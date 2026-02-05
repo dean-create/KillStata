@@ -1,0 +1,63 @@
+The Econometrics tool provides access to advanced econometric analysis methods through Python-based computation engines.
+
+This tool allows you to perform sophisticated econometric analyses including:
+- OLS regression with robust/clustered standard errors
+- Propensity Score Methods (PSM, IPW, regression adjustment, double robust)
+- Instrumental Variable methods (IV-2SLS with validity tests)
+- Difference-in-Differences (Static DID, Staggered DID, Event Study)
+- Regression Discontinuity Design (RDD)
+
+## Input Requirements
+
+The tool accepts:
+- methodName: The econometric method to use
+- params: A JSON object containing method-specific parameters (dataPath, variables, options)
+
+All data inputs should be CSV file paths. The tool will:
+1. Load the data using pandas
+2. Execute the specified econometric method
+3. Return results including regression tables, coefficients, standard errors, p-values
+4. Save output files (LaTeX tables, plots, logs) to the analysis directory
+
+## Example Usage
+
+Basic OLS regression:
+{
+  "methodName": "ols_regression",
+  "params": {
+    "dataPath": "./data/cleaned/data.csv",
+    "dependentVar": "y",
+    "treatmentVar": "treatment",
+    "covariates": ["x1", "x2", "x3"],
+    "clusterVar": "firm_id",
+    "outputDir": "./analysis/regressions"
+  }
+}
+
+Difference-in-Differences:
+{
+  "methodName": "did_regression",
+  "params": {
+    "dataPath": "./data/cleaned/panel_data.csv",
+    "dependentVar": "outcome",
+    "treatmentGroup": "treated_group",
+    "treatmentTime": "post_treatment",
+    "entityEffect": true,
+    "timeEffect": true,
+    "clusterVar": "entity_id",
+    "outputDir": "./analysis/did"
+  }
+}
+
+## Output Structure
+
+Results are returned as JSON with:
+- coefficients: Estimated treatment effects and other parameters
+- standardErrors: Standard errors (robust/clustered as specified)
+- pValues: Statistical significance levels
+- rSquared: Model fit statistics
+- tables: LaTeX/CSV formatted regression tables
+- plots: Saved plot file paths (for diagnostic plots)
+- logs: Detailed analysis logs in markdown format
+
+All outputs are automatically saved to the specified output directory following the project structure convention.

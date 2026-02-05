@@ -1,0 +1,102 @@
+gPart> = {}
+            const stream = await LLM.stream(streamInput)
+
+            for await (const value of stream.fullStream) {
+              input.abort.throwIfAborted()
+              switch (value.type) {
+                case "start":
+                  SessionStatus.set(input.sessionID, { type: "busy" })
+                  break
+
+                case "reasoning-start":
+                  if (value.id in reasoningMap) {
+                    continue
+                  }
+                  reasoningMap[value.id] = {
+                    id: Identifier.ascending("part"),
+                    messageID: input.assistantMessage.id,
+                    sessionID: input.assistantMessage.sessionID,
+                    type: "reasoning",
+                    text: "",
+                    time: {
+                      start: Date.now(),
+                    },
+                    metadata: value.providerMetadata,
+                  }
+                  break
+
+                case "reasoning-delta":
+                  if (value.id in reasoningMap) {
+                    const part = reasoningMap[value.id]
+                    part.text += value.text
+                    if (value.providerMetadata) part.metadata = value.providerMetadata
+                    if (part.text) await Session.updatePart({ part, delta: value.text })
+                  }
+                  break
+
+                case "reasoning-end":
+                  if (value.id in reasoningMap) {
+                    const part = reasoningMap[value.id]
+                    part.text = part.text.trimEnd()
+
+                    part.time = {
+                      ...part.time,
+                      end: Date.now(),
+                    }
+                    if (value.providerMetadata) part.metadata = value.providerMetadata
+                    await Session.updatePart(part)
+                    delete reasoningMap[value.id]
+                  }
+                  break
+
+                case "tool-input-start":
+                  const part = await Session.updatePart({
+                    id: toolcalls[value.id]?.id ?? Identifier.ascending("part"),
+                    messageID: input.assistantMessage.id,
+                    sessionID: input.assistantMessage.sessionID,
+                    type: "tool",
+                    tool: value.toolName,
+                    callID: value.id,
+                    state: {
+                      status: "pending",
+                      input: {},
+                      raw: "",
+                    },
+                  })
+                  toolcalls[value.id] = part as MessageV2.ToolPart
+                  break
+
+                case "tool-input-delta":
+                  break
+
+                case "tool-input-end":
+                  break
+
+                case "tool-call": {
+                  const match = toolcalls[value.toolCallId]
+                  if (match) {
+                    const part = await Session.updatePart({
+                      ...match,
+                      tool: value.toolName,
+                      state: {
+                        status: "running",
+                        // 使用 normalizeToolInput 确保 input 是对象类型，符合 ToolState schema
+                        input: normalizeToolInput(value.input, value.toolName),
+                        time: {
+                          start: Date.now(),
+                        },
+                      },
+                      metadata: value.providerMetadata,
+                    })
+                    toolcalls[value.toolCallId] = part as MessageV2.ToolPart
+
+                    const parts = await MessageV2.parts(input.assistantMessage.id)
+                    const lastThree = parts.slice(-DOOM_LOOP_THRESHOLD)
+
+                    if (
+                      lastThree.length === DOOM_LOOP_THRESHOLD &&
+                      lastThree.every(
+                        (p) =>
+                          p.type === "tool" &&
+                          p.tool === value.toolName &&
+                          p.state.status !== "pend

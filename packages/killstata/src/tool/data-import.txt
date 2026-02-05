@@ -1,0 +1,71 @@
+The DataImport tool handles conversion between different statistical data formats (Excel, Stata DTA, CSV) and provides data preprocessing capabilities.
+
+This tool is essential for the killstata workflow which uses CSV as the intermediate standard format for all data operations.
+
+## Supported Operations
+
+1. **Import**: Convert Excel (.xlsx) or Stata (.dta) files to CSV
+   - Preserves variable names and labels
+   - Handles missing values appropriately
+   - Extracts metadata (variable labels, value labels)
+   - Saves metadata separately for reference
+
+2. **Export**: Convert processed CSV back to Excel or Stata format
+   - Restores variable labels from metadata
+   - Applies appropriate data types
+   - Formats output for publication/sharing
+
+3. **Preprocess**: Clean and transform CSV data
+   - Handle missing values (drop/impute)
+   - Variable transformations (log, standardize, winsorize)
+   - Create dummy variables from categorical variables
+   - Generate interaction terms
+
+## Input Parameters
+
+- action: "import" | "export" | "preprocess"
+- inputPath: Path to the input file
+- outputPath: Path for the output file
+- format: "csv" | "xlsx" | "dta" (for export)
+- options: Format-specific options
+
+## Example Usage
+
+Import Stata file to CSV:
+{
+  "action": "import",
+  "inputPath": "./data/raw/survey_data.dta",
+  "outputPath": "./data/cleaned/survey_data.csv",
+  "preserveLabels": true
+}
+
+Preprocess CSV data:
+{
+  "action": "preprocess",
+  "inputPath": "./data/cleaned/survey_data.csv",
+  "outputPath": "./data/cleaned/survey_data_processed.csv",
+  "operations": [
+    { "type": "dropna", "subset": ["income", "age"] },
+    { "type": "log_transform", "variables": ["income"] },
+    { "type": "standardize", "variables": ["age", "education"] },
+    { "type": "winsorize", "variables": ["revenue"], "limits": [0.01, 0.99] }
+  ]
+}
+
+Export to Excel:
+{
+  "action": "export",
+  "inputPath": "./output/tables/regression_results.csv",
+  "outputPath": "./output/tables/regression_results.xlsx",
+  "format": "xlsx",
+  "sheetName": "Results"
+}
+
+## Output
+
+- Converted/processed file saved to specified path
+- Metadata file (JSON) saved alongside (for import operations)
+- Processing log (markdown) documenting all transformations
+- Summary statistics before/after preprocessing
+
+All operations preserve data provenance and are fully reproducible.

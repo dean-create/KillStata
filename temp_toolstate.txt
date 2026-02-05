@@ -1,0 +1,75 @@
+ToolStatePending = z
+    .object({
+      status: z.literal("pending"),
+      input: z.record(z.string(), z.any()),
+      raw: z.string(),
+    })
+    .meta({
+      ref: "ToolStatePending",
+    })
+
+  export type ToolStatePending = z.infer<typeof ToolStatePending>
+
+  export const ToolStateRunning = z
+    .object({
+      status: z.literal("running"),
+      input: z.record(z.string(), z.any()),
+      title: z.string().optional(),
+      metadata: z.record(z.string(), z.any()).optional(),
+      time: z.object({
+        start: z.number(),
+      }),
+    })
+    .meta({
+      ref: "ToolStateRunning",
+    })
+  export type ToolStateRunning = z.infer<typeof ToolStateRunning>
+
+  export const ToolStateCompleted = z
+    .object({
+      status: z.literal("completed"),
+      input: z.record(z.string(), z.any()),
+      output: z.string(),
+      title: z.string(),
+      metadata: z.record(z.string(), z.any()),
+      time: z.object({
+        start: z.number(),
+        end: z.number(),
+        compacted: z.number().optional(),
+      }),
+      attachments: FilePart.array().optional(),
+    })
+    .meta({
+      ref: "ToolStateCompleted",
+    })
+  export type ToolStateCompleted = z.infer<typeof ToolStateCompleted>
+
+  export const ToolStateError = z
+    .object({
+      status: z.literal("error"),
+      input: z.record(z.string(), z.any()),
+      error: z.string(),
+      metadata: z.record(z.string(), z.any()).optional(),
+      time: z.object({
+        start: z.number(),
+        end: z.number(),
+      }),
+    })
+    .meta({
+      ref: "ToolStateError",
+    })
+  export type ToolStateError = z.infer<typeof ToolStateError>
+
+  export const ToolState = z
+    .discriminatedUnion("status", [ToolStatePending, ToolStateRunning, ToolStateCompleted, ToolStateError])
+    .meta({
+      ref: "ToolState",
+    })
+
+  export const ToolPart = PartBase.extend({
+    type: z.literal("tool"),
+    callID: z.string(),
+    tool: z.string(),
+    state: ToolState,
+    metadata: z.record(z.string(), z.any()).optional(),
+  

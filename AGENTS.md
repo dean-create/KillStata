@@ -1,0 +1,4 @@
+- To test opencode in `packages/opencode`, run `bun dev`.
+- To regenerate the JavaScript SDK, run `./packages/sdk/js/script/build.ts`.
+- ALWAYS USE PARALLEL TOOLS WHEN APPLICABLE.
+- The default branch in this repo is `dev`.
