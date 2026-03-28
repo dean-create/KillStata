@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json.schemastore.org/package.json",
   "name": "killstata",
   "description": "AI-powered development tool",
   "private": true,

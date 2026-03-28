@@ -1,10 +1,31 @@
 {
-  "$schema": "https://json.schemastore.org/package.json",
-  "version": "1.1.31",
+  "version": "0.1.0",
   "name": "killstata",
+  "description": "AI-powered CLI assistant for econometric analysis. Supports data preprocessing, OLS regression, IV-2SLS, DID, PSM and more causal inference methods.",
   "type": "module",
   "license": "MIT",
-  "private": true,
+  "author": "killstata",
+  "homepage": "https://github.com/killstata/killstata",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/killstata/killstata.git",
+    "directory": "packages/killstata"
+  },
+  "keywords": [
+    "econometrics",
+    "stata",
+    "regression",
+    "causal-inference",
+    "panel-data",
+    "DID",
+    "PSM",
+    "IV",
+    "cli",
+    "ai-agent"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "typecheck": "tsgo --noEmit",
     "test": "bun test",
@@ -20,6 +41,16 @@
   "bin": {
     "killstata": "./bin/killstata"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "skills/",
+    "python/",
+    "script/postinstall.mjs",
+    "tsconfig.json",
+    "package.json",
+    "README.md"
+  ],
   "exports": {
     "./*": "./src/*.ts"
   },

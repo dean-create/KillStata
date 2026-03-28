@@ -26,3 +26,8 @@ target
 opencode-dev
 logs/
 *.bun-build
+
+.opencode
+.killstata
+results
+packages

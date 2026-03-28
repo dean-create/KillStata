@@ -29,6 +29,7 @@ import { PlanExitTool, PlanEnterTool } from "./plan"
 import { ApplyPatchTool } from "./apply_patch"
 import { EconometricsTool } from "./econometrics"
 import { DataImportTool } from "./data-import"
+import { RegressionTableTool } from "./regression-table"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -113,6 +114,7 @@ export namespace ToolRegistry {
       SkillTool,
       ApplyPatchTool,
       EconometricsTool,
+      RegressionTableTool,
       DataImportTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),

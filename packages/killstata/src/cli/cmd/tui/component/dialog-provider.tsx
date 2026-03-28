@@ -15,7 +15,6 @@ import { Clipboard } from "@tui/util/clipboard"
 import { useToast } from "../ui/toast"
 
 const PROVIDER_PRIORITY: Record<string, number> = {
-  opencode: 0,
   anthropic: 1,
   "github-copilot": 2,
   openai: 3,
@@ -30,14 +29,14 @@ export function createDialogProviderOptions() {
   const options = createMemo(() => {
     return pipe(
       sync.data.provider_next.all,
+      (providers) => providers.filter((provider) => provider.id !== "opencode"),
       sortBy((x) => PROVIDER_PRIORITY[x.id] ?? 99),
       map((provider) => {
         const isConnected = connected().has(provider.id)
         return {
-          title: provider.id === "opencode" ? "Killstata" : provider.name,
+          title: provider.name,
           value: provider.id,
           description: {
-            opencode: "(Recommended)",
             anthropic: "(Claude Max or API key)",
             openai: "(ChatGPT Plus/Pro or API key)",
           }[provider.id],
@@ -226,18 +225,7 @@ function ApiMethod(props: ApiMethodProps) {
     <DialogPrompt
       title={props.title}
       placeholder="API key"
-      description={
-        props.providerID === "opencode" ? (
-          <box gap={1}>
-            <text fg={theme.textMuted}>
-              Killstata gives you access to all the best coding models at the cheapest prices with a single API key.
-            </text>
-            <text fg={theme.text}>
-              Go to <span style={{ fg: theme.primary }}>https://killstata.io</span> to get a key
-            </text>
-          </box>
-        ) : undefined
-      }
+      description={undefined}
       onConfirm={async (value) => {
         if (!value) return
         await sdk.client.auth.set({

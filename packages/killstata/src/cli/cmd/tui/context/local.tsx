@@ -12,6 +12,7 @@ import { Provider } from "@/provider/provider"
 import { useArgs } from "./args"
 import { useSDK } from "./sdk"
 import { RGBA } from "@opentui/core"
+import { nextTabCycleIndex, pickTabCycleAgents } from "./agent-cycle"
 
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
   name: "Local",
@@ -34,11 +35,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     }
 
     const agent = iife(() => {
-      const agents = createMemo(() => sync.data.agent.filter((x) => x.mode !== "subagent" && !x.hidden))
+      const agentsAllVisiblePrimary = createMemo(() => sync.data.agent.filter((x) => x.mode !== "subagent" && !x.hidden))
+      const agentsForTabCycle = createMemo(() => pickTabCycleAgents(agentsAllVisiblePrimary()))
       const [agentStore, setAgentStore] = createStore<{
         current: string
       }>({
-        current: agents()[0].name,
+        current: agentsAllVisiblePrimary()[0]?.name ?? "",
       })
       const { theme } = useTheme()
       const colors = createMemo(() => [
@@ -51,13 +53,16 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       ])
       return {
         list() {
-          return agents()
+          return agentsAllVisiblePrimary()
         },
         current() {
-          return agents().find((x) => x.name === agentStore.current)!
+          const all = agentsAllVisiblePrimary()
+          const first = all[0]
+          if (!first) throw new Error("No visible primary agents available")
+          return all.find((x) => x.name === agentStore.current) ?? first
         },
         set(name: string) {
-          if (!agents().some((x) => x.name === name))
+          if (!agentsAllVisiblePrimary().some((x) => x.name === name))
             return toast.show({
               variant: "warning",
               message: `Agent not found: ${name}`,
@@ -66,13 +71,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           setAgentStore("current", name)
         },
         move(direction: 1 | -1) {
-          batch(() => {
-            let next = agents().findIndex((x) => x.name === agentStore.current) + direction
-            if (next < 0) next = agents().length - 1
-            if (next >= agents().length) next = 0
-            const value = agents()[next]
-            setAgentStore("current", value.name)
+          const cycle = agentsForTabCycle()
+          const next = nextTabCycleIndex({
+            agents: cycle,
+            currentName: agentStore.current,
+            direction,
           })
+          const value = cycle[next]
+          if (value) setAgentStore("current", value.name)
         },
         color(name: string) {
           const all = sync.data.agent

@@ -269,6 +269,7 @@ test("custom provider with npm package", async () => {
   })
 })
 
+
 test("env variable takes precedence, config merges options", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {

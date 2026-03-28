@@ -1,125 +1,76 @@
 #!/usr/bin/env node
 
+import { execSync } from "child_process"
 import fs from "fs"
-import path from "path"
 import os from "os"
-import { fileURLToPath } from "url"
-import { createRequire } from "module"
+import path from "path"
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const require = createRequire(import.meta.url)
+const BOLD = "\x1b[1m"
+const GREEN = "\x1b[32m"
+const YELLOW = "\x1b[33m"
+const RED = "\x1b[31m"
+const CYAN = "\x1b[36m"
+const RESET = "\x1b[0m"
 
-function detectPlatformAndArch() {
-  // Map platform names
-  let platform
-  switch (os.platform()) {
-    case "darwin":
-      platform = "darwin"
-      break
-    case "linux":
-      platform = "linux"
-      break
-    case "win32":
-      platform = "windows"
-      break
-    default:
-      platform = os.platform()
-      break
-  }
-
-  // Map architecture names
-  let arch
-  switch (os.arch()) {
-    case "x64":
-      arch = "x64"
-      break
-    case "arm64":
-      arch = "arm64"
-      break
-    case "arm":
-      arch = "arm"
-      break
-    default:
-      arch = os.arch()
-      break
-  }
-
-  return { platform, arch }
-}
-
-function findBinary() {
-  const { platform, arch } = detectPlatformAndArch()
-  const packageName = `opencode-${platform}-${arch}`
-  const binaryName = platform === "windows" ? "opencode.exe" : "opencode"
-
+function commandExists(cmd) {
   try {
-    // Use require.resolve to find the package
-    const packageJsonPath = require.resolve(`${packageName}/package.json`)
-    const packageDir = path.dirname(packageJsonPath)
-    const binaryPath = path.join(packageDir, "bin", binaryName)
-
-    if (!fs.existsSync(binaryPath)) {
-      throw new Error(`Binary not found at ${binaryPath}`)
-    }
-
-    return { binaryPath, binaryName }
-  } catch (error) {
-    throw new Error(`Could not find package ${packageName}: ${error.message}`)
+    const check = os.platform() === "win32" ? "where" : "which"
+    execSync(`${check} ${cmd}`, { stdio: "ignore" })
+    return true
+  } catch {
+    return false
   }
 }
 
-function prepareBinDirectory(binaryName) {
-  const binDir = path.join(__dirname, "bin")
-  const targetPath = path.join(binDir, binaryName)
-
-  // Ensure bin directory exists
-  if (!fs.existsSync(binDir)) {
-    fs.mkdirSync(binDir, { recursive: true })
-  }
-
-  // Remove existing binary/symlink if it exists
-  if (fs.existsSync(targetPath)) {
-    fs.unlinkSync(targetPath)
-  }
-
-  return { binDir, targetPath }
-}
-
-function symlinkBinary(sourcePath, binaryName) {
-  const { targetPath } = prepareBinDirectory(binaryName)
-
-  fs.symlinkSync(sourcePath, targetPath)
-  console.log(`opencode binary symlinked: ${targetPath} -> ${sourcePath}`)
-
-  // Verify the file exists after operation
-  if (!fs.existsSync(targetPath)) {
-    throw new Error(`Failed to symlink binary to ${targetPath}`)
-  }
-}
-
-async function main() {
+function getVersion(cmd, flag = "--version") {
   try {
-    if (os.platform() === "win32") {
-      // On Windows, the .exe is already included in the package and bin field points to it
-      // No postinstall setup needed
-      console.log("Windows detected: binary setup not needed (using packaged .exe)")
-      return
-    }
-
-    // On non-Windows platforms, just verify the binary package exists
-    // Don't replace the wrapper script - it handles binary execution
-    const { binaryPath } = findBinary()
-    console.log(`Platform binary verified at: ${binaryPath}`)
-    console.log("Wrapper script will handle binary execution")
-  } catch (error) {
-    console.error("Failed to setup opencode binary:", error.message)
-    process.exit(1)
+    return execSync(`${cmd} ${flag}`, { encoding: "utf-8" }).trim()
+  } catch {
+    return null
   }
 }
 
-try {
-  main()
-} catch (error) {
-  console.error("Postinstall script error:", error.message)
-  process.exit(0)
+function ensureDir(dir) {
+  fs.mkdirSync(dir, { recursive: true })
 }
+
+const homeDir = process.env.OPENCODE_TEST_HOME || os.homedir()
+const killstataRoot = path.join(homeDir, ".killstata")
+const skillRoot = path.join(killstataRoot, "skill")
+const importedRoot = path.join(skillRoot, "imported")
+const localRoot = path.join(skillRoot, "local")
+const builtinRoot = path.resolve(import.meta.dirname, "../skills/builtin")
+
+ensureDir(skillRoot)
+ensureDir(importedRoot)
+ensureDir(localRoot)
+
+console.log("")
+console.log(`${BOLD}${CYAN}killstata${RESET} - AI-powered Econometrics Agent`)
+console.log("")
+
+const hasBun = commandExists("bun")
+if (hasBun) {
+  console.log(`  ${GREEN}[OK]${RESET} Bun runtime: ${getVersion("bun")}`)
+} else {
+  console.log(`  ${RED}[FAIL]${RESET} Bun runtime not found`)
+}
+
+const pythonCmd = os.platform() === "win32" ? "python" : "python3"
+if (commandExists(pythonCmd)) {
+  console.log(`  ${GREEN}[OK]${RESET} Python: ${getVersion(pythonCmd)}`)
+} else {
+  console.log(`  ${YELLOW}[WARN]${RESET} Python not found`)
+}
+
+console.log(`  ${GREEN}[OK]${RESET} Skill directory: ${skillRoot}`)
+console.log(`  ${GREEN}[OK]${RESET} Built-in skills: ${builtinRoot}`)
+console.log(`  ${GREEN}[OK]${RESET} Imported skills: ${importedRoot}`)
+console.log(`  ${GREEN}[OK]${RESET} Local skills: ${localRoot}`)
+
+console.log("")
+console.log(`${BOLD}Next steps${RESET}`)
+console.log(`  Run ${CYAN}killstata init${RESET} to set up the Python econometrics environment.`)
+console.log(`  Run ${CYAN}killstata skills list${RESET} to inspect the bundled skill catalog.`)
+console.log(`  Put custom skills under ${CYAN}${localRoot}${RESET} or project-local ${CYAN}.killstata/skill${RESET}.`)
+console.log("")

@@ -1,4 +1,4 @@
-import { MessageV2 } from "./message-v2"
+﻿import { MessageV2 } from "./message-v2"
 import { Log } from "@/util/log"
 import { Identifier } from "@/id/id"
 import { Session } from "."
@@ -15,6 +15,13 @@ import { Config } from "@/config/config"
 import { SessionCompaction } from "./compaction"
 import { PermissionNext } from "@/permission/next"
 import { Question } from "@/question"
+import { classifyToolFailure, persistToolReflection } from "@/tool/analysis-reflection"
+import {
+  buildGroundingFailureText,
+  collectNumericSnapshotsFromToolMetadata,
+  validateNumericGrounding,
+} from "@/tool/analysis-grounding"
+import { Instance } from "@/project/instance"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -23,8 +30,8 @@ export namespace SessionProcessor {
   /**
    * 规范化工具输入，确保返回对象类型
    * 某些模型可能返回 JSON 字符串格式的 input，需要解析为对象
-   * ToolState schema 要求 input �?z.record(z.string(), z.any())
-   * @param input - 工具输入，可能是对象�?JSON 字符�?   * @returns 规范化后的对象类型输�?   */
+   * ToolState schema 要求 input �?z.record(z.string(), z.any())
+   * @param input - 工具输入，可能是对象�?JSON 字符�?   * @returns 规范化后的对象类型输�?   */
   function extractKeyedValue(input: string, key: string): string | undefined {
     const match = new RegExp(`\\b${key}\\s*[:=]\\s*([^\\n\\r}]+)`, "i").exec(input)
     if (!match) return undefined
@@ -51,11 +58,11 @@ export namespace SessionProcessor {
     if (typeof input === "object" && input !== null && !Array.isArray(input)) {
       return input as Record<string, unknown>
     }
-    // 如果是字符串，尝试解析�Ϊ JSON
+    // 如果是字符串，尝试解析�Ϊ JSON
     if (typeof input === "string") {
       try {
         const parsed = JSON.parse(input)
-        // 确Ϳ�解析结枛是对�?
+        // 确Ϳ�解析结枛是对�?
         if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
           return parsed as Record<string, unknown>
         }
@@ -92,6 +99,15 @@ export namespace SessionProcessor {
     let blocked = false
     let attempt = 0
     let needsCompaction = false
+    let repair:
+      | {
+        type: "repair"
+        toolName: string
+        retryStage: string
+        repairAction: string
+        reflectionPath?: string
+      }
+      | undefined
 
     const result = {
       get message() {
@@ -256,6 +272,25 @@ export namespace SessionProcessor {
                 case "tool-error": {
                   const match = toolcalls[value.toolCallId]
                   if (match && match.state.status === "running") {
+                    const existingReflection =
+                      match.state.metadata && typeof match.state.metadata === "object"
+                        ? (match.state.metadata["reflection"] as Record<string, unknown> | undefined)
+                        : undefined
+                    let reflectionMetadata = existingReflection
+                    if (!reflectionMetadata) {
+                      const reflection = classifyToolFailure({
+                        toolName: value.toolName,
+                        error: (value.error as any).toString(),
+                        input: value.input ? normalizeToolInput(value.input, value.toolName) : match.state.input,
+                      })
+                      const reflectionPath = persistToolReflection(reflection)
+                      reflectionMetadata = {
+                        ...reflection,
+                        reflectionPath: reflectionPath.startsWith(Instance.directory)
+                          ? reflectionPath.slice(Instance.directory.length + 1)
+                          : reflectionPath,
+                      }
+                    }
                     await Session.updatePart({
                       ...match,
                       state: {
@@ -263,12 +298,37 @@ export namespace SessionProcessor {
                         // 使用 normalizeToolInput 确保 input 是对象类型，符合 ToolState schema
                         input: value.input ? normalizeToolInput(value.input, value.toolName) : match.state.input,
                         error: (value.error as any).toString(),
+                        metadata: {
+                          ...(match.state.metadata ?? {}),
+                          ...(reflectionMetadata ? { reflection: reflectionMetadata } : {}),
+                        },
                         time: {
                           start: match.state.time.start,
                           end: Date.now(),
                         },
                       },
                     })
+
+                    if (
+                      reflectionMetadata &&
+                      (value.toolName === "data_import" || value.toolName === "econometrics") &&
+                      !blocked
+                    ) {
+                      repair = {
+                        type: "repair",
+                        toolName: value.toolName,
+                        retryStage:
+                          typeof reflectionMetadata["retryStage"] === "string" ? reflectionMetadata["retryStage"] : "verify",
+                        repairAction:
+                          typeof reflectionMetadata["repairAction"] === "string"
+                            ? reflectionMetadata["repairAction"]
+                            : "Repair the failed stage and retry once.",
+                        reflectionPath:
+                          typeof reflectionMetadata["reflectionPath"] === "string"
+                            ? reflectionMetadata["reflectionPath"]
+                            : undefined,
+                      }
+                    }
 
                     if (
                       value.error instanceof PermissionNext.RejectedError ||
@@ -376,11 +436,28 @@ export namespace SessionProcessor {
                       { text: currentText.text },
                     )
                     currentText.text = textOutput.text
+                    const messageParts = await MessageV2.parts(input.assistantMessage.id)
+                    const numericSnapshots = messageParts.flatMap((part) => {
+                      if (part.type !== "tool" || part.state.status !== "completed") return []
+                      return collectNumericSnapshotsFromToolMetadata(part.state.metadata)
+                    })
+                    const grounding = validateNumericGrounding({
+                      text: currentText.text,
+                      snapshots: numericSnapshots,
+                    })
+                    if (grounding.status === "fail") {
+                      currentText.text = buildGroundingFailureText(grounding)
+                    }
                     currentText.time = {
                       start: Date.now(),
                       end: Date.now(),
                     }
                     if (value.providerMetadata) currentText.metadata = value.providerMetadata
+                    currentText.metadata = {
+                      ...(currentText.metadata ?? {}),
+                      numericGroundingStatus: grounding.status === "fail" ? "numeric_grounding_failed" : grounding.status,
+                      grounding,
+                    }
                     await Session.updatePart(currentText)
                   }
                   currentText = undefined
@@ -457,6 +534,7 @@ export namespace SessionProcessor {
           await Session.updateMessage(input.assistantMessage)
           if (needsCompaction) return "compact"
           if (blocked) return "stop"
+          if (repair) return repair
           if (input.assistantMessage.error) return "stop"
           return "continue"
         }
@@ -465,6 +543,9 @@ export namespace SessionProcessor {
     return result
   }
 }
+
+
+
 
 
 

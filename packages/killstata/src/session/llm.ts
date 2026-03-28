@@ -72,6 +72,7 @@ export namespace LLM {
         // use agent prompt otherwise provider prompt
         // For Codex sessions, skip SystemPrompt.provider() since it's sent via options.instructions
         ...(input.agent.prompt ? [input.agent.prompt] : isCodex ? [] : SystemPrompt.provider(input.model)),
+        ...SystemPrompt.agent(input.agent),
         // any custom prompt passed into this call
         ...input.system,
         // any custom prompt from last user message

@@ -63,9 +63,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const directory = useDirectory()
   const kv = useKV()
 
-  const hasProviders = createMemo(() =>
-    sync.data.provider.some((x) => x.id !== "opencode" || Object.values(x.models).some((y) => y.cost?.input !== 0)),
-  )
+  const hasProviders = createMemo(() => sync.data.provider.some((x) => x.id !== "opencode"))
   const gettingStartedDismissed = createMemo(() => kv.get("dismissed_getting_started", false))
 
   return (
@@ -284,9 +282,9 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                     ✕
                   </text>
                 </box>
-                <text fg={theme.textMuted}>Killstata includes free models so you can start immediately.</text>
+                <text fg={theme.textMuted}>Connect a provider to start using killstata models.</text>
                 <text fg={theme.textMuted}>
-                  Connect from 75+ providers to use other models, including Claude, GPT, Gemini etc
+                  Connect a supported provider to use models such as Claude, GPT, Gemini and Kimi
                 </text>
                 <box flexDirection="row" gap={1} justifyContent="space-between">
                   <text fg={theme.text}>Connect provider</text>

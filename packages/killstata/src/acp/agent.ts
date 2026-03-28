@@ -1,4 +1,4 @@
-﻿import {
+import {
   RequestError,
   type Agent as ACPAgent,
   type AgentSideConnection,
@@ -409,8 +409,8 @@ export namespace ACP {
       log.info("initialize", { protocolVersion: params.protocolVersion })
 
       const authMethod: AuthMethod = {
-        description: "Run `opencode auth login` in the terminal",
-        name: "Login with opencode",
+        description: "Run `killstata auth login` in the terminal",
+        name: "Login with Killstata",
         id: "opencode-login",
       }
 
@@ -418,9 +418,9 @@ export namespace ACP {
       if (params.clientCapabilities?._meta?.["terminal-auth"] === true) {
         authMethod._meta = {
           "terminal-auth": {
-            command: "opencode",
+            command: "killstata",
             args: ["auth", "login"],
-            label: "OpenCode Login",
+            label: "Killstata Login",
           },
         }
       }
@@ -445,7 +445,7 @@ export namespace ACP {
         },
         authMethods: [authMethod],
         agentInfo: {
-          name: "OpenCode",
+          name: "Killstata",
           version: Installation.VERSION,
         },
       }

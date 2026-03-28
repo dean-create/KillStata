@@ -1144,9 +1144,6 @@ export namespace Provider {
         "gemini-2.5-flash",
         "gpt-5-nano",
       ]
-      if (providerID.startsWith("opencode")) {
-        priority = ["gpt-5-nano"]
-      }
       if (providerID.startsWith("github-copilot")) {
         // prioritize free models for github copilot
         priority = ["gpt-5-mini", "claude-haiku-4.5", ...priority]
@@ -1156,12 +1153,6 @@ export namespace Provider {
           if (model.includes(item)) return getModel(providerID, model)
         }
       }
-    }
-
-    // Check if opencode provider is available before using it
-    const opencodeProvider = await state().then((state) => state.providers["opencode"])
-    if (opencodeProvider && opencodeProvider.models["gpt-5-nano"]) {
-      return getModel("opencode", "gpt-5-nano")
     }
 
     return undefined
@@ -1181,9 +1172,15 @@ export namespace Provider {
     const cfg = await Config.get()
     if (cfg.model) return parseModel(cfg.model)
 
+    const configuredProviderIDs = cfg.provider ? Object.keys(cfg.provider) : undefined
     const provider = await list()
       .then((val) => Object.values(val))
-      .then((x) => x.find((p) => !cfg.provider || Object.keys(cfg.provider).includes(p.id)))
+      .then((providers) =>
+        providers.find((item) => {
+          if (configuredProviderIDs?.length) return configuredProviderIDs.includes(item.id)
+          return item.id !== "opencode"
+        }),
+      )
     if (!provider) throw new Error("no providers found")
     const [model] = sort(Object.values(provider.models))
     if (!model) throw new Error("no models found")

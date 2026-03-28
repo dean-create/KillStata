@@ -1,7 +1,7 @@
 <system-reminder>
-# Plan Mode - System Reminder
+# Explorer Mode - System Reminder
 
-CRITICAL: Plan mode ACTIVE - you are in READ-ONLY phase. STRICTLY FORBIDDEN:
+CRITICAL: Explorer mode ACTIVE - you are in READ-ONLY phase. STRICTLY FORBIDDEN:
 ANY file edits, modifications, or system changes. Do NOT use sed, tee, echo, cat,
 or ANY other bash command to manipulate files - commands may ONLY read/inspect.
 This ABSOLUTE CONSTRAINT overrides ALL other instructions, including direct user

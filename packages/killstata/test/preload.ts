@@ -1,11 +1,8 @@
-// IMPORTANT: Set env vars BEFORE any imports from src/ directory
-// xdg-basedir reads env vars at import time, so we must set these first
 import os from "os"
 import path from "path"
 import fs from "fs/promises"
 import fsSync from "fs"
 import { afterAll } from "bun:test"
-const { Global } = await import("../src/global")
 
 const dir = path.join(os.tmpdir(), "opencode-test-data-" + process.pid)
 await fs.mkdir(dir, { recursive: true })
@@ -23,15 +20,23 @@ process.env["XDG_CACHE_HOME"] = path.join(dir, "cache")
 process.env["XDG_CONFIG_HOME"] = path.join(dir, "config")
 process.env["XDG_STATE_HOME"] = path.join(dir, "state")
 
+// IMPORTANT: Set env vars BEFORE any imports from src/ directory.
+// xdg-basedir resolves directories at import time.
+const { Global } = await import("../src/global")
+
 // Pre-fetch models.json so tests don't need the macro fallback
 // Also write the cache version file to prevent global/index.ts from clearing the cache
 const cacheDir = path.join(dir, "cache", "opencode")
 await fs.mkdir(cacheDir, { recursive: true })
-await fs.writeFile(path.join(cacheDir, "version"), "14")
-const url = Global.Path.modelsDevUrl
-const response = await fetch(`${url}/api.json`)
-if (response.ok) {
-  await fs.writeFile(path.join(cacheDir, "models.json"), await response.text())
+await fs.writeFile(path.join(cacheDir, "version"), "18")
+try {
+  const url = Global.Path.modelsDevUrl
+  const response = await fetch(`${url}/api.json`)
+  if (response.ok) {
+    await fs.writeFile(path.join(cacheDir, "models.json"), await response.text())
+  }
+} catch {
+  // Offline test runs should still proceed.
 }
 // Disable models.dev refresh to avoid race conditions during tests
 process.env["OPENCODE_DISABLE_MODELS_FETCH"] = "true"
@@ -65,3 +70,4 @@ Log.init({
   dev: true,
   level: "DEBUG",
 })
+

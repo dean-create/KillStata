@@ -1,265 +1,156 @@
 ﻿import { describe, expect, test } from "bun:test"
-import path from "path"
 import { DataImportTool } from "../../src/tool/data-import"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 
-// 测试上下文
 const ctx = {
-    sessionID: "test",
-    messageID: "",
-    callID: "",
-    agent: "data-import",
-    abort: AbortSignal.any([]),
-    metadata: () => { },
-    ask: async () => { },
+  sessionID: "test",
+  messageID: "",
+  callID: "",
+  agent: "data-import",
+  abort: AbortSignal.any([]),
+  metadata: () => {},
+  ask: async () => {},
 }
 
-const projectRoot = path.join(__dirname, "../..")
-
 describe("tool.data_import", () => {
-    // 测试工具初始化
-    test("初始化成功", async () => {
-        await Instance.provide({
-            directory: projectRoot,
-            fn: async () => {
-                const dataImport = await DataImportTool.init()
-                expect(dataImport).toBeDefined()
-                expect(dataImport.description).toContain("data")
-            },
-        })
+  test("initializes with schema and description", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const tool = await DataImportTool.init()
+        expect(tool).toBeDefined()
+        expect(tool.description.toLowerCase()).toContain("data")
+      },
     })
+  })
 
-    // 测试导入操作参数
-    test("支持import操作", async () => {
-        await Instance.provide({
-            directory: projectRoot,
-            fn: async () => {
-                const dataImport = await DataImportTool.init()
+  test("throws when input file is missing", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const tool = await DataImportTool.init()
 
-                const params = {
-                    action: "import" as const,
-                    inputPath: "data.dta",
-                    outputPath: "data.csv",
-                    preserveLabels: true,
-                }
-
-                expect(params.action).toBe("import")
-                expect(params.preserveLabels).toBe(true)
+        let thrown: Error | undefined
+        try {
+          await tool.execute(
+            {
+              action: "import",
+              inputPath: "missing.csv",
+              preserveLabels: true,
+              createInspectionArtifacts: true,
             },
-        })
+            ctx as any,
+          )
+        } catch (error) {
+          thrown = error as Error
+        }
+
+        expect(thrown).toBeDefined()
+        expect(thrown!.message).toContain("Input file not found")
+      },
     })
+  })
 
-    // 测试导出操作参数
-    test("支持export操作", async () => {
-        await Instance.provide({
-            directory: projectRoot,
-            fn: async () => {
-                const dataImport = await DataImportTool.init()
+  test("accepts new workflow actions in schema", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const tool = await DataImportTool.init()
 
-                const params = {
-                    action: "export" as const,
-                    inputPath: "data.csv",
-                    outputPath: "data.xlsx",
-                    format: "xlsx" as const,
-                }
-
-                expect(params.action).toBe("export")
-                expect(params.format).toBe("xlsx")
+        const filterParsed = tool.parameters.parse({
+          action: "filter",
+          inputPath: "panel.csv",
+          preserveLabels: true,
+          filters: [
+            {
+              column: "省份",
+              operator: "not_in",
+              values: ["北京市", "天津市", "上海市", "重庆市"],
+              caseSensitive: false,
             },
+          ],
         })
-    })
-
-    // 测试预处理操作参数
-    test("支持preprocess操作", async () => {
-        await Instance.provide({
-            directory: projectRoot,
-            fn: async () => {
-                const dataImport = await DataImportTool.init()
-
-                const params = {
-                    action: "preprocess" as const,
-                    inputPath: "raw_data.csv",
-                    outputPath: "clean_data.csv",
-                    operations: [
-                        {
-                            type: "dropna" as const,
-                            variables: ["income", "age"],
-                        },
-                        {
-                            type: "winsorize" as const,
-                            variables: ["salary"],
-                            params: { lower: 0.01, upper: 0.99 },
-                        },
-                    ],
-                }
-
-                expect(params.action).toBe("preprocess")
-                expect(params.operations?.length).toBe(2)
-                expect(params.operations?.[0].type).toBe("dropna")
-                expect(params.operations?.[1].type).toBe("winsorize")
+        const describeParsed = tool.parameters.parse({
+          action: "describe",
+          datasetId: "dataset_x",
+          stageId: "stage_000",
+          runId: "run_20260324-153010_demo",
+          preserveLabels: true,
+          variables: ["数字经济指数", "数字普惠金融指数"],
+        })
+        const importParsed = tool.parameters.parse({
+          action: "import",
+          inputPath: "panel.dta",
+          format: "parquet",
+          preserveLabels: true,
+        })
+        const preprocessParsed = tool.parameters.parse({
+          action: "preprocess",
+          datasetId: "dataset_x",
+          stageId: "stage_000",
+          preserveLabels: true,
+          operations: [
+            {
+              type: "group_linear_interpolate",
+              variables: ["经济发展水平"],
+              params: {
+                group_by: ["地区"],
+                time_var: "year",
+              },
             },
+          ],
         })
+        const healthParsed = tool.parameters.parse({
+          action: "healthcheck",
+          preserveLabels: true,
+        })
+        const rollbackParsed = tool.parameters.parse({
+          action: "rollback",
+          datasetId: "dataset_x",
+          stageId: "stage_000",
+          preserveLabels: true,
+        })
+
+        expect(filterParsed.action).toBe("filter")
+        expect(describeParsed.action).toBe("describe")
+        expect(describeParsed.runId).toBe("run_20260324-153010_demo")
+        expect(importParsed.format).toBe("parquet")
+        expect(preprocessParsed.operations?.[0]?.type).toBe("group_linear_interpolate")
+        expect(healthParsed.action).toBe("healthcheck")
+        expect(rollbackParsed.action).toBe("rollback")
+      },
     })
+  })
+
+  test("requires inputPath for non-healthcheck actions", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const tool = await DataImportTool.init()
+
+        let thrown: Error | undefined
+        try {
+          await tool.execute(
+            {
+              action: "filter",
+              preserveLabels: true,
+              createInspectionArtifacts: true,
+              filters: [{ column: "省份", operator: "not_in", values: ["北京市"], caseSensitive: false }],
+            },
+            ctx as any,
+          )
+        } catch (error) {
+          thrown = error as Error
+        }
+
+        expect(thrown).toBeDefined()
+        expect(thrown!.message).toContain("requires inputPath or datasetId + stageId")
+      },
+    })
+  })
 })
-
-describe("tool.data_import 预处理操作", () => {
-    // 测试dropna操作
-    test("dropna操作参数验证", async () => {
-        await Instance.provide({
-            directory: projectRoot,
-            fn: async () => {
-                const operation = {
-                    type: "dropna" as const,
-                    variables: ["var1", "var2"],
-                    params: { how: "any" },
-                }
-
-                expect(operation.type).toBe("dropna")
-                expect(operation.variables?.length).toBe(2)
-            },
-        })
-    })
-
-    // 测试fillna操作
-    test("fillna操作参数验证", async () => {
-        await Instance.provide({
-            directory: projectRoot,
-            fn: async () => {
-                const operation = {
-                    type: "fillna" as const,
-                    variables: ["income"],
-                    params: { method: "mean" },
-                }
-
-                expect(operation.type).toBe("fillna")
-                expect(operation.params?.method).toBe("mean")
-            },
-        })
-    })
-
-    // 测试log_transform操作
-    test("log_transform操作参数验证", async () => {
-        await Instance.provide({
-            directory: projectRoot,
-            fn: async () => {
-                const operation = {
-                    type: "log_transform" as const,
-                    variables: ["gdp", "population"],
-                }
-
-                expect(operation.type).toBe("log_transform")
-                expect(operation.variables?.length).toBe(2)
-            },
-        })
-    })
-
-    // 测试standardize操作
-    test("standardize操作参数验证", async () => {
-        await Instance.provide({
-            directory: projectRoot,
-            fn: async () => {
-                const operation = {
-                    type: "standardize" as const,
-                    variables: ["price", "quantity"],
-                }
-
-                expect(operation.type).toBe("standardize")
-            },
-        })
-    })
-
-    // 测试winsorize操作
-    test("winsorize操作参数验证", async () => {
-        await Instance.provide({
-            directory: projectRoot,
-            fn: async () => {
-                const operation = {
-                    type: "winsorize" as const,
-                    variables: ["return"],
-                    params: { lower: 0.01, upper: 0.99 },
-                }
-
-                expect(operation.type).toBe("winsorize")
-                expect(operation.params?.lower).toBe(0.01)
-                expect(operation.params?.upper).toBe(0.99)
-            },
-        })
-    })
-
-    // 测试create_dummies操作
-    test("create_dummies操作参数验证", async () => {
-        await Instance.provide({
-            directory: projectRoot,
-            fn: async () => {
-                const operation = {
-                    type: "create_dummies" as const,
-                    variables: ["industry", "region"],
-                }
-
-                expect(operation.type).toBe("create_dummies")
-                expect(operation.variables?.length).toBe(2)
-            },
-        })
-    })
-})
-
-describe("tool.data_import 文件格式", () => {
-    // 测试CSV格式支持
-    test("支持CSV格式", async () => {
-        await using tmp = await tmpdir({ git: true })
-        await Instance.provide({
-            directory: tmp.path,
-            fn: async () => {
-                // 创建测试CSV文件
-                const csvData = `id,name,value
-1,Alice,100
-2,Bob,200
-3,Charlie,300`
-                await Bun.write(path.join(tmp.path, "test.csv"), csvData)
-
-                const params = {
-                    action: "import" as const,
-                    inputPath: "test.csv",
-                }
-
-                expect(params.inputPath.endsWith(".csv")).toBe(true)
-            },
-        })
-    })
-
-    // 测试Excel格式支持
-    test("支持xlsx格式", async () => {
-        await Instance.provide({
-            directory: projectRoot,
-            fn: async () => {
-                const params = {
-                    action: "export" as const,
-                    inputPath: "data.csv",
-                    outputPath: "data.xlsx",
-                    format: "xlsx" as const,
-                }
-
-                expect(params.format).toBe("xlsx")
-            },
-        })
-    })
-
-    // 测试Stata格式支持
-    test("支持dta格式", async () => {
-        await Instance.provide({
-            directory: projectRoot,
-            fn: async () => {
-                const params = {
-                    action: "import" as const,
-                    inputPath: "stata_data.dta",
-                    preserveLabels: true,
-                }
-
-                expect(params.inputPath.endsWith(".dta")).toBe(true)
-                expect(params.preserveLabels).toBe(true)
-            },
-        })
-    })
-})
-

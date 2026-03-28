@@ -233,10 +233,24 @@ export namespace Session {
   }
 
   export function plan(input: { slug: string; time: { created: number } }) {
+    const root = Instance.project.vcs ? Instance.worktree : Instance.directory
+    const base = path.join(root, ".killstata", "plans")
+    return path.join(base, [input.time.created, input.slug].join("-") + ".md")
+  }
+
+  export function legacyPlan(input: { slug: string; time: { created: number } }) {
     const base = Instance.project.vcs
       ? path.join(Instance.worktree, ".opencode", "plans")
       : path.join(Global.Path.data, "plans")
     return path.join(base, [input.time.created, input.slug].join("-") + ".md")
+  }
+
+  export async function planReadPath(input: { slug: string; time: { created: number } }) {
+    const next = plan(input)
+    if (await Bun.file(next).exists()) return next
+    const legacy = legacyPlan(input)
+    if (await Bun.file(legacy).exists()) return legacy
+    return next
   }
 
   export const get = fn(Identifier.schema("session"), async (id) => {

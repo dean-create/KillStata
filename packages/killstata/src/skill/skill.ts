@@ -1,6 +1,5 @@
 import z from "zod"
 import path from "path"
-import { Config } from "../config/config"
 import { Instance } from "../project/instance"
 import { NamedError } from "@opencode-ai/util/error"
 import { ConfigMarkdown } from "../config/markdown"
@@ -10,6 +9,7 @@ import { Filesystem } from "@/util/filesystem"
 import { Flag } from "@/flag/flag"
 import { Bus } from "@/bus"
 import { Session } from "@/session"
+import { builtinSkillsRoot, doctorSkillFile, importedSkillsRoot, pathWithin, SkillSource } from "./manage"
 
 export namespace Skill {
   const log = Log.create({ service: "skill" })
@@ -17,6 +17,7 @@ export namespace Skill {
     name: z.string(),
     description: z.string(),
     location: z.string(),
+    source: SkillSource,
   })
   export type Info = z.infer<typeof Info>
 
@@ -38,13 +39,21 @@ export namespace Skill {
     }),
   )
 
-  const OPENCODE_SKILL_GLOB = new Bun.Glob("{skill,skills}/**/SKILL.md")
+  const KILLSTATA_SKILL_GLOB = new Bun.Glob("{skill,skills}/**/SKILL.md")
   const CLAUDE_SKILL_GLOB = new Bun.Glob("skills/**/SKILL.md")
+  const BUILTIN_SKILL_GLOB = new Bun.Glob("**/SKILL.md")
+
+  function classifyKillstataSource(root: string, match: string): SkillSource {
+    if (pathWithin(builtinSkillsRoot(), match)) return "builtin"
+    if (pathWithin(importedSkillsRoot(), match)) return "imported"
+    if (pathWithin(path.join(Global.Path.home, ".killstata"), root)) return "user"
+    return "project"
+  }
 
   export const state = Instance.state(async () => {
     const skills: Record<string, Info> = {}
 
-    const addSkill = async (match: string) => {
+    const addSkill = async (match: string, source: SkillSource) => {
       const md = await ConfigMarkdown.parse(match).catch((err) => {
         const message = ConfigMarkdown.FrontmatterError.isInstance(err)
           ? err.data.message
@@ -72,53 +81,67 @@ export namespace Skill {
         name: parsed.data.name,
         description: parsed.data.description,
         location: match,
+        source,
       }
     }
 
-    // Scan .claude/skills/ directories (project-level)
-    const claudeDirs = await Array.fromAsync(
-      Filesystem.up({
-        targets: [".claude"],
-        start: Instance.directory,
-        stop: Instance.worktree,
-      }),
-    )
-    // Also include global ~/.claude/skills/
-    const globalClaude = `${Global.Path.home}/.claude`
-    if (await Filesystem.isDir(globalClaude)) {
-      claudeDirs.push(globalClaude)
-    }
-
-    if (!Flag.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS) {
-      for (const dir of claudeDirs) {
-        const matches = await Array.fromAsync(
-          CLAUDE_SKILL_GLOB.scan({
-            cwd: dir,
-            absolute: true,
-            onlyFiles: true,
-            followSymlinks: true,
-            dot: true,
-          }),
-        ).catch((error) => {
-          log.error("failed .claude directory scan for skills", { dir, error })
-          return []
-        })
-
-        for (const match of matches) {
-          await addSkill(match)
-        }
-      }
-    }
-
-    // Scan .opencode/skill/ directories
-    for (const dir of await Config.directories()) {
-      for await (const match of OPENCODE_SKILL_GLOB.scan({
-        cwd: dir,
+    const builtinRoot = builtinSkillsRoot()
+    if (await Filesystem.isDir(builtinRoot)) {
+      for await (const match of BUILTIN_SKILL_GLOB.scan({
+        cwd: builtinRoot,
         absolute: true,
         onlyFiles: true,
         followSymlinks: true,
       })) {
-        await addSkill(match)
+        await addSkill(match, "builtin")
+      }
+    }
+
+    const userDirs = [path.join(Global.Path.home, ".killstata"), path.join(Global.Path.home, ".opencode")]
+    if (!Flag.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS) {
+      userDirs.push(path.join(Global.Path.home, ".claude"))
+    }
+
+    for (const dir of userDirs) {
+      const exists = await Filesystem.isDir(dir)
+      if (!exists) continue
+
+      const glob = path.basename(dir) === ".claude" ? CLAUDE_SKILL_GLOB : KILLSTATA_SKILL_GLOB
+      const matches = await Array.fromAsync(
+        glob.scan({
+          cwd: dir,
+          absolute: true,
+          onlyFiles: true,
+          followSymlinks: true,
+          dot: true,
+        }),
+      ).catch((error) => {
+        log.error("failed user directory scan for skills", { dir, error })
+        return []
+      })
+
+      for (const match of matches) {
+        await addSkill(match, pathWithin(importedSkillsRoot(), match) ? "imported" : "user")
+      }
+    }
+
+    const projectDirs = await Array.fromAsync(
+      Filesystem.up({
+        targets: !Flag.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS ? [".killstata", ".opencode", ".claude"] : [".killstata", ".opencode"],
+        start: Instance.directory,
+        stop: Instance.worktree,
+      }),
+    )
+    for (const dir of projectDirs.toReversed()) {
+      const glob = path.basename(dir) === ".claude" ? CLAUDE_SKILL_GLOB : KILLSTATA_SKILL_GLOB
+      for await (const match of glob.scan({
+        cwd: dir,
+        absolute: true,
+        onlyFiles: true,
+        followSymlinks: true,
+        dot: true,
+      })) {
+        await addSkill(match, classifyKillstataSource(dir, match))
       }
     }
 
@@ -130,6 +153,19 @@ export namespace Skill {
   }
 
   export async function all() {
-    return state().then((x) => Object.values(x))
+    return state().then((x) => Object.values(x).sort((a, b) => a.name.localeCompare(b.name)))
+  }
+
+  export async function doctor() {
+    const allSkills = await all()
+    const findings = (
+      await Promise.all(
+        allSkills.map(async (skill) => {
+          const issues = await doctorSkillFile(skill.location)
+          return issues.map((issue) => ({ ...issue, skill: issue.skill ?? skill.name }))
+        }),
+      )
+    ).flat()
+    return findings.sort((a, b) => a.path.localeCompare(b.path) || a.code.localeCompare(b.code))
   }
 }

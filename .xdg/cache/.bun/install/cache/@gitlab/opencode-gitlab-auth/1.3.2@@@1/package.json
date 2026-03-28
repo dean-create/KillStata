@@ -1,0 +1,99 @@
+{
+  "name": "@gitlab/opencode-gitlab-auth",
+  "version": "1.3.2",
+  "description": "GitLab OAuth authentication plugin for OpenCode",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://gitlab.com/gitlab-org/editor-extensions/opencode-gitlab-auth.git"
+  },
+  "bugs": {
+    "url": "https://gitlab.com/gitlab-org/editor-extensions/opencode-gitlab-auth/-/issues"
+  },
+  "homepage": "https://gitlab.com/gitlab-org/editor-extensions/opencode-gitlab-auth#readme",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "rebuild": "npm run clean && npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "lint-staged": "lint-staged",
+    "prepare": "husky install",
+    "prepublishOnly": "npm run build",
+    "semantic-release": "semantic-release"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "gitlab",
+    "gitlab-duo",
+    "oauth",
+    "oauth2",
+    "authentication",
+    "auth",
+    "login",
+    "pkce",
+    "security",
+    "plugin",
+    "personal-access-token",
+    "pat",
+    "developer-tools",
+    "devops",
+    "ai",
+    "typescript"
+  ],
+  "author": {
+    "name": "Vladimir Glafirov",
+    "email": "vglafirov@gitlab.com",
+    "url": "https://gitlab.com/vglafirov"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@opencode-ai/plugin": "*"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "^10.2.0",
+    "@opencode-ai/plugin": "*",
+    "fastify": "^5.2.0",
+    "open": "^10.0.0"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^18.4.3",
+    "@commitlint/config-conventional": "^18.4.3",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/gitlab": "^13.0.3",
+    "@semantic-release/npm": "^11.0.2",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "@vitest/coverage-v8": "^4.0.17",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.2.0",
+    "prettier": "^3.1.1",
+    "semantic-release": "^22.0.12",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.17"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

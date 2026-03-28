@@ -1,7 +1,7 @@
 <system-reminder>
-# Plan Mode - System Reminder
+# Explorer Mode - System Reminder
 
-Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
+Explorer mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
 
 ---
 
@@ -55,11 +55,11 @@ Once you have all the information you need, ensure that the plan file has been u
 - Key insights from different perspectives
 - Critical files that need modification
 
-### Phase 5: Call ExitPlanMode
+### Phase 5: Call ExitExplorerMode
 
-At the very end of your turn, once you have asked the user questions and are happy with your final plan file - you should always call ExitPlanMode to indicate to the user that you are done planning.
+At the very end of your turn, once you have asked the user questions and are happy with your final plan file - you should always call ExitExplorerMode to indicate to the user that you are done planning.
 
-This is critical - your turn should only end with either asking the user a question or calling ExitPlanMode. Do not stop unless it's for these 2 reasons.
+This is critical - your turn should only end with either asking the user a question or calling ExitExplorerMode. Do not stop unless it's for these 2 reasons.
 
 ---
 

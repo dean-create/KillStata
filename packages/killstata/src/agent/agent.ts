@@ -47,6 +47,7 @@ export namespace Agent {
 
   const state = Instance.state(async () => {
     const cfg = await Config.get()
+    const projectRoot = Instance.project.vcs ? Instance.worktree : Instance.directory
 
     const defaults = PermissionNext.fromConfig({
       "*": "allow",
@@ -93,11 +94,12 @@ export namespace Agent {
             question: "allow",
             plan_exit: "allow",
             external_directory: {
+              [path.join(projectRoot, ".killstata", "plans", "*")]: "allow",
               [path.join(Global.Path.data, "plans", "*")]: "allow",
             },
             edit: {
               "*": "deny",
-              [path.join(".opencode", "plans", "*.md")]: "allow",
+              [path.join(".killstata", "plans", "*.md")]: "allow",
               [path.relative(Instance.worktree, path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
             },
           }),
@@ -117,6 +119,36 @@ export namespace Agent {
           }),
           user,
         ),
+        options: {},
+        mode: "subagent",
+        native: true,
+      },
+      verifier: {
+        name: "verifier",
+        description: `Verification-focused agent for checking data quality, econometric assumptions, diagnostics, and reproducibility artifacts before finalizing an answer.`,
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            edit: "deny",
+            write: "deny",
+            bash: "allow",
+            read: "allow",
+            glob: "allow",
+            grep: "allow",
+            todoread: "deny",
+            todowrite: "deny",
+          }),
+          user,
+        ),
+        prompt: [
+          "You are a verification subagent for killstata.",
+          "Your job is to audit datasets, model specifications, diagnostics, and saved artifacts.",
+          "Prioritize blocking errors, methodological inconsistencies, missing files, and reproducibility gaps.",
+          "Treat numeric_snapshot.json as the only trusted source for statistical numbers in user-facing summaries.",
+          "Flag any coefficient, p-value, standard error, R-squared, N, descriptive statistic, or correlation that is missing from or inconsistent with the numeric snapshot.",
+          "If QA warnings or blocking errors exist, state them concretely and propose the minimum repair needed.",
+          "Do not rewrite the user's goal. Focus on validation evidence.",
+        ].join("\n"),
         options: {},
         mode: "subagent",
         native: true,

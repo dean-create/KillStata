@@ -29,12 +29,24 @@ export namespace Global {
   }
 }
 
+async function ensureDir(dir: string) {
+  try {
+    const stat = await fs.stat(dir).catch(() => undefined)
+    if (stat?.isDirectory()) return
+    await fs.mkdir(dir, { recursive: true })
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException
+    if (nodeError.code === "EEXIST") return
+    throw error
+  }
+}
+
 await Promise.all([
-  fs.mkdir(Global.Path.data, { recursive: true }),
-  fs.mkdir(Global.Path.config, { recursive: true }),
-  fs.mkdir(Global.Path.state, { recursive: true }),
-  fs.mkdir(Global.Path.log, { recursive: true }),
-  fs.mkdir(Global.Path.bin, { recursive: true }),
+  ensureDir(Global.Path.data),
+  ensureDir(Global.Path.config),
+  ensureDir(Global.Path.state),
+  ensureDir(Global.Path.log),
+  ensureDir(Global.Path.bin),
 ])
 
 const CACHE_VERSION = "18"

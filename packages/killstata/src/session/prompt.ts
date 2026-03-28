@@ -18,7 +18,7 @@ import { ProviderTransform } from "../provider/transform"
 import { SystemPrompt } from "./system"
 import { Plugin } from "../plugin"
 import PROMPT_PLAN from "../session/prompt/plan.txt"
-import BUILD_SWITCH from "../session/prompt/build-switch.txt"
+import ANALYST_SWITCH from "../session/prompt/analyst-switch.txt"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
 import { defer } from "../util/defer"
 import { clone } from "remeda"
@@ -268,6 +268,7 @@ export namespace SessionPrompt {
     using _ = defer(() => cancel(sessionID))
 
     let step = 0
+    let analysisRepairAttempts = 0
     const session = await Session.get(sessionID)
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
@@ -615,6 +616,45 @@ export namespace SessionPrompt {
         model,
       })
       if (result === "stop") break
+      if (typeof result === "object" && result.type === "repair") {
+        analysisRepairAttempts += 1
+        if (analysisRepairAttempts > 2) break
+        SessionStatus.set(sessionID, {
+          type: "repair",
+          tool: result.toolName,
+          retryStage: result.retryStage,
+          message: result.repairAction,
+        })
+
+        const repairUserMessage: MessageV2.User = {
+          id: Identifier.ascending("message"),
+          sessionID,
+          role: "user",
+          time: {
+            created: Date.now(),
+          },
+          agent: lastUser.agent,
+          model: lastUser.model,
+        }
+        await Session.updateMessage(repairUserMessage)
+        await Session.updatePart({
+          id: Identifier.ascending("part"),
+          messageID: repairUserMessage.id,
+          sessionID,
+          type: "text",
+          synthetic: true,
+          text: [
+            `The ${result.toolName} step failed during ${result.retryStage}.`,
+            `Repair action: ${result.repairAction}`,
+            result.reflectionPath ? `Reflection log: ${result.reflectionPath}` : "",
+            "Retry only the failed stage. Reuse successful stages and saved artifacts instead of restarting the whole workflow.",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        } satisfies MessageV2.TextPart)
+        continue
+      }
+      analysisRepairAttempts = 0
       if (result === "compact") {
         await SessionCompaction.create({
           sessionID,
@@ -1279,7 +1319,7 @@ export namespace SessionPrompt {
     const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
     if (!userMessage) return input.messages
 
-    // Original logic when experimental plan mode is disabled
+    // Original logic when experimental explorer mode is disabled
     if (!Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE) {
       if (input.agent.name === "explorer") {
         userMessage.parts.push({
@@ -1298,19 +1338,19 @@ export namespace SessionPrompt {
           messageID: userMessage.info.id,
           sessionID: userMessage.info.sessionID,
           type: "text",
-          text: BUILD_SWITCH,
+          text: ANALYST_SWITCH,
           synthetic: true,
         })
       }
       return input.messages
     }
 
-    // New plan mode logic when flag is enabled
+    // New explorer mode logic when flag is enabled
     const assistantMessage = input.messages.findLast((msg) => msg.info.role === "assistant")
 
-    // Switching from plan mode to build mode
+    // Switching from explorer mode to analyst mode
     if (input.agent.name !== "explorer" && assistantMessage?.info.agent === "explorer") {
-      const plan = Session.plan(input.session)
+      const plan = await Session.planReadPath(input.session)
       const exists = await Bun.file(plan).exists()
       if (exists) {
         const part = await Session.updatePart({
@@ -1319,7 +1359,7 @@ export namespace SessionPrompt {
           sessionID: userMessage.info.sessionID,
           type: "text",
           text:
-            BUILD_SWITCH + "\n\n" + `A plan file exists at ${plan}. You should execute on the plan defined within it`,
+            ANALYST_SWITCH + "\n\n" + `A plan file exists at ${plan}. You should execute on the plan defined within it`,
           synthetic: true,
         })
         userMessage.parts.push(part)
@@ -1327,7 +1367,7 @@ export namespace SessionPrompt {
       return input.messages
     }
 
-    // Entering plan mode
+    // Entering explorer mode
     if (input.agent.name === "explorer" && assistantMessage?.info.agent !== "explorer") {
       const plan = Session.plan(input.session)
       const exists = await Bun.file(plan).exists()
@@ -1338,7 +1378,7 @@ export namespace SessionPrompt {
         sessionID: userMessage.info.sessionID,
         type: "text",
         text: `<system-reminder>
-Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
+Explorer mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
 
 ## Plan File Info:
 ${exists ? `A plan file already exists at ${plan}. You can read it and make incremental edits using the edit tool.` : `No plan file exists yet. You should create your plan at ${plan} using the write tool.`}
@@ -1367,7 +1407,7 @@ Launch general agent(s) to design the implementation based on the user's intent 
 You can launch up to 1 agent(s) in parallel.
 
 **Guidelines:**
-- **Default**: Launch at least 1 Plan agent for most tasks - it helps validate your understanding and consider alternatives
+- **Default**: Launch at least 1 Explorer agent for most tasks - it helps validate your understanding and consider alternatives
 - **Skip agents**: Only for truly trivial tasks (typo fixes, single-line changes, simple renames)
 
 Examples of when to use multiple agents:
@@ -1400,7 +1440,7 @@ Goal: Write your final plan to the plan file (the only file you can edit).
 - Include a verification section describing how to test the changes end-to-end (run the code, use MCP tools, run tests)
 
 ### Phase 5: Call plan_exit tool
-At the very end of your turn, once you have asked the user questions and are happy with your final plan file - you should always call plan_exit to indicate to the user that you are done planning.
+At the very end of your turn, once you have asked the user questions and are happy with your final plan file - you should always call plan_exit to indicate to the user that you are done planning and ready to switch to analyst agent.
 This is critical - your turn should only end with either asking the user a question or calling plan_exit. Do not stop unless it's for these 2 reasons.
 
 **Important:** Use question tool to clarify requirements/approach, use plan_exit to request plan approval. Do NOT use question tool to ask "Is this plan okay?" - that's what plan_exit does.

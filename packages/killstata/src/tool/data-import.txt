@@ -1,71 +1,109 @@
-The DataImport tool handles conversion between different statistical data formats (Excel, Stata DTA, CSV) and provides data preprocessing capabilities.
+The DataImport tool handles tabular data ingestion, stage-based cleaning, QA, and descriptive analysis for killstata.
 
-This tool is essential for the killstata workflow which uses CSV as the intermediate standard format for all data operations.
+Use it to build a reproducible Excel/CSV/Stata preprocessing pipeline before any econometric model.
 
-## Supported Operations
+Internal format policy:
+- Input layer: Excel / CSV / DTA
+- Internal working layer: Parquet + metadata sidecar
+- User inspection/export layer: CSV / XLSX
+- Compatibility export layer: DTA
 
-1. **Import**: Convert Excel (.xlsx) or Stata (.dta) files to CSV
-   - Preserves variable names and labels
-   - Handles missing values appropriately
-   - Extracts metadata (variable labels, value labels)
-   - Saves metadata separately for reference
+## Supported Actions
 
-2. **Export**: Convert processed CSV back to Excel or Stata format
-   - Restores variable labels from metadata
-   - Applies appropriate data types
-   - Formats output for publication/sharing
+1. import
+- Convert Excel (.xlsx/.xls), Stata (.dta), or CSV into a canonical Parquet working dataset
+- Always create a Parquet stage plus inspection CSV/XLSX
+- Return datasetId/stageId and save schema, labels, audit files, and inspection tables
 
-3. **Preprocess**: Clean and transform CSV data
-   - Handle missing values (drop/impute)
-   - Variable transformations (log, standardize, winsorize)
-   - Create dummy variables from categorical variables
-   - Generate interaction terms
+2. export
+- Convert a working dataset back to CSV, Excel, Stata, or Parquet
+- Prefer CSV/XLSX/DTA for user-facing delivery; Parquet remains the internal canonical format
 
-## Input Parameters
+3. preprocess
+- Apply explicit cleaning operations such as drop_missing, fill_constant, fill_mean, fill_median, forward_fill, backward_fill, linear_interpolate, group_linear_interpolate, regression_impute, log_transform, standardize, winsorize, and create_dummies
+- Save the processed dataset as a new Parquet stage plus audit files and inspection tables
 
-- action: "import" | "export" | "preprocess"
-- inputPath: Path to the input file
-- outputPath: Path for the output file
-- format: "csv" | "xlsx" | "dta" (for export)
-- options: Format-specific options
+4. filter
+- Apply explicit row filtering rules such as in/not_in/eq/neq/gt/gte/lt/lte/contains/not_contains
+- Save the filtered dataset as a new Parquet stage plus filter audit files and inspection tables
+
+5. describe
+- Produce descriptive statistics tables for selected variables
+- Save CSV, workbook, summary JSON, and numeric_snapshot.json artifacts
+
+6. correlation
+- Produce a correlation matrix for selected numeric variables
+- Save CSV, workbook, summary JSON, and numeric_snapshot.json artifacts
+
+7. qa
+- Run a structured data-quality gate
+- Check missingness, duplicate panel keys, and numeric availability
+- Return status, warnings, blocking_errors, and suggested_repairs in JSON
+
+8. healthcheck
+- Check Python module readiness for the data/econometrics pipeline
+- Report missing or broken modules and the exact install command
+- `pyarrow` is required because Parquet is the canonical working format
+
+## Key Parameters
+
+- action: import | export | preprocess | filter | describe | correlation | qa | healthcheck | rollback
+- inputPath: source file path, required for every action except healthcheck when datasetId/stageId is not provided
+- datasetId, stageId: canonical Parquet stage reference; prefer this after import
+- runId: optional run identifier; reuse the same runId across multi-step workflows to group visible outputs
+- branch: branch name for split preprocessing / estimation workflows
+- outputPath: optional target artifact path
+- format:
+  - export: csv | xlsx | dta | parquet
+  - import | filter | preprocess | rollback: canonical output is always parquet; non-parquet values are ignored with a note
+- operations: preprocess operation list
+- filters: filter rule list
+- variables: selected variables for describe/correlation
+- entityVar, timeVar: optional panel identifiers used by qa and interpolation
+- options: action-specific options such as correlation method
+
+## Output Contract
+
+Every action returns a structured artifact trail when applicable:
+- datasetId / stageId / parentStageId for canonical artifact workflows
+- input path
+- output path
+- inspection CSV / workbook paths for stage-producing data steps
+- row/column counts before and after
+- summary JSON path
+- audit log path or workbook path when relevant
+- numeric_snapshot.json for describe/correlation so statistical values can be grounded
+- QA warnings and blocking errors when relevant
 
 ## Example Usage
 
-Import Stata file to CSV:
+Import a DTA file into the canonical artifact workflow:
 {
   "action": "import",
-  "inputPath": "./data/raw/survey_data.dta",
-  "outputPath": "./data/cleaned/survey_data.csv",
-  "preserveLabels": true
+  "inputPath": "../test/did高质量发展.dta",
+  "format": "parquet"
 }
 
-Preprocess CSV data:
+Filter out Heilongjiang on a dataset stage:
 {
-  "action": "preprocess",
-  "inputPath": "./data/cleaned/survey_data.csv",
-  "outputPath": "./data/cleaned/survey_data_processed.csv",
-  "operations": [
-    { "type": "dropna", "subset": ["income", "age"] },
-    { "type": "log_transform", "variables": ["income"] },
-    { "type": "standardize", "variables": ["age", "education"] },
-    { "type": "winsorize", "variables": ["revenue"], "limits": [0.01, 0.99] }
+  "action": "filter",
+  "datasetId": "did_dataset_xxxxxx",
+  "stageId": "stage_000",
+  "branch": "cleaning",
+  "filters": [
+    {
+      "column": "省份",
+      "operator": "neq",
+      "value": "黑龙江省"
+    }
   ]
 }
 
-Export to Excel:
+Run QA before panel estimation:
 {
-  "action": "export",
-  "inputPath": "./output/tables/regression_results.csv",
-  "outputPath": "./output/tables/regression_results.xlsx",
-  "format": "xlsx",
-  "sheetName": "Results"
+  "action": "qa",
+  "datasetId": "did_dataset_xxxxxx",
+  "stageId": "stage_000",
+  "entityVar": "地区",
+  "timeVar": "year"
 }
-
-## Output
-
-- Converted/processed file saved to specified path
-- Metadata file (JSON) saved alongside (for import operations)
-- Processing log (markdown) documenting all transformations
-- Summary statistics before/after preprocessing
-
-All operations preserve data provenance and are fully reproducible.

@@ -30,6 +30,7 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
             `  <skill>`,
             `    <name>${skill.name}</name>`,
             `    <description>${skill.description}</description>`,
+            `    <source>${skill.source}</source>`,
             `  </skill>`,
           ]),
           "</available_skills>",
@@ -52,7 +53,7 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
       const skill = await Skill.get(params.name)
 
       if (!skill) {
-        const available = await Skill.all().then((x) => Object.keys(x).join(", "))
+        const available = await Skill.all().then((x) => x.map((skill) => skill.name).join(", "))
         throw new Error(`Skill "${params.name}" not found. Available skills: ${available || "none"}`)
       }
 
@@ -67,7 +68,14 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
       const dir = path.dirname(skill.location)
 
       // Format output similar to plugin pattern
-      const output = [`## Skill: ${skill.name}`, "", `**Base directory**: ${dir}`, "", parsed.content.trim()].join("\n")
+      const output = [
+        `## Skill: ${skill.name}`,
+        "",
+        `**Source**: ${skill.source}`,
+        `**Base directory**: ${dir}`,
+        "",
+        parsed.content.trim(),
+      ].join("\n")
 
       return {
         title: `Loaded skill: ${skill.name}`,
@@ -75,6 +83,7 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
         metadata: {
           name: skill.name,
           dir,
+          source: skill.source,
         },
       }
     },

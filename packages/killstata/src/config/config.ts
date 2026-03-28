@@ -31,6 +31,8 @@ import { Event } from "../server/event"
 
 export namespace Config {
   const log = Log.create({ service: "config" })
+  const PROJECT_CONFIG_DIRS = [".killstata", ".opencode"] as const
+  const PROJECT_CONFIG_FILES = ["config.jsonc", "config.json", "opencode.jsonc", "opencode.json"] as const
 
   // Custom merge function that concatenates array fields instead of replacing them
   function mergeConfigConcatArrays(target: Info, source: Info): Info {
@@ -81,7 +83,7 @@ export namespace Config {
 
     // Project config has highest precedence (overrides global and remote)
     if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
-      for (const file of ["opencode.jsonc", "opencode.json"]) {
+      for (const file of PROJECT_CONFIG_FILES) {
         const found = await Filesystem.findUp(file, Instance.directory, Instance.worktree)
         for (const resolved of found.toReversed()) {
           result = mergeConfigConcatArrays(result, await loadFile(resolved))
@@ -105,16 +107,16 @@ export namespace Config {
       ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG
         ? await Array.fromAsync(
             Filesystem.up({
-              targets: [".opencode"],
+              targets: [...PROJECT_CONFIG_DIRS],
               start: Instance.directory,
               stop: Instance.worktree,
             }),
           )
         : []),
-      // Always scan ~/.opencode/ (user home directory)
+      // Always scan ~/.killstata/ and ~/.opencode/ (user home directory)
       ...(await Array.fromAsync(
         Filesystem.up({
-          targets: [".opencode"],
+          targets: [...PROJECT_CONFIG_DIRS],
           start: Global.Path.home,
           stop: Global.Path.home,
         }),
@@ -127,8 +129,8 @@ export namespace Config {
     }
 
     for (const dir of unique(directories)) {
-      if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
-        for (const file of ["opencode.jsonc", "opencode.json"]) {
+      if (PROJECT_CONFIG_DIRS.some((name) => dir.endsWith(name)) || dir === Flag.OPENCODE_CONFIG_DIR) {
+        for (const file of PROJECT_CONFIG_FILES) {
           log.debug(`loading config from ${path.join(dir, file)}`)
           result = mergeConfigConcatArrays(result, await loadFile(path.join(dir, file)))
           // to satisfy the type checker
@@ -139,8 +141,11 @@ export namespace Config {
       }
 
       const exists = existsSync(path.join(dir, "node_modules"))
-      const installing = installDependencies(dir)
-      if (!exists) await installing
+      const needsInstall = await needsDependencies(dir)
+      if (!exists && needsInstall) {
+        const installing = installDependencies(dir)
+        await installing
+      }
 
       result.command = mergeDeep(result.command ?? {}, await loadCommand(dir))
       result.agent = mergeDeep(result.agent, await loadAgent(dir))
@@ -224,6 +229,28 @@ export namespace Config {
     await BunProc.run(["install"], { cwd: dir }).catch(() => {})
   }
 
+  async function needsDependencies(dir: string) {
+    const pkgPath = path.join(dir, "package.json")
+    if (await Bun.file(pkgPath).exists()) {
+      const raw = await Bun.file(pkgPath).text().catch(() => "")
+      if (raw.trim() && raw.trim() !== "{}") return true
+    }
+
+    for (const pattern of ["{tool,tools,plugin,plugins}/*.{js,ts,mjs,cjs}", "{tool,tools,plugin,plugins}/**/*.{js,ts,mjs,cjs}"]) {
+      const matches = await Array.fromAsync(
+        new Bun.Glob(pattern).scan({
+          cwd: dir,
+          absolute: false,
+          onlyFiles: true,
+          dot: true,
+        }),
+      ).catch(() => [])
+      if (matches.length > 0) return true
+    }
+
+    return false
+  }
+
   function rel(item: string, patterns: string[]) {
     for (const pattern of patterns) {
       const index = item.indexOf(pattern)
@@ -257,7 +284,7 @@ export namespace Config {
       })
       if (!md) continue
 
-      const patterns = ["/.opencode/command/", "/.opencode/commands/", "/command/", "/commands/"]
+      const patterns = ["/.killstata/command/", "/.killstata/commands/", "/.opencode/command/", "/.opencode/commands/", "/command/", "/commands/"]
       const file = rel(item, patterns) ?? path.basename(item)
       const name = trim(file)
 
@@ -297,7 +324,7 @@ export namespace Config {
       })
       if (!md) continue
 
-      const patterns = ["/.opencode/agent/", "/.opencode/agents/", "/agent/", "/agents/"]
+      const patterns = ["/.killstata/agent/", "/.killstata/agents/", "/.opencode/agent/", "/.opencode/agents/", "/agent/", "/agents/"]
       const file = rel(item, patterns) ?? path.basename(item)
       const agentName = trim(file)
 
