@@ -1,4 +1,5 @@
 - To test killstata in `packages/killstata`, run `bun dev`.
+- When running killstata tests, prefer minimal filesystem footprint: reuse existing project state/log directories when possible, avoid creating many timestamped temp directories by default, and clean up temporary test artifacts after verification unless the user explicitly asks to keep them.
 - To regenerate the JavaScript SDK, run `./packages/sdk/js/script/build.ts`.
 - ALWAYS USE PARALLEL TOOLS WHEN APPLICABLE.
 - The default branch in this repo is `dev`.

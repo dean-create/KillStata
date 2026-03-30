@@ -150,10 +150,21 @@ export namespace SessionPrompt {
   export type PromptInput = z.infer<typeof PromptInput>
 
   export const prompt = fn(PromptInput, async (input) => {
+    log.info("prompt start", {
+      sessionID: input.sessionID,
+      messageID: input.messageID,
+      noReply: input.noReply,
+      partCount: input.parts.length,
+    })
     const session = await Session.get(input.sessionID)
     await SessionRevert.cleanup(session)
 
     const message = await createUserMessage(input)
+    log.info("prompt user message created", {
+      sessionID: input.sessionID,
+      messageID: message.info.id,
+      partCount: message.parts.length,
+    })
     await Session.touch(input.sessionID)
 
     // this is backwards compatibility for allowing `tools` to be specified when
@@ -174,9 +185,17 @@ export namespace SessionPrompt {
     }
 
     if (input.noReply === true) {
+      log.info("prompt noReply returning", {
+        sessionID: input.sessionID,
+        messageID: message.info.id,
+      })
       return message
     }
 
+    log.info("prompt entering loop", {
+      sessionID: input.sessionID,
+      messageID: message.info.id,
+    })
     return loop(input.sessionID)
   })
 
@@ -600,7 +619,7 @@ export namespace SessionPrompt {
         agent,
         abort,
         sessionID,
-        system: [...(await SystemPrompt.environment()), ...(await SystemPrompt.custom())],
+        system: [...(await SystemPrompt.environment({ messages: msgs })), ...(await SystemPrompt.custom())],
         messages: [
           ...MessageV2.toModelMessages(sessionMessages, model),
           ...(isLastStep
@@ -947,6 +966,11 @@ export namespace SessionPrompt {
   }
 
   async function createUserMessage(input: PromptInput) {
+    log.info("createUserMessage start", {
+      sessionID: input.sessionID,
+      messageID: input.messageID,
+      partCount: input.parts.length,
+    })
     const agent = await Agent.get(input.agent ?? (await Agent.defaultAgent()))
     const info: MessageV2.Info = {
       id: input.messageID ?? Identifier.ascending("message"),
@@ -1289,6 +1313,11 @@ export namespace SessionPrompt {
       }),
     ).then((x) => x.flat())
 
+    log.info("createUserMessage before plugin trigger", {
+      sessionID: input.sessionID,
+      messageID: info.id,
+      partCount: parts.length,
+    })
     await Plugin.trigger(
       "chat.message",
       {
@@ -1303,11 +1332,25 @@ export namespace SessionPrompt {
         parts,
       },
     )
+    log.info("createUserMessage after plugin trigger", {
+      sessionID: input.sessionID,
+      messageID: info.id,
+      partCount: parts.length,
+    })
 
     await Session.updateMessage(info)
+    log.info("createUserMessage message persisted", {
+      sessionID: input.sessionID,
+      messageID: info.id,
+    })
     for (const part of parts) {
       await Session.updatePart(part)
     }
+    log.info("createUserMessage parts persisted", {
+      sessionID: input.sessionID,
+      messageID: info.id,
+      partCount: parts.length,
+    })
 
     return {
       info,

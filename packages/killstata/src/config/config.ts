@@ -101,26 +101,28 @@ export namespace Config {
     result.mode = result.mode || {}
     result.plugin = result.plugin || []
 
+    const homeConfigDirs = await Array.fromAsync(
+      Filesystem.up({
+        targets: [...PROJECT_CONFIG_DIRS],
+        start: Global.Path.home,
+        stop: Global.Path.home,
+      }),
+    )
+    const projectConfigDirs = !Flag.OPENCODE_DISABLE_PROJECT_CONFIG
+      ? await Array.fromAsync(
+          Filesystem.up({
+            targets: [...PROJECT_CONFIG_DIRS],
+            start: Instance.directory,
+            stop: Instance.worktree,
+          }),
+        )
+      : []
+
     const directories = [
       Global.Path.config,
-      // Only scan project .opencode/ directories when project discovery is enabled
-      ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG
-        ? await Array.fromAsync(
-            Filesystem.up({
-              targets: [...PROJECT_CONFIG_DIRS],
-              start: Instance.directory,
-              stop: Instance.worktree,
-            }),
-          )
-        : []),
-      // Always scan ~/.killstata/ and ~/.opencode/ (user home directory)
-      ...(await Array.fromAsync(
-        Filesystem.up({
-          targets: [...PROJECT_CONFIG_DIRS],
-          start: Global.Path.home,
-          stop: Global.Path.home,
-        }),
-      )),
+      // Load user-level ~/.killstata and ~/.opencode before project-level overrides.
+      ...homeConfigDirs,
+      ...projectConfigDirs,
     ]
 
     if (Flag.OPENCODE_CONFIG_DIR) {
@@ -909,6 +911,92 @@ export namespace Config {
     })
   export type Provider = z.infer<typeof Provider>
 
+  const KillstataPython = z
+    .object({
+      executable: z.string().optional().describe("Absolute path to the Python executable killstata should use"),
+      managed: z
+        .boolean()
+        .optional()
+        .describe("Whether killstata should prefer the managed virtual environment under ~/.killstata/venv"),
+    })
+    .strict()
+    .meta({
+      ref: "KillstataPythonConfig",
+    })
+
+  const KillstataStata = z
+    .object({
+      path: z.string().optional().describe("Absolute path to the Stata installation directory or executable"),
+      edition: z.enum(["mp", "se", "be"]).optional().describe("Stata edition for the built-in MCP server"),
+    })
+    .strict()
+    .meta({
+      ref: "KillstataStataConfig",
+    })
+
+  const KillstataRootDirectory = z
+    .object({
+      root: z.string().optional().describe("Absolute path for this killstata user-level directory"),
+    })
+    .strict()
+    .meta({
+      ref: "KillstataRootDirectoryConfig",
+    })
+
+  const KillstataWorkspace = z
+    .object({
+      enabled: z.boolean().optional().describe("Whether killstata should use the global ~/.killstata/workspace directory"),
+      root: z.string().optional().describe("Absolute path to the global killstata workspace directory"),
+    })
+    .strict()
+    .meta({
+      ref: "KillstataWorkspaceConfig",
+    })
+
+  const KillstataAgents = z
+    .object({
+      root: z.string().optional().describe("Absolute path to the user-level agents directory"),
+      main: z
+        .object({
+          root: z.string().optional().describe("Absolute path to the main agent root directory"),
+          stateRoot: z.string().optional().describe("Absolute path to the main agent metadata directory"),
+          sessionsRoot: z.string().optional().describe("Absolute path to the main agent sessions directory"),
+        })
+        .strict()
+        .optional(),
+      subagents: z
+        .object({
+          root: z.string().optional().describe("Absolute path to the subagents directory"),
+          runsPath: z.string().optional().describe("Absolute path to the subagent run index JSON file"),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict()
+    .meta({
+      ref: "KillstataAgentsConfig",
+    })
+
+  export const Killstata = z
+    .object({
+      home: KillstataRootDirectory.optional(),
+      python: KillstataPython.optional(),
+      stata: KillstataStata.optional(),
+      workspace: KillstataWorkspace.optional(),
+      skills: KillstataRootDirectory.optional(),
+      agents: KillstataAgents.optional(),
+      logs: KillstataRootDirectory.optional(),
+      memory: KillstataRootDirectory.optional(),
+      tmp: KillstataRootDirectory.optional(),
+      state: KillstataRootDirectory.optional(),
+      downloads: KillstataRootDirectory.optional(),
+    })
+    .strict()
+    .meta({
+      ref: "KillstataConfig",
+    })
+  export type Killstata = z.infer<typeof Killstata>
+
   export const Info = z
     .object({
       $schema: z.string().optional().describe("JSON schema reference for configuration validation"),
@@ -1115,6 +1203,7 @@ export namespace Config {
             .describe("Timeout in milliseconds for model context protocol (MCP) requests"),
         })
         .optional(),
+      killstata: Killstata.optional().describe("Killstata runtime configuration for Python and Stata"),
     })
     .strict()
     .meta({
@@ -1159,6 +1248,39 @@ export namespace Config {
       })
     if (!text) return {}
     return load(text, filepath)
+  }
+
+  function migrateLegacyKillstataConfig(filepath: string, data: unknown): Info | undefined {
+    const legacyPath = path.resolve(path.join(Global.Path.home, ".killstata", "config.json"))
+    if (path.resolve(filepath) !== legacyPath) return undefined
+    if (!data || typeof data !== "object" || Array.isArray(data)) return undefined
+
+    const record = data as Record<string, unknown>
+    const hasLegacyShape =
+      typeof record["python_executable"] === "string" ||
+      typeof record["stata_path"] === "string" ||
+      typeof record["stata_edition"] === "string"
+    if (!hasLegacyShape) return undefined
+
+    const edition = record["stata_edition"]
+    return {
+      $schema: "https://opencode.ai/config.json",
+      killstata: {
+        python:
+          typeof record["python_executable"] === "string"
+            ? {
+                executable: record["python_executable"],
+              }
+            : undefined,
+        stata:
+          typeof record["stata_path"] === "string" || typeof edition === "string"
+            ? {
+                path: typeof record["stata_path"] === "string" ? record["stata_path"] : undefined,
+                edition: edition === "mp" || edition === "se" || edition === "be" ? edition : undefined,
+              }
+            : undefined,
+      },
+    }
   }
 
   async function load(text: string, configFilepath: string) {
@@ -1228,7 +1350,7 @@ export namespace Config {
       })
     }
 
-    const parsed = Info.safeParse(data)
+    const parsed = Info.safeParse(migrateLegacyKillstataConfig(configFilepath, data) ?? data)
     if (parsed.success) {
       if (!parsed.data.$schema) {
         parsed.data.$schema = "https://opencode.ai/config.json"
@@ -1386,6 +1508,11 @@ export namespace Config {
         properties: {},
       },
     })
+  }
+
+  export async function invalidate() {
+    global.reset()
+    await Instance.disposeAll()
   }
 
   export async function directories() {

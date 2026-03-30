@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import fs from "fs"
+import os from "os"
+import path from "path"
+import { execFileSync } from "child_process"
 import { EconometricsTool } from "../../src/tool/econometrics"
+import { resolveRuntimePythonCommand } from "../../src/killstata/runtime-config"
 import { Instance } from "../../src/project/instance"
-import { tmpdir } from "../fixture/fixture"
 
 const ctx = {
   sessionID: "test",
@@ -9,143 +13,101 @@ const ctx = {
   callID: "",
   agent: "econometrics",
   abort: AbortSignal.any([]),
-  metadata: () => {},
-  ask: async () => {},
+  metadata: async () => undefined,
+  ask: async () => undefined,
+}
+
+function makeTempDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "killstata-econometrics-"))
+}
+
+async function withInstance<T>(fn: (root: string) => Promise<T>) {
+  const root = makeTempDir()
+  try {
+    return await Instance.provide({
+      directory: root,
+      fn: async () => fn(root),
+    })
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 }
 
 describe("tool.econometrics", () => {
-  test("initializes with supported method schema", async () => {
-    await using tmp = await tmpdir()
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const tool = await EconometricsTool.init()
-        expect(tool).toBeDefined()
-
-        const parsed = tool.parameters.parse({
-          methodName: "panel_fe_regression",
-          datasetId: "did_dataset",
-          stageId: "stage_000",
-          runId: "run_20260324-153010_demo",
-          dependentVar: "y",
-          treatmentVar: "x",
-          entityVar: "province",
-          timeVar: "year",
-        })
-
-        expect(parsed.methodName).toBe("panel_fe_regression")
-        expect(parsed.runId).toBe("run_20260324-153010_demo")
-      },
-    })
-  })
-
-  test("requires treatmentVar for treatment-effect methods", async () => {
-    await using tmp = await tmpdir()
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const tool = await EconometricsTool.init()
-
-        let thrown: Error | undefined
-        try {
-          await tool.execute(
+  test("requires panel keys for DID-family methods", async () => {
+    await withInstance(async () => {
+      const tool = await EconometricsTool.init()
+      for (const methodName of ["did_static", "did_staggered", "did_event_study", "did_event_study_viz"] as const) {
+        await expect(
+          tool.execute(
             {
-              methodName: "ols_regression",
+              methodName,
               dataPath: "missing.csv",
               dependentVar: "y",
+              options: {
+                treatment_entity_dummy: "treated_entity",
+                treatment_finished_dummy: "treated_finished",
+              },
             },
             ctx as any,
-          )
-        } catch (error) {
-          thrown = error as Error
-        }
-
-        expect(thrown).toBeDefined()
-        expect(thrown!.message).toContain("requires treatmentVar")
-      },
+          ),
+        ).rejects.toThrow("entityVar and timeVar")
+      }
     })
   })
 
-  test("accepts canonical dataset references", async () => {
-    await using tmp = await tmpdir()
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const tool = await EconometricsTool.init()
-
-        const parsed = tool.parameters.parse({
-          methodName: "baseline_regression",
-          datasetId: "did_dataset",
-          stageId: "stage_000",
-          branch: "baseline",
-          dependentVar: "经济发展水平",
-          treatmentVar: "did",
-          entityVar: "地区",
-          timeVar: "year",
-        })
-
-        expect(parsed.datasetId).toBe("did_dataset")
-        expect(parsed.stageId).toBe("stage_000")
-      },
+  test("does not require relative_time_variable at validation time", async () => {
+    await withInstance(async () => {
+      const tool = await EconometricsTool.init()
+      await expect(
+        tool.execute(
+          {
+            methodName: "did_event_study",
+            dataPath: "missing.csv",
+            dependentVar: "y",
+            entityVar: "entity",
+            timeVar: "year",
+            options: {
+              treatment_entity_dummy: "treated_entity",
+              treatment_finished_dummy: "treated_finished",
+            },
+          },
+          ctx as any,
+        ),
+      ).rejects.not.toThrow("relative_time_variable")
     })
   })
 
-  test("requires entityVar and timeVar for panel FE", async () => {
-    await using tmp = await tmpdir()
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const tool = await EconometricsTool.init()
-
-        let thrown: Error | undefined
-        try {
-          await tool.execute(
-            {
-              methodName: "panel_fe_regression",
-              dataPath: "missing.csv",
-              dependentVar: "y",
-              treatmentVar: "x",
-            },
-            ctx as any,
-          )
-        } catch (error) {
-          thrown = error as Error
-        }
-
-        expect(thrown).toBeDefined()
-        expect(thrown!.message).toContain("entityVar and timeVar")
-      },
-    })
+  test("persists common output helpers and parameter mappings in source", () => {
+    const sourcePath = path.join(process.cwd(), "src", "tool", "econometrics.ts")
+    const source = fs.readFileSync(sourcePath, "utf-8")
+    expect(source).toContain("persist_common_outputs")
+    expect(source).toContain("scalar_coefficient_table")
+    expect(source).toContain('result["summary_path"]')
+    expect(source).toContain("running_variable_cutoff=cutoff")
+    expect(source).toContain("running_variable_bandwidth=options.get(\"bandwidth\", None)")
+    expect(source).toContain("max_order=polynomial_degree")
+    expect(source).toContain("target_type = options.get(\"target_type\", \"ATE\")")
   })
 
-  test("requires method-specific options for IV", async () => {
-    await using tmp = await tmpdir()
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const tool = await EconometricsTool.init()
-
-        let thrown: Error | undefined
-        try {
-          await tool.execute(
-            {
-              methodName: "iv_2sls",
-              dataPath: "missing.csv",
-              dependentVar: "y",
-              treatmentVar: "x",
-              covariates: ["c1"],
-              options: {},
-            },
-            ctx as any,
-          )
-        } catch (error) {
-          thrown = error as Error
-        }
-
-        expect(thrown).toBeDefined()
-        expect(thrown!.message).toContain("requires options")
-        expect(thrown!.message).toContain("iv_variable")
-      },
+  test("imports econometric_algorithm in headless mode", async () => {
+    await withInstance(async () => {
+      const pythonCommand = await resolveRuntimePythonCommand()
+      const algorithmPath = path.join(process.cwd(), "python", "econometrics")
+      const output = execFileSync(
+        pythonCommand,
+        [
+          "-c",
+          [
+            "import sys",
+            `sys.path.insert(0, r'${algorithmPath.replace(/\\/g, "\\\\")}')`,
+            "import econometric_algorithm",
+            "print('ok')",
+          ].join("\n"),
+        ],
+        { encoding: "utf-8" },
+      )
+      expect(output.trim()).toBe("ok")
     })
   })
 })

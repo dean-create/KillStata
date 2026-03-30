@@ -41,6 +41,93 @@ import { ProviderTransform } from "./transform"
 export namespace Provider {
   const log = Log.create({ service: "provider" })
 
+  function normalizeGoogleToolCallIndexesChunk(line: string) {
+    if (!line.startsWith("data: ")) return line
+
+    const payload = line.slice(6).trim()
+    if (!payload || payload === "[DONE]") return line
+
+    try {
+      const parsed = JSON.parse(payload)
+      if (!Array.isArray(parsed?.choices)) return line
+
+      for (const choice of parsed.choices) {
+        const toolCalls = choice?.delta?.tool_calls
+        if (!Array.isArray(toolCalls)) continue
+        for (const [index, toolCall] of toolCalls.entries()) {
+          if (toolCall && typeof toolCall === "object" && toolCall.index === undefined) {
+            toolCall.index = index
+          }
+        }
+      }
+
+      return `data: ${JSON.stringify(parsed)}`
+    } catch {
+      return line
+    }
+  }
+
+  function normalizeGoogleStreamingResponse(response: Response) {
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? ""
+    if (!response.body || !contentType.includes("text/event-stream")) return response
+
+    const source = response.body
+    const reader = source.getReader()
+    const decoder = new TextDecoder()
+    const encoder = new TextEncoder()
+    let buffer = ""
+
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const flushLines = (final = false) => {
+          const parts = buffer.split("\n")
+          const trailing = final ? undefined : (parts.pop() ?? "")
+          if (!final) {
+            buffer = trailing
+          } else {
+            buffer = ""
+          }
+
+          for (const part of parts) {
+            const line = part.endsWith("\r") ? part.slice(0, -1) : part
+            controller.enqueue(encoder.encode(`${normalizeGoogleToolCallIndexesChunk(line)}\n`))
+          }
+
+          if (final && trailing) {
+            const line = trailing.endsWith("\r") ? trailing.slice(0, -1) : trailing
+            controller.enqueue(encoder.encode(normalizeGoogleToolCallIndexesChunk(line)))
+          }
+        }
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            flushLines(false)
+          }
+
+          buffer += decoder.decode()
+          flushLines(true)
+          controller.close()
+        } catch (error) {
+          controller.error(error)
+        } finally {
+          reader.releaseLock()
+        }
+      },
+      async cancel(reason) {
+        await reader.cancel(reason).catch(() => {})
+      },
+    })
+
+    return new Response(body, {
+      headers: response.headers,
+      status: response.status,
+      statusText: response.statusText,
+    })
+  }
+
   function isGpt5OrLater(modelID: string): boolean {
     const match = /^gpt-(\d+)/.exec(modelID)
     if (!match) {
@@ -1016,11 +1103,17 @@ export namespace Provider {
           }
         }
 
-        return fetchFn(input, {
+        const response = await fetchFn(input, {
           ...opts,
           // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
           timeout: false,
         })
+
+        if (model.providerID === "google" && model.api.npm === "@ai-sdk/openai-compatible") {
+          return normalizeGoogleStreamingResponse(response)
+        }
+
+        return response
       }
 
       // Special case: google-vertex-anthropic uses a subpath import

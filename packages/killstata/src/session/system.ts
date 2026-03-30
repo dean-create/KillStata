@@ -3,10 +3,14 @@ import { Global } from "../global"
 import { Filesystem } from "../util/filesystem"
 import { Config } from "../config/config"
 import { Log } from "../util/log"
+import { Skill } from "../skill"
 
 import { Instance } from "../project/instance"
 import path from "path"
 import os from "os"
+import type { MessageV2 } from "./message-v2"
+import { getStage, readDatasetManifest } from "../tool/analysis-state"
+import { relativeWithinProject } from "../tool/analysis-path"
 
 import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
 import PROMPT_ANTHROPIC_WITHOUT_TODO from "./prompt/qwen.txt"
@@ -31,30 +35,42 @@ You are operating as an econometric analysis assistant. When working with data:
 - Check for treatment/outcome variables based on naming conventions
 
 ## Mandatory Workflow
-1. Environment check:
+1. Plan first:
+   - For non-trivial cleaning, causal inference, or multi-step spreadsheet work, first state a concise stage plan before calling tools.
+   - The default stage order is: plan -> healthcheck/import -> preprocess/qa -> baseline estimate -> diagnostics -> robustness -> grounded narrative.
+   - Name the current stage explicitly when retrying after a failure; do not restart the entire workflow if only one stage failed.
+2. Environment check:
    - When Python readiness is uncertain, call data_import with action="healthcheck" first.
-2. Data intake:
+3. Data intake:
    - If source data is xlsx/csv/dta/sav, call data_import with action="import" first.
    - Prefer the returned datasetId/stageId artifact reference over raw file paths after import.
    - Confirm the canonical working dataset before running any model.
    - Treat the canonical working dataset as a Parquet stage with metadata sidecars.
    - Treat CSV/XLSX as inspection/export artifacts and DTA as import/export only, not the primary working layer.
-3. Data quality gate:
+4. Data quality gate:
    - Call data_import with action="qa" before estimation on the working dataset.
    - Check missingness, duplicates, outliers, variable ranges, and panel identifiers.
    - Use data_import actions such as filter, preprocess, describe, or correlation before estimation when needed.
-4. Identification setup:
+   - If QA returns blocking errors, stop and repair only the QA/clean stage.
+5. Identification setup:
    - Explicitly define outcome, treatment, covariates, entity identifier, time identifier, and clustering level.
    - Explain why the chosen design matches the user's causal question.
-5. Estimation:
+6. Estimation:
    - Use econometrics with explicit method and options.
    - For panel baseline regressions, prefer methodName="panel_fe_regression" with entityVar, timeVar, and clusterVar.
-6. Validation loop:
+7. Diagnostics and robustness:
+   - After a baseline model, read diagnostics.json before reporting conclusions.
+   - Run core diagnostics first, then decide whether robustness checks are required.
+   - If diagnostics expose blocking issues, repair only the failed stage and rerun from there.
+8. Validation loop:
    - Read the saved diagnostics and metadata files after estimation.
    - Read numeric_snapshot.json before reporting any coefficient, p-value, standard error, R-squared, N, descriptive statistic, or correlation.
-   - If outputs are inconsistent, coefficients are missing, or QA reports warnings/blocking errors, revise only the failed stage and rerun.
+   - Verify that expected artifacts exist after each tool step before proceeding.
+   - If outputs are inconsistent, coefficients are missing, or QA/diagnostics/reflection report blocking errors, revise only the failed stage and rerun.
+   - Warnings may continue, but they must be surfaced explicitly in the final narrative.
    - When a tool fails, inspect the reflection log and retryStage metadata before making the next call.
-7. Reproducibility:
+   - Never report a statistical conclusion when the relevant numeric snapshot or diagnostics artifact is missing.
+9. Reproducibility:
    - Save outputs under analysis/<method>/ or analysis/datasets/<datasetId>/ and report file paths clearly.
 
 ## Method Selection Protocol
@@ -80,9 +96,17 @@ When user describes a research question, determine the appropriate method:
 ## Tool Integration
 - Use the econometrics tool for method-specific analysis
 - Use the data_import tool for data preprocessing and QA
+- If MCP tools named stata_run_selection, stata_run_file, or stata_session are available, use them instead of shell commands for Stata work.
+- Prefer stata_run_selection for short interactive Stata snippets.
+- Prefer stata_run_file for longer or reusable Stata workflows, and use absolute paths.
+- Keep and reuse session_id for multi-step Stata work so the dataset state persists between calls.
 - Before complex spreadsheet, DTA, or econometric tasks, load the most relevant skill with the skill tool.
-- Prefer tabular-ingest, tabular-cleaning, and panel-data-qa for data preparation tasks.
-- Prefer descriptive-analysis, causal-design-selector, and regression-reporting for econometric workflows.
+- Skill aliases:
+  - Excel/XLSX processing -> prefer xlsx or the closest spreadsheet-processing skill available
+  - CSV summarization -> prefer CSV Data Summarizer or the closest csv/tabular profiling skill available
+  - Missing-data handling and variable engineering -> prefer a matching imported skill when available, otherwise fall back to data_import
+  - Diagnostic testing and robustness -> prefer a matching imported skill when available, otherwise fall back to econometrics diagnostics
+- Prefer the closest installed skill rather than hallucinating an unavailable skill name.
 - Save every intermediate dataset and audit file when cleaning data
 - Intermediate datasets should be Parquet stages; inspection files should be CSV/XLSX
 - Treat datasetId/stageId as the default reference once a canonical artifact exists
@@ -91,6 +115,45 @@ When user describes a research question, determine the appropriate method:
 `
 
 const log = Log.create({ service: "system-prompt" })
+
+const SKILL_ALIAS_CANDIDATES = [
+  { capability: "xlsx_excel_processing", labels: ["xlsx"], preferred: ["xlsx"] },
+  { capability: "csv_summarization", labels: ["csv summarization"], preferred: ["csv-data-summarizer", "CSV Data Summarizer"] },
+  { capability: "missing_data_handling", labels: ["missing-data handling"], preferred: ["missing-data-handler"] },
+  { capability: "variable_engineering", labels: ["variable engineering"], preferred: ["variable-engineering"] },
+  { capability: "diagnostic_testing", labels: ["diagnostic testing"], preferred: ["diagnostic-testing"] },
+  { capability: "robustness_checks", labels: ["robustness checks"], preferred: ["robustness-check"] },
+] as const
+
+function findInstalledSkillMatch(
+  skills: Awaited<ReturnType<typeof Skill.all>>,
+  preferred: readonly string[],
+) {
+  const lowered = skills.map((skill) => ({ ...skill, lower: skill.name.toLowerCase() }))
+  for (const candidate of preferred) {
+    const exact = lowered.find((skill) => skill.lower === candidate.toLowerCase())
+    if (exact) return exact
+  }
+  for (const candidate of preferred) {
+    const fuzzy = lowered.find((skill) => skill.lower.includes(candidate.toLowerCase()))
+    if (fuzzy) return fuzzy
+  }
+  return undefined
+}
+
+async function buildSkillAliasSummary() {
+  const skills = await Skill.all().catch(() => [])
+  if (skills.length === 0) return ""
+  const lines = ["<skill_aliases>"]
+  for (const alias of SKILL_ALIAS_CANDIDATES) {
+    const match = findInstalledSkillMatch(skills, alias.preferred)
+    lines.push(
+      `  ${alias.capability}: ${match ? `${match.name} [${match.source}]` : "unavailable; fall back to data_import/econometrics"}`,
+    )
+  }
+  lines.push("</skill_aliases>")
+  return lines.join("\n")
+}
 
 async function resolveRelativeInstruction(instruction: string): Promise<string[]> {
   if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
@@ -165,9 +228,10 @@ export namespace SystemPrompt {
     return [basePrompt, ECONOMETRICS_CONTEXT]
   }
 
-  export async function environment() {
+  export async function environment(input?: { messages?: MessageV2.WithParts[] }) {
     const project = Instance.project
-    const dataFiles = await scanDataFiles(Instance.directory)
+    const dataSummary = await buildDataSummary(input?.messages)
+    const skillSummary = await buildSkillAliasSummary()
 
     return [
       [
@@ -178,7 +242,8 @@ export namespace SystemPrompt {
         `  Platform: ${process.platform}`,
         `  Today's date: ${new Date().toDateString()}`,
         `</env>`,
-        dataFiles.length > 0 ? `<data_files>\n  ${dataFiles.join("\n  ")}\n</data_files>` : "",
+        dataSummary,
+        skillSummary,
         `<files>`,
         `  ${project.vcs === "git" && false
           ? await Ripgrep.tree({
@@ -213,6 +278,80 @@ export namespace SystemPrompt {
     }
 
     return results.slice(0, 20)
+  }
+
+  function currentDatasetContext(messages: MessageV2.WithParts[] = []) {
+    for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+      const message = messages[messageIndex]
+      if (message.info.role !== "assistant") continue
+      for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+        const part = message.parts[partIndex]
+        if (part.type !== "tool" || part.state.status !== "completed") continue
+        const metadata = (part.state.metadata ?? {}) as Record<string, unknown>
+        const result = (metadata.result ?? {}) as Record<string, unknown>
+        const datasetId =
+          (typeof metadata.datasetId === "string" ? metadata.datasetId : undefined) ??
+          (typeof result.dataset_id === "string" ? result.dataset_id : undefined)
+        if (!datasetId) continue
+        const stageId =
+          (typeof metadata.stageId === "string" ? metadata.stageId : undefined) ??
+          (typeof result.stage_id === "string" ? result.stage_id : undefined)
+        const runId =
+          (typeof metadata.runId === "string" ? metadata.runId : undefined) ??
+          (typeof result.run_id === "string" ? result.run_id : undefined)
+        return { datasetId, stageId, runId }
+      }
+    }
+    return undefined
+  }
+
+  async function buildDataSummary(messages?: MessageV2.WithParts[]) {
+    const current = currentDatasetContext(messages)
+    if (current?.datasetId) {
+      try {
+        const manifest = readDatasetManifest(current.datasetId)
+        const stage = getStage(manifest, current.stageId)
+        const rows = stage.rowCount !== undefined ? `${stage.rowCount} rows` : "rows unknown"
+        const columns = stage.columnCount !== undefined ? `${stage.columnCount} columns` : "columns unknown"
+        return [
+          "<data_summary>",
+          `  Current canonical dataset: ${manifest.datasetId}`,
+          `  Source file: ${relativeWithinProject(manifest.sourcePath)}`,
+          `  Current stage: ${stage.stageId} (${stage.action}, branch=${stage.branch})`,
+          `  Working parquet: ${relativeWithinProject(stage.workingPath)}`,
+          `  Shape: ${rows}, ${columns}`,
+          current.runId ? `  Current run: ${current.runId}` : "",
+          "</data_summary>",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      } catch {}
+    }
+
+    const dataFiles = await scanDataFiles(Instance.directory)
+    if (dataFiles.length === 0) return ""
+    const counts = dataFiles.reduce<Record<string, number>>((acc, item) => {
+      const ext = path.extname(item).replace(/^\./, "").toLowerCase() || "unknown"
+      acc[ext] = (acc[ext] ?? 0) + 1
+      return acc
+    }, {})
+    const candidates = [...dataFiles]
+      .sort((a, b) => {
+        const depthDiff = a.split(/[\\/]+/).length - b.split(/[\\/]+/).length
+        if (depthDiff !== 0) return depthDiff
+        return a.length - b.length
+      })
+      .slice(0, 3)
+    return [
+      "<data_summary>",
+      `  Candidate source files: ${dataFiles.length}`,
+      `  By extension: ${Object.entries(counts)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([ext, count]) => `${ext}=${count}`)
+        .join(", ")}`,
+      `  Top candidates: ${candidates.join(", ")}`,
+      "</data_summary>",
+    ].join("\n")
   }
 
   const LOCAL_RULE_FILES = ["AGENTS.md", "CLAUDE.md", "CONTEXT.md"]

@@ -614,11 +614,8 @@ export namespace ProviderTransform {
       return { reasoningEffort: "minimal" }
     }
     if (model.providerID === "google") {
-      // gemini-3 uses thinkingLevel, gemini-2.5 uses thinkingBudget
-      if (model.api.id.includes("gemini-3")) {
-        return { thinkingConfig: { thinkingLevel: "minimal" } }
-      }
-      return { thinkingConfig: { thinkingBudget: 0 } }
+      // Google's OpenAI-compatible endpoint rejects thinkingConfig even for Gemini models.
+      return {}
     }
     if (model.providerID === "openrouter") {
       if (model.api.id.includes("google")) {

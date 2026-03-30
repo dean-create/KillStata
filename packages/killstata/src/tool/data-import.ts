@@ -4,7 +4,6 @@ import * as path from "path"
 import { spawn, exec } from "child_process"
 import DESCRIPTION from "./data-import.txt"
 import { Instance } from "../project/instance"
-import * as os from "os"
 import { Log } from "../util/log"
 import { Tool } from "./tool"
 import { Question } from "../question"
@@ -15,7 +14,10 @@ import {
   createDatasetId,
   createDatasetManifest,
   finalOutputsPath,
+  findDatasetForSource,
+  fingerprintSourceFile,
   inferRunId,
+  latestImportStageForFingerprint,
   nextStageId,
   getStage,
   projectErrorsRoot,
@@ -28,33 +30,22 @@ import {
   stageInspectionPaths,
   stageMetaPaths,
   stageOutputPath,
+  upsertDatasetIndexEntry,
 } from "./analysis-state"
-import { classifyToolFailure, persistToolReflection } from "./analysis-reflection"
+import { classifyToolFailure, evaluateQaGate, persistToolReflection } from "./analysis-reflection"
 import { AnalysisIntent } from "./analysis-intent"
 import {
   createCorrelationNumericSnapshot,
   createDescribeNumericSnapshot,
   type NumericSnapshotDocument,
-  snapshotPreview,
 } from "./analysis-grounding"
+import { relativeWithinProject, resolveToolPath } from "./analysis-path"
+import { numericSnapshotPreview } from "./analysis-tool-metadata"
+import { pythonInstallCommand, resolveRuntimePythonCommand } from "@/killstata/runtime-config"
 
 const log = Log.create({ service: "data-import-tool" })
 
 // Python环境路径配置
-let PYTHON_CMD = process.env.KILLSTATA_PYTHON
-if (!PYTHON_CMD) {
-  const configFile = path.join(os.homedir(), ".killstata", "config.json")
-  if (fs.existsSync(configFile)) {
-    try {
-      const config = JSON.parse(fs.readFileSync(configFile, "utf-8"))
-      if (config.python_executable) PYTHON_CMD = config.python_executable
-    } catch (e) {
-      log.warn(`Failed to read KillStatA config file at ${configFile}: ${e}`)
-    }
-  }
-}
-PYTHON_CMD = PYTHON_CMD ?? (process.platform === "win32" ? "python" : "python3")
-
 const ECONOMETRICS_DIR = path.join(__dirname, "../../python/econometrics")
 const PYTHON_RESULT_PREFIX = "__KILLSTATA_JSON__"
 
@@ -199,15 +190,6 @@ async function runInlinePython(input: { command: string; script: string; cwd: st
   })
 }
 
-function resolveWithinProject(filePath: string) {
-  if (path.isAbsolute(filePath)) return filePath
-  return path.join(Instance.directory, filePath)
-}
-
-function relativeWithinProject(filePath: string) {
-  return path.relative(Instance.directory, filePath)
-}
-
 function requireResolvableInput(action: DataAction, input: { inputPath?: string; datasetId?: string; stageId?: string }) {
   if (action === "healthcheck" || action === "rollback") return
   if (input.inputPath) return
@@ -298,6 +280,8 @@ export const DataImportTool = Tool.define("data_import", {
     options: z.object({}).passthrough().optional(),
   }),
   async execute(params, ctx) {
+    const pythonCommand = await resolveRuntimePythonCommand()
+    const installCommand = pythonInstallCommand(pythonCommand)
     if (ctx.agent === "analyst" && params.action !== "healthcheck") {
       const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
       if (!analystState.asked) {
@@ -375,7 +359,16 @@ export const DataImportTool = Tool.define("data_import", {
       stageId: params.stageId,
     })
 
-    const directInputPath = params.inputPath ? resolveWithinProject(params.inputPath) : undefined
+    const directInputPath = params.inputPath
+      ? await resolveToolPath({
+          filePath: params.inputPath,
+          mode: "read",
+          toolName: "data_import",
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+          callID: ctx.callID,
+        })
+      : undefined
     const artifactInput = resolveArtifactInput({
       datasetId: params.datasetId,
       stageId: params.stageId,
@@ -403,23 +396,52 @@ export const DataImportTool = Tool.define("data_import", {
     let summaryPath: string | undefined
     let logPath: string | undefined
     const actionStamp = buildFileStamp()
+    let sourceFingerprint = directInputPath && params.action === "import" ? fingerprintSourceFile(directInputPath) : undefined
+    let reusedImportStage = false
 
     if (params.action === "import") {
-      datasetId ??= createDatasetId(inputPath!)
+      const reused = findDatasetForSource(inputPath!)
+      sourceFingerprint = reused.fingerprint
+      datasetManifest ??= reused.manifest
+      datasetId ??= datasetManifest?.datasetId ?? createDatasetId(inputPath!, sourceFingerprint.key)
       datasetManifest ??= createDatasetManifest({
         datasetId,
         sourcePath: inputPath!,
         sourceFormat: path.extname(inputPath!).replace(/^\./, "").toLowerCase() as "csv" | "xlsx" | "xls" | "dta" | "parquet",
         workingFormat: "parquet",
       })
-      stageId = stageId ?? "stage_000"
-      const stagePaths = stageMetaPaths({ datasetId, stageId, action: params.action, stamp: actionStamp })
+      const matchingImportStage = latestImportStageForFingerprint(datasetManifest, sourceFingerprint.key)
+      if (matchingImportStage) {
+        reusedImportStage = true
+        sourceStage = matchingImportStage
+        parentStageId = matchingImportStage.parentStageId
+        stageId = matchingImportStage.stageId
+        inspectionPath = matchingImportStage.inspectionPath
+        inspectionWorkbookPath = matchingImportStage.inspectionWorkbookPath
+        schemaPath = matchingImportStage.schemaPath
+        labelsPath = matchingImportStage.labelsPath
+        summaryPath = matchingImportStage.summaryPath
+        logPath = matchingImportStage.logPath
+      } else {
+        stageId = datasetManifest.stages.length === 0 ? "stage_000" : nextStageId(datasetManifest)
+      }
+    }
+
+    if (params.action === "import" && !reusedImportStage) {
+      const ensuredDatasetId = datasetId!
+      const ensuredStageId = stageId!
+      const stagePaths = stageMetaPaths({ datasetId: ensuredDatasetId, stageId: ensuredStageId, action: params.action, stamp: actionStamp })
       schemaPath = stagePaths.schemaPath
       labelsPath = stagePaths.labelsPath
       summaryPath = stagePaths.summaryPath
       logPath = stagePaths.logPath
       if (params.createInspectionArtifacts) {
-        const inspection = stageInspectionPaths({ datasetId, stageId, action: params.action, stamp: actionStamp })
+        const inspection = stageInspectionPaths({
+          datasetId: ensuredDatasetId,
+          stageId: ensuredStageId,
+          action: params.action,
+          stamp: actionStamp,
+        })
         inspectionPath = inspection.csvPath
         inspectionWorkbookPath = inspection.workbookPath
       }
@@ -462,7 +484,16 @@ export const DataImportTool = Tool.define("data_import", {
     }
 
     const outputPath = params.outputPath
-      ? resolveWithinProject(params.outputPath)
+      ? await resolveToolPath({
+          filePath: params.outputPath,
+          mode: "write",
+          toolName: "data_import",
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+          callID: ctx.callID,
+        })
+      : reusedImportStage && sourceStage?.workingPath
+        ? sourceStage.workingPath
       : datasetManifest && stageId && isStageProducingAction(params.action)
         ? stageOutputPath({
           datasetId: datasetManifest.datasetId,
@@ -502,44 +533,69 @@ export const DataImportTool = Tool.define("data_import", {
 
     fs.mkdirSync(path.dirname(outputPath), { recursive: true })
 
-    await ctx.ask({
-      permission: "bash",
-      patterns: [`${PYTHON_CMD} *data*`],
-      always: [`${PYTHON_CMD}*`],
-      metadata: {
-        description: `Data pipeline action: ${params.action}`,
-      },
-    })
+    let result: PythonResult
+    if (reusedImportStage && sourceStage && datasetManifest) {
+      result = {
+        success: true,
+        action: "import",
+        dataset_id: datasetManifest.datasetId,
+        stage_id: sourceStage.stageId,
+        parent_stage_id: sourceStage.parentStageId,
+        branch: sourceStage.branch,
+        run_id: runId,
+        input_path: inputPath,
+        output_path: sourceStage.workingPath,
+        summary_path: sourceStage.summaryPath,
+        log_path: sourceStage.logPath,
+        inspection_path: sourceStage.inspectionPath,
+        inspection_workbook_path: sourceStage.inspectionWorkbookPath,
+        schema_path: sourceStage.schemaPath,
+        labels_path: sourceStage.labelsPath,
+        rows_before: sourceStage.rowCount,
+        rows_after: sourceStage.rowCount,
+        columns_before: sourceStage.columnCount,
+        columns_after: sourceStage.columnCount,
+        warnings: ["Reused existing import stage because the source file fingerprint is unchanged."],
+      }
+    } else {
+      await ctx.ask({
+        permission: "bash",
+        patterns: [`${pythonCommand} *data*`],
+        always: [`${pythonCommand}*`],
+        metadata: {
+          description: `Data pipeline action: ${params.action}`,
+        },
+      })
 
-    const payload = {
-      action: params.action,
-      input_path: inputPath ?? null,
-      output_path: outputPath,
-      format: effectiveOutputFormat({ action: params.action, format: params.format }),
-      preserve_labels: params.preserveLabels,
-      dataset_id: datasetManifest?.datasetId ?? datasetId ?? null,
-      stage_id: stageId ?? null,
-      parent_stage_id: parentStageId ?? null,
-      branch,
-      run_id: runId,
-      stage_label: params.stageLabel ?? null,
-      schema_path: schemaPath ?? null,
-      labels_path: labelsPath ?? null,
-      summary_path: summaryPath ?? null,
-      log_path: logPath ?? null,
-      inspection_path: inspectionPath ?? null,
-      inspection_workbook_path: inspectionWorkbookPath ?? null,
-      operations: params.operations ?? [],
-      filters: params.filters ?? [],
-      variables: params.variables ?? [],
-      group_by: params.groupBy ?? [],
-      entity_var: params.entityVar ?? null,
-      time_var: params.timeVar ?? null,
-      options: params.options ?? {},
-      install_command: `${PYTHON_CMD} -m pip install pandas statsmodels linearmodels openpyxl scipy matplotlib pyarrow`,
-    }
+      const payload = {
+        action: params.action,
+        input_path: inputPath ?? null,
+        output_path: outputPath,
+        format: effectiveOutputFormat({ action: params.action, format: params.format }),
+        preserve_labels: params.preserveLabels,
+        dataset_id: datasetManifest?.datasetId ?? datasetId ?? null,
+        stage_id: stageId ?? null,
+        parent_stage_id: parentStageId ?? null,
+        branch,
+        run_id: runId,
+        stage_label: params.stageLabel ?? null,
+        schema_path: schemaPath ?? null,
+        labels_path: labelsPath ?? null,
+        summary_path: summaryPath ?? null,
+        log_path: logPath ?? null,
+        inspection_path: inspectionPath ?? null,
+        inspection_workbook_path: inspectionWorkbookPath ?? null,
+        operations: params.operations ?? [],
+        filters: params.filters ?? [],
+        variables: params.variables ?? [],
+        group_by: params.groupBy ?? [],
+        entity_var: params.entityVar ?? null,
+        time_var: params.timeVar ?? null,
+        options: params.options ?? {},
+        install_command: installCommand,
+      }
 
-    const payloadB64 = encodePythonPayload(payload)
+      const payloadB64 = encodePythonPayload(payload)
 
     const pythonScript = `
 import base64
@@ -581,7 +637,7 @@ except Exception as exc:
     result = {
         "success": False,
         "error": f"Failed to import pandas/numpy: {exc}",
-        "install_command": payload.get("install_command") if "payload" in globals() else "${PYTHON_CMD} -m pip install pandas statsmodels linearmodels openpyxl scipy matplotlib pyarrow",
+        "install_command": payload.get("install_command") if "payload" in globals() else "${installCommand}",
     }
     error_path = safe_error_path("bootstrap")
     result["error_log_path"] = error_path
@@ -590,7 +646,24 @@ except Exception as exc:
     raise SystemExit(0)
 
 try:
-    from data_preprocess import get_column_info
+    from data_preprocess import (
+        build_quality_report as preprocess_quality_report,
+        correlation_matrix,
+        describe_dataset,
+        drop_missing_rows,
+        fill_missing_constant,
+        fill_missing_statistics,
+        fill_missing_values,
+        forward_backward_fill,
+        get_column_info,
+        group_linear_interpolate,
+        linear_interpolate,
+        log_transform_columns,
+        regression_impute,
+        safe_get_dummies,
+        standardize_columns,
+        winsorize_columns,
+    )
 except Exception as exc:
     result = {"success": False, "error": f"Failed to import data_preprocess: {exc}"}
     error_path = safe_error_path("bootstrap")
@@ -644,7 +717,21 @@ def read_table(file_path):
     if suffix in [".xlsx", ".xls"]:
         return pd.read_excel(file_path)
     if suffix == ".dta":
-        return pd.read_stata(file_path, preserve_dtypes=False)
+        read_error = None
+        for encoding in [None, "gbk", "latin1"]:
+            try:
+                kwargs = {"preserve_dtypes": False}
+                if encoding is not None:
+                    kwargs["encoding"] = encoding
+                df = pd.read_stata(file_path, **kwargs)
+                df.attrs["_source_encoding"] = encoding or "default"
+                return df
+            except Exception as exc:
+                read_error = exc
+                message = str(exc).lower()
+                if encoding is None and not isinstance(exc, UnicodeDecodeError) and "unicode" not in message and "codec" not in message:
+                    raise
+        raise read_error
     if suffix == ".parquet":
         return pd.read_parquet(file_path)
     raise ValueError(f"Unsupported input format: {suffix}")
@@ -696,53 +783,8 @@ def selected_columns(df, variables):
     return variables
 
 def build_quality_report(df, entity_var=None, time_var=None):
-    warnings = []
-    blocking_errors = []
-    suggested_repairs = []
-
-    missing_share = {
-        col: round(float(df[col].isna().mean()), 6)
-        for col in df.columns
-        if float(df[col].isna().mean()) > 0
-    }
-
-    duplicates = 0
-    if entity_var and time_var:
-        missing_keys = [x for x in [entity_var, time_var] if x not in df.columns]
-        if missing_keys:
-            blocking_errors.append(f"Panel identifiers not found: {missing_keys}")
-        else:
-            duplicates = int(df.duplicated(subset=[entity_var, time_var]).sum())
-            if duplicates > 0:
-                blocking_errors.append(f"Found {duplicates} duplicate entity-time rows")
-                suggested_repairs.append("Deduplicate panel keys before regression")
-
-    numeric_columns = df.select_dtypes(include=["number"]).columns.tolist()
-    if not numeric_columns:
-        warnings.append("Dataset has no numeric columns")
-
-    high_missing = [col for col, share in missing_share.items() if share >= 0.2]
-    if high_missing:
-        warnings.append(f"Columns with >=20% missing values: {high_missing}")
-        suggested_repairs.append("Impute or drop high-missing columns before estimation")
-
-    status = "pass"
-    if warnings:
-        status = "warn"
-    if blocking_errors:
-        status = "fail"
-
-    return {
-        "status": status,
-        "warnings": warnings,
-        "blocking_errors": blocking_errors,
-        "suggested_repairs": suggested_repairs,
-        "row_count": int(len(df)),
-        "column_count": int(len(df.columns)),
-        "numeric_columns": numeric_columns,
-        "missing_share": missing_share,
-        "duplicate_entity_time_rows": duplicates,
-    }
+    _, report = preprocess_quality_report(df, entity_var=entity_var, time_var=time_var)
+    return report
 
 def apply_filter(df, rule):
     column = rule["column"]
@@ -786,10 +828,7 @@ def apply_filter(df, rule):
     raise ValueError(f"Unsupported filter operator: {operator}")
 
 def summarize_dataframe(df, columns):
-    summary = df[columns].describe(include="all").transpose().reset_index().rename(columns={"index": "variable"})
-    summary["dtype"] = summary["variable"].map(lambda col: str(df[col].dtype))
-    summary["missing_count"] = summary["variable"].map(lambda col: int(df[col].isna().sum()))
-    summary["missing_share"] = summary["variable"].map(lambda col: round(float(df[col].isna().mean()), 6))
+    summary, _ = describe_dataset(df, columns=columns)
     summary["non_null_count"] = summary["variable"].map(lambda col: int(df[col].notna().sum()))
     return summary
 
@@ -903,10 +942,9 @@ try:
             op_params = op.get("params") or {}
 
             if op_type in ["dropna", "drop_missing"]:
-                before = len(df)
                 subset = selected_columns(df, vars_in) if vars_in else None
-                df = df.dropna(subset=subset)
-                log_entries.append(f"dropna removed {before - len(df)} rows")
+                df, audit = drop_missing_rows(df, columns=subset)
+                log_entries.append(json.dumps(audit, ensure_ascii=False))
             elif op_type in ["fillna", "fill_constant", "fill_mean", "fill_median"]:
                 target_vars = selected_columns(df, vars_in) if vars_in else list(df.columns)
                 method = op_params.get("method")
@@ -917,26 +955,21 @@ try:
                 elif op_type == "fill_constant":
                     method = "constant"
                 explicit_value = op_params.get("value", 0)
-                for var in target_vars:
-                    if method == "mean":
-                        fill_value = df[var].mean()
-                    elif method == "median":
-                        fill_value = df[var].median()
-                    elif method == "mode":
-                        mode = df[var].mode(dropna=True)
-                        fill_value = mode.iloc[0] if len(mode) else explicit_value
-                    else:
-                        fill_value = explicit_value
-                    df[var] = df[var].fillna(fill_value)
-                log_entries.append(f"fillna on {target_vars} with method={method or 'constant'}")
+                if method in ["mean", "median", "mode"]:
+                    df, audit = fill_missing_statistics(df, columns=target_vars, strategy=method)
+                elif method == "constant" or method is None:
+                    df, audit = fill_missing_constant(df, columns=target_vars, value=explicit_value)
+                else:
+                    df, audit = fill_missing_values(df, columns=target_vars, strategy=method, value=explicit_value)
+                log_entries.append(json.dumps(audit, ensure_ascii=False))
             elif op_type == "forward_fill":
                 target_vars = selected_columns(df, vars_in) if vars_in else list(df.columns)
-                df[target_vars] = df[target_vars].ffill()
-                log_entries.append(f"forward_fill on {target_vars}")
+                df, audit = forward_backward_fill(df, columns=target_vars, direction="forward")
+                log_entries.append(json.dumps(audit, ensure_ascii=False))
             elif op_type == "backward_fill":
                 target_vars = selected_columns(df, vars_in) if vars_in else list(df.columns)
-                df[target_vars] = df[target_vars].bfill()
-                log_entries.append(f"backward_fill on {target_vars}")
+                df, audit = forward_backward_fill(df, columns=target_vars, direction="backward")
+                log_entries.append(json.dumps(audit, ensure_ascii=False))
             elif op_type == "linear_interpolate":
                 target_vars = selected_columns(df, vars_in)
                 time_var = op_params.get("time_var") or payload.get("time_var")
@@ -944,10 +977,8 @@ try:
                     raise ValueError("linear_interpolate requires time_var")
                 if time_var not in df.columns:
                     raise ValueError(f"Interpolation time variable not found: {time_var}")
-                df = df.sort_values(by=[time_var])
-                for var in target_vars:
-                    df[var] = pd.to_numeric(df[var], errors="coerce").interpolate(method="linear", limit_direction="both")
-                log_entries.append(f"linear_interpolate on {target_vars} by {time_var}")
+                df, audit = linear_interpolate(df, columns=target_vars, time_var=time_var)
+                log_entries.append(json.dumps(audit, ensure_ascii=False))
             elif op_type == "group_linear_interpolate":
                 target_vars = selected_columns(df, vars_in)
                 time_var = op_params.get("time_var") or payload.get("time_var")
@@ -961,13 +992,8 @@ try:
                 missing_groups = [var for var in group_vars if var not in df.columns]
                 if missing_groups:
                     raise ValueError(f"Interpolation group variables not found: {missing_groups}")
-                df = df.sort_values(by=group_vars + [time_var])
-                for var in target_vars:
-                    df[var] = (
-                        df.groupby(group_vars, dropna=False)[var]
-                        .transform(lambda series: pd.to_numeric(series, errors="coerce").interpolate(method="linear", limit_direction="both"))
-                    )
-                log_entries.append(f"group_linear_interpolate on {target_vars} by {group_vars} and {time_var}")
+                df, audit = group_linear_interpolate(df, columns=target_vars, time_var=time_var, group_by=group_vars)
+                log_entries.append(json.dumps(audit, ensure_ascii=False))
             elif op_type == "regression_impute":
                 target_vars = selected_columns(df, vars_in)
                 predictors = op_params.get("predictors") or []
@@ -976,52 +1002,31 @@ try:
                 missing_predictors = [col for col in predictors if col not in df.columns]
                 if missing_predictors:
                     raise ValueError(f"Regression imputation predictors not found: {missing_predictors}")
-                for var in target_vars:
-                    cols = [var] + predictors
-                    working = df[cols].copy()
-                    for col in cols:
-                        working[col] = pd.to_numeric(working[col], errors="coerce")
-                    train = working.dropna()
-                    if train.empty:
-                        raise ValueError(f"Regression imputation has no complete training rows for {var}")
-                    X = train[predictors].to_numpy(dtype=float)
-                    X = np.column_stack([np.ones(len(X)), X])
-                    y = train[var].to_numpy(dtype=float)
-                    beta = np.linalg.pinv(X.T @ X) @ (X.T @ y)
-                    missing_mask = working[var].isna() & working[predictors].notna().all(axis=1)
-                    if missing_mask.any():
-                        X_pred = working.loc[missing_mask, predictors].to_numpy(dtype=float)
-                        X_pred = np.column_stack([np.ones(len(X_pred)), X_pred])
-                        df.loc[missing_mask, var] = X_pred @ beta
-                operation_warnings.append("Regression imputation modifies observed missingness; review audit artifacts before estimation")
-                log_entries.append(f"regression_impute on {target_vars} with predictors={predictors}")
+                df, audit = regression_impute(df, columns=target_vars, predictors=predictors)
+                operation_warnings.extend(audit.get("warnings", []))
+                log_entries.append(json.dumps(audit, ensure_ascii=False))
             elif op_type == "log_transform":
-                for var in selected_columns(df, vars_in):
-                    df[f"log_{var}"] = np.log(pd.to_numeric(df[var], errors="coerce") + 1.0)
-                log_entries.append(f"log_transform on {vars_in}")
+                target_vars = selected_columns(df, vars_in)
+                df, audit = log_transform_columns(df, columns=target_vars, offset=float(op_params.get("offset", 1.0)))
+                log_entries.append(json.dumps(audit, ensure_ascii=False))
             elif op_type == "standardize":
-                for var in selected_columns(df, vars_in):
-                    numeric = pd.to_numeric(df[var], errors="coerce")
-                    std = numeric.std()
-                    if pd.isna(std) or float(std) == 0:
-                        raise ValueError(f"Cannot standardize variable with zero std: {var}")
-                    df[f"{var}_std"] = (numeric - numeric.mean()) / std
-                log_entries.append(f"standardize on {vars_in}")
+                target_vars = selected_columns(df, vars_in)
+                df, audit = standardize_columns(df, columns=target_vars, suffix=op_params.get("suffix", "_std"))
+                log_entries.append(json.dumps(audit, ensure_ascii=False))
             elif op_type == "winsorize":
-                from scipy.stats.mstats import winsorize
-
+                target_vars = selected_columns(df, vars_in)
                 lower = float(op_params.get("lower", 0.01))
                 upper = float(op_params.get("upper", 0.01))
-                limits = op_params.get("limits") or [lower, upper]
-                for var in selected_columns(df, vars_in):
-                    numeric = pd.to_numeric(df[var], errors="coerce")
-                    df[var] = winsorize(numeric, limits=limits)
-                log_entries.append(f"winsorize on {vars_in} with limits={limits}")
+                limits = op_params.get("limits")
+                if isinstance(limits, list) and len(limits) == 2:
+                    lower = float(limits[0])
+                    upper = float(limits[1])
+                df, audit = winsorize_columns(df, columns=target_vars, lower=lower, upper=upper)
+                log_entries.append(json.dumps(audit, ensure_ascii=False))
             elif op_type == "create_dummies":
-                for var in selected_columns(df, vars_in):
-                    dummies = pd.get_dummies(df[var], prefix=var, drop_first=True, dtype=int)
-                    df = pd.concat([df, dummies], axis=1)
-                log_entries.append(f"create_dummies on {vars_in}")
+                target_vars = selected_columns(df, vars_in)
+                df, audit = safe_get_dummies(df, columns=target_vars, drop_first=bool(op_params.get("drop_first", True)))
+                log_entries.append(json.dumps(audit, ensure_ascii=False))
             else:
                 raise ValueError(f"Unsupported preprocess operation: {op_type}")
 
@@ -1188,11 +1193,9 @@ try:
 
     if action == "correlation":
         columns = selected_columns(df, payload.get("variables") or [])
-        numeric_cols = [col for col in columns if pd.api.types.is_numeric_dtype(df[col])]
-        if len(numeric_cols) < 2:
-            raise ValueError("Correlation requires at least two numeric columns")
         corr_method = payload.get("options", {}).get("method", "pearson")
-        corr = df[numeric_cols].corr(method=corr_method)
+        corr, corr_summary = correlation_matrix(df, columns=columns, method=corr_method)
+        numeric_cols = corr_summary["variables"]
         workbook_path = output_path if output_path.endswith(".xlsx") else str(Path(output_path).with_suffix(".xlsx"))
         csv_path = str(Path(workbook_path).with_suffix("")) + ".csv"
         summary_path = str(Path(workbook_path).with_suffix("")) + "_summary.json"
@@ -1216,7 +1219,7 @@ try:
             "columns_after": columns_before,
             "variables": numeric_cols,
         }
-        save_json(summary_path, {"result": result, "method": corr_method})
+        save_json(summary_path, {"result": result, "method": corr_method, "summary": corr_summary})
         emit(result)
         raise SystemExit(0)
 
@@ -1259,39 +1262,46 @@ except Exception as exc:
     emit(result)
 `
 
-    log.info("run data_import", { action: params.action, inputPath, outputPath })
+      log.info("run data_import", { action: params.action, inputPath, outputPath })
 
-    let execution: { code: number | null; stdout: string; stderr: string }
-    try {
-      execution = await runInlinePython({
-        command: PYTHON_CMD,
-        script: pythonScript,
-        cwd: Instance.directory,
-      })
-    } catch (error) {
-      throw new Error(
-        `Failed to launch python command "${PYTHON_CMD}". Set KILLSTATA_PYTHON if needed.\n${error instanceof Error ? error.message : String(error)}`,
-      )
-    }
+      let execution: { code: number | null; stdout: string; stderr: string }
+      try {
+        execution = await runInlinePython({
+          command: pythonCommand,
+          script: pythonScript,
+          cwd: Instance.directory,
+        })
+      } catch (error) {
+        throw new Error(
+          `Failed to launch python command "${pythonCommand}". Run killstata config to set Python if needed.\n${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
 
-    const { code, stdout, stderr } = execution
+      const { code, stdout, stderr } = execution
 
-    if (code !== 0) {
-      log.error("python failed", { code, stderr })
-      throw new Error(`Data import failed (exit code ${code})\n${stderr}\n${stdout}`)
-    }
+      if (code !== 0) {
+        log.error("python failed", { code, stderr })
+        throw new Error(`Data import failed (exit code ${code})\n${stderr}\n${stdout}`)
+      }
 
-    let result: PythonResult
-    try {
-      result = parsePythonResult<PythonResult>(stdout)
-    } catch (error) {
-      throw new Error(`Failed to parse python result: ${error}\nRaw output:\n${stdout}\nStderr:\n${stderr}`)
+      try {
+        result = parsePythonResult<PythonResult>(stdout)
+      } catch (error) {
+        throw new Error(`Failed to parse python result: ${error}\nRaw output:\n${stdout}\nStderr:\n${stderr}`)
+      }
     }
     const effectiveRunId = inferRunId({
       requestedRunId: result.run_id ?? runId,
       stage: sourceStage,
     })
     result.run_id = effectiveRunId
+    if (sourceFingerprint && result.action === "import" && datasetManifest) {
+      upsertDatasetIndexEntry({
+        datasetId: datasetManifest.datasetId,
+        sourcePath: datasetManifest.sourcePath,
+        fingerprint: sourceFingerprint,
+      })
+    }
     const formatIgnoredForStage =
       isStageProducingAction(params.action) && params.format !== undefined && params.format !== "parquet"
         ? `Ignored format=${params.format}. Canonical stage outputs always use parquet.`
@@ -1325,6 +1335,34 @@ except Exception as exc:
       throw new Error(message)
     }
 
+    const qaGate = evaluateQaGate({
+      toolName: "data_import",
+      qaSource: params.action === "qa" ? "qa_report" : "data_import_result",
+      warnings: result.warnings,
+      blockingErrors: result.blocking_errors,
+      input: {
+        action: params.action,
+        inputPath: params.inputPath,
+        datasetId: params.datasetId,
+        stageId: params.stageId,
+      },
+    })
+
+    if (qaGate.reflection) {
+      const reflectionPath = persistToolReflection(qaGate.reflection)
+      await ctx.metadata({
+        metadata: {
+          reflection: {
+            ...qaGate.reflection,
+            reflectionPath: relativeWithinProject(reflectionPath),
+          },
+        },
+      })
+      throw new Error(
+        `Data operation blocked by QA gate: ${qaGate.qaGateReason}\nReflection log: ${relativeWithinProject(reflectionPath)}`,
+      )
+    }
+
     let numericSnapshot: NumericSnapshotDocument | undefined
     if (params.action === "describe" && result.output_path) {
       numericSnapshot = createDescribeNumericSnapshot({
@@ -1349,6 +1387,9 @@ except Exception as exc:
 
     if (datasetManifest) {
       if (params.action === "import" || params.action === "filter" || params.action === "preprocess" || params.action === "rollback") {
+        if (params.action === "import" && reusedImportStage) {
+          // Reused imports keep the existing canonical stage and only refresh the dataset index.
+        } else {
         appendStage(datasetManifest, {
           stageId: result.stage_id ?? stageId ?? "stage_000",
           runId: effectiveRunId,
@@ -1370,9 +1411,11 @@ except Exception as exc:
           metadata: {
             runId: effectiveRunId,
             sourceFormat: datasetManifest.sourceFormat,
+            ...(sourceFingerprint ? { sourceFingerprint: sourceFingerprint.key } : {}),
             ...(formatIgnoredForStage ? { format_note: formatIgnoredForStage } : {}),
           },
         })
+        }
       } else {
         appendArtifact(datasetManifest, {
           artifactId: `${params.action}_${Date.now()}`,
@@ -1464,12 +1507,6 @@ except Exception as exc:
     if (result.log_path) output += `Audit log: ${relativeWithinProject(result.log_path)}\n`
     if (result.numeric_snapshot_path) output += `Numeric snapshot: ${relativeWithinProject(result.numeric_snapshot_path)}\n`
     if (formatIgnoredForStage) output += `Format note: ${formatIgnoredForStage}\n`
-    if (visibleOutputs.length) {
-      output += `\nVisible outputs:\n`
-      for (const item of visibleOutputs) {
-        output += `- ${item.label}: ${item.relativePath}\n`
-      }
-    }
     if (visibleManifestPath) output += `Final outputs manifest: ${relativeWithinProject(visibleManifestPath)}\n`
 
     if (params.action === "import" && result.column_info) {
@@ -1500,6 +1537,10 @@ except Exception as exc:
       if (result.blocking_errors?.length) output += `Blocking errors: ${result.blocking_errors.join(" | ")}\n`
       if (result.suggested_repairs?.length) output += `Suggested repairs: ${result.suggested_repairs.join(" | ")}\n`
     }
+    if (qaGate.qaGateStatus === "warn") {
+      output += `QA gate: warn\n`
+      if (qaGate.qaGateReason) output += `QA gate reason: ${qaGate.qaGateReason}\n`
+    }
 
     if (params.action === "healthcheck") {
       output += `\nEnvironment status: ${result.status ?? "unknown"}\n`
@@ -1518,12 +1559,16 @@ except Exception as exc:
       metadata: {
         action: params.action,
         result,
+        datasetId: result.dataset_id ?? datasetManifest?.datasetId,
+        stageId: result.stage_id ?? params.stageId ?? sourceStage?.stageId,
         runId: effectiveRunId,
         numericSnapshotPath: result.numeric_snapshot_path ? relativeWithinProject(result.numeric_snapshot_path) : undefined,
-        numericSnapshot: numericSnapshot,
-        numericSnapshotPreview: numericSnapshot ? snapshotPreview(numericSnapshot) : undefined,
+        numericSnapshotPreview: numericSnapshotPreview(numericSnapshot),
         groundingScope:
           params.action === "describe" ? "descriptive" : params.action === "correlation" ? "correlation" : undefined,
+        qaGateStatus: qaGate.qaGateStatus,
+        qaGateReason: qaGate.qaGateReason,
+        qaSource: qaGate.qaSource,
         visibleOutputs,
         finalOutputsPath: visibleManifestPath ? relativeWithinProject(visibleManifestPath) : undefined,
       },

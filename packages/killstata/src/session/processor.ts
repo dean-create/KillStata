@@ -27,6 +27,34 @@ export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
   const log = Log.create({ service: "session.processor" })
 
+  async function collectTurnNumericSnapshots(sessionID: string, currentMessageID: string) {
+    const snapshots = []
+    const seenSnapshotPaths = new Set<string>()
+    let withinCurrentTurn = false
+
+    for await (const message of MessageV2.stream(sessionID)) {
+      if (!withinCurrentTurn) {
+        if (message.info.id !== currentMessageID) continue
+        withinCurrentTurn = true
+      }
+
+      if (message.info.role === "user") break
+      if (message.info.role !== "assistant") continue
+
+      for (const part of message.parts) {
+        if (part.type !== "tool" || part.state.status !== "completed") continue
+        for (const snapshot of await collectNumericSnapshotsFromToolMetadata(part.state.metadata)) {
+          const snapshotPath = snapshot.snapshotPath ?? JSON.stringify(snapshot)
+          if (seenSnapshotPaths.has(snapshotPath)) continue
+          seenSnapshotPaths.add(snapshotPath)
+          snapshots.push(snapshot)
+        }
+      }
+    }
+
+    return snapshots
+  }
+
   /**
    * 规范化工具输入，确保返回对象类型
    * 某些模型可能返回 JSON 字符串格式的 input，需要解析为对象
@@ -124,9 +152,22 @@ export namespace SessionProcessor {
           try {
             let currentText: MessageV2.TextPart | undefined
             let reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
+            let firstEventLogged = false
             const stream = await LLM.stream(streamInput)
+            log.info("stream created", {
+              sessionID: input.sessionID,
+              messageID: input.assistantMessage.id,
+            })
 
             for await (const value of stream.fullStream) {
+              if (!firstEventLogged) {
+                firstEventLogged = true
+                log.info("stream first event", {
+                  sessionID: input.sessionID,
+                  messageID: input.assistantMessage.id,
+                  type: value.type,
+                })
+              }
               input.abort.throwIfAborted()
               switch (value.type) {
                 case "start":
@@ -436,11 +477,7 @@ export namespace SessionProcessor {
                       { text: currentText.text },
                     )
                     currentText.text = textOutput.text
-                    const messageParts = await MessageV2.parts(input.assistantMessage.id)
-                    const numericSnapshots = messageParts.flatMap((part) => {
-                      if (part.type !== "tool" || part.state.status !== "completed") return []
-                      return collectNumericSnapshotsFromToolMetadata(part.state.metadata)
-                    })
+                    const numericSnapshots = await collectTurnNumericSnapshots(input.sessionID, input.assistantMessage.id)
                     const grounding = validateNumericGrounding({
                       text: currentText.text,
                       snapshots: numericSnapshots,

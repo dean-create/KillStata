@@ -28,6 +28,8 @@ import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
 import { InitCommand } from "./cli/cmd/init"
 import { SkillsCommand } from "./cli/cmd/skills"
+import { ConfigCommand } from "./cli/cmd/config"
+import { ensureKillstataHomeDirectories } from "./killstata/runtime-config"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -71,6 +73,7 @@ const cli = yargs(hideBin(process.argv))
 
     process.env.AGENT = "1"
     process.env.KILLSTATA = "1"
+    await ensureKillstataHomeDirectories()
 
     Log.Default.info("killstata", {
       version: Installation.VERSION,
@@ -99,6 +102,7 @@ const cli = yargs(hideBin(process.argv))
   .command(GithubCommand)
   .command(PrCommand)
   .command(SessionCommand)
+  .command(ConfigCommand)
   .command(InitCommand)
   .command(SkillsCommand)
   .fail((msg, err) => {

@@ -7,6 +7,7 @@
 - **Typecheck**: `bun run typecheck` (npm run typecheck)
 - **Test**: `bun test` (runs all tests)
 - **Single test**: `bun test test/tool/tool.test.ts` (specific test file)
+- **Testing footprint**: When running acceptance/e2e/manual tests, keep filesystem churn low. Reuse existing state/log directories when possible, do not create many timestamped temp folders by default, and clean temporary test artifacts after verification unless the user explicitly wants them preserved.
 
 ## Code Style
 

@@ -288,6 +288,35 @@ export namespace MCP {
     }
   }
 
+  function appendTail(chunks: string[], chunk: string, limit = 8_000) {
+    chunks.push(chunk)
+    let total = 0
+    for (let i = chunks.length - 1; i >= 0; i--) {
+      total += chunks[i]!.length
+      if (total > limit) {
+        chunks.splice(0, i)
+        break
+      }
+    }
+  }
+
+  function captureLocalMcpStderr(transport: StdioClientTransport) {
+    const chunks: string[] = []
+    transport.stderr?.on("data", (value) => {
+      const text = typeof value === "string" ? value : value?.toString("utf-8")
+      if (!text) return
+      appendTail(chunks, text)
+    })
+    return () => chunks.join("").trim()
+  }
+
+  function formatLocalMcpError(error: unknown, stderrOutput?: string) {
+    const detail = error instanceof Error ? error.message : String(error)
+    const stderr = stderrOutput?.trim()
+    if (!stderr) return detail
+    return `${detail}\n\nstderr:\n${stderr}`
+  }
+
   async function create(key: string, mcp: Config.Mcp) {
     if (mcp.enabled === false) {
       log.info("mcp server disabled", { key })
@@ -300,6 +329,7 @@ export namespace MCP {
     log.info("found", { key, type: mcp.type })
     let mcpClient: MCPClient | undefined
     let status: Status | undefined = undefined
+    let getLocalStderrOutput: (() => string) | undefined
 
     if (mcp.type === "remote") {
       // OAuth is enabled by default for remote servers unless explicitly disabled with oauth: false
@@ -409,7 +439,7 @@ export namespace MCP {
       const [cmd, ...args] = mcp.command
       const cwd = Instance.directory
       const transport = new StdioClientTransport({
-        stderr: "ignore",
+        stderr: "pipe",
         command: cmd,
         args,
         cwd,
@@ -419,6 +449,7 @@ export namespace MCP {
           ...mcp.environment,
         },
       })
+      getLocalStderrOutput = captureLocalMcpStderr(transport)
 
       const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
       try {
@@ -433,15 +464,16 @@ export namespace MCP {
           status: "connected",
         }
       } catch (error) {
+        const detail = formatLocalMcpError(error, getLocalStderrOutput())
         log.error("local mcp startup failed", {
           key,
           command: mcp.command,
           cwd,
-          error: error instanceof Error ? error.message : String(error),
+          error: detail,
         })
         status = {
           status: "failed" as const,
-          error: error instanceof Error ? error.message : String(error),
+          error: detail,
         }
       }
     }
@@ -460,11 +492,18 @@ export namespace MCP {
       }
     }
 
-    const result = await withTimeout(mcpClient.listTools(), mcp.timeout ?? DEFAULT_TIMEOUT).catch((err) => {
-      log.error("failed to get tools from client", { key, error: err })
-      return undefined
-    })
-    if (!result) {
+    const toolsResult = await withTimeout(mcpClient.listTools(), mcp.timeout ?? DEFAULT_TIMEOUT)
+      .then((result) => ({ result }))
+      .catch((error) => {
+        const detail = mcp.type === "local"
+          ? formatLocalMcpError(error, getLocalStderrOutput?.())
+          : error instanceof Error
+            ? error.message
+            : String(error)
+        log.error("failed to get tools from client", { key, error: detail })
+        return { error: detail }
+      })
+    if ("error" in toolsResult) {
       await mcpClient.close().catch((error) => {
         log.error("Failed to close MCP client", {
           error,
@@ -472,18 +511,15 @@ export namespace MCP {
       })
       status = {
         status: "failed",
-        error: "Failed to get tools",
+        error: toolsResult.error,
       }
       return {
         mcpClient: undefined,
-        status: {
-          status: "failed" as const,
-          error: "Failed to get tools",
-        },
+        status,
       }
     }
 
-    log.info("create() successfully created client", { key, toolCount: result.tools.length })
+    log.info("create() successfully created client", { key, toolCount: toolsResult.result.tools.length })
     return {
       mcpClient,
       status,

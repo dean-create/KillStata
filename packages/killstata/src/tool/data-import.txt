@@ -2,6 +2,13 @@ The DataImport tool handles tabular data ingestion, stage-based cleaning, QA, an
 
 Use it to build a reproducible Excel/CSV/Stata preprocessing pipeline before any econometric model.
 
+Execution policy:
+- For non-trivial data cleaning, first state a concise stage plan before calling tools.
+- Prefer the canonical artifact workflow: import -> preprocess/filter -> qa -> describe/correlation when needed.
+- After a failure, repair and rerun only the failed stage. Do not restart the whole workflow unless the source file changed.
+- If a QA gate produces blocking_errors, stop and repair the clean/qa stage before estimation.
+- Warnings may continue, but they must be surfaced in later narrative/reporting.
+
 Internal format policy:
 - Input layer: Excel / CSV / DTA
 - Internal working layer: Parquet + metadata sidecar
@@ -21,6 +28,7 @@ Internal format policy:
 
 3. preprocess
 - Apply explicit cleaning operations such as drop_missing, fill_constant, fill_mean, fill_median, forward_fill, backward_fill, linear_interpolate, group_linear_interpolate, regression_impute, log_transform, standardize, winsorize, and create_dummies
+- These operations are backed by the Python preprocessing library and return audit-ready summaries for each step
 - Save the processed dataset as a new Parquet stage plus audit files and inspection tables
 
 4. filter
@@ -37,8 +45,12 @@ Internal format policy:
 
 7. qa
 - Run a structured data-quality gate
-- Check missingness, duplicate panel keys, and numeric availability
+- Check missingness, duplicate panel keys, numeric availability, outlier flags, and panel-balance signals when panel identifiers are provided
 - Return status, warnings, blocking_errors, and suggested_repairs in JSON
+- QA gate behavior:
+  - blocking_errors -> block downstream estimation
+  - warnings only -> allow continuation with explicit risk disclosure
+  - no warnings/errors -> pass
 
 8. healthcheck
 - Check Python module readiness for the data/econometrics pipeline
@@ -73,7 +85,26 @@ Every action returns a structured artifact trail when applicable:
 - summary JSON path
 - audit log path or workbook path when relevant
 - numeric_snapshot.json for describe/correlation so statistical values can be grounded
+- metadata suitable for grounding:
+  - numericSnapshotPath
+  - numericSnapshotPreview
+  - groundingScope
+  - datasetId / stageId / runId
 - QA warnings and blocking errors when relevant
+- QA gate metadata when relevant:
+  - qaGateStatus
+  - qaGateReason
+  - qaSource
+
+## Planning And Skill Guidance
+
+- Before spreadsheet-heavy or CSV/XLSX-oriented tasks, load the most relevant installed skill when available.
+- Prefer skill aliases rather than hallucinating unavailable names:
+  - Excel/XLSX processing -> `xlsx`
+  - CSV summarization -> `csv-data-summarizer` when installed
+  - Missing-data handling / variable engineering -> use the closest installed skill; otherwise use this tool directly
+- Use explicit column names and explicit operation parameters.
+- Preserve the canonical Parquet stage as the working source of truth after import.
 
 ## Example Usage
 

@@ -14,6 +14,12 @@ import path from "path"
 import { Global } from "../../global"
 import { modify, applyEdits } from "jsonc-parser"
 import { Bus } from "../../bus"
+import {
+  createBuiltInStataMcpConfig,
+  normalizeStataPath,
+  runBundledStataMcpServer,
+  StataEdition,
+} from "../../mcp/stata"
 
 function getAuthStatusIcon(status: MCP.AuthStatus): string {
   switch (status) {
@@ -55,6 +61,7 @@ export const McpCommand = cmd({
   builder: (yargs) =>
     yargs
       .command(McpAddCommand)
+      .command(McpStataServerCommand)
       .command(McpListCommand)
       .command(McpAuthCommand)
       .command(McpLogoutCommand)
@@ -456,15 +463,14 @@ export const McpAddCommand = cmd({
           configPath = scopeResult
         }
 
-        const name = await prompts.text({
-          message: "Enter MCP server name",
-          validate: (x) => (x && x.length > 0 ? undefined : "Required"),
-        })
-        if (prompts.isCancel(name)) throw new UI.CancelledError()
-
         const type = await prompts.select({
-          message: "Select MCP server type",
+          message: "Select MCP server type or preset",
           options: [
+            {
+              label: "Stata (built-in)",
+              value: "stata",
+              hint: "Set a Stata path once and use Stata directly from chat",
+            },
             {
               label: "Local",
               value: "local",
@@ -478,6 +484,46 @@ export const McpAddCommand = cmd({
           ],
         })
         if (prompts.isCancel(type)) throw new UI.CancelledError()
+
+        if (type === "stata") {
+          const stataPath = await prompts.text({
+            message: "Enter Stata installation path or executable path",
+            placeholder: process.platform === "win32" ? "e.g., C:\\Program Files\\Stata18" : undefined,
+            validate: (x) => {
+              if (!x || x.trim().length === 0) return "Required"
+              try {
+                normalizeStataPath(x)
+                return undefined
+              } catch (error) {
+                return error instanceof Error ? error.message : String(error)
+              }
+            },
+          })
+          if (prompts.isCancel(stataPath)) throw new UI.CancelledError()
+
+          const edition = await prompts.select({
+            message: "Select Stata edition",
+            initialValue: "mp",
+            options: [
+              { label: "MP", value: "mp", hint: "Recommended default" },
+              { label: "SE", value: "se", hint: "Standard Edition" },
+              { label: "BE", value: "be", hint: "Basic Edition" },
+            ],
+          })
+          if (prompts.isCancel(edition)) throw new UI.CancelledError()
+
+          const mcpConfig = createBuiltInStataMcpConfig(stataPath, StataEdition.parse(edition))
+          await addMcpToConfig("stata", mcpConfig, configPath)
+          prompts.log.success(`Built-in Stata MCP added to ${configPath}`)
+          prompts.outro("MCP server added successfully")
+          return
+        }
+
+        const name = await prompts.text({
+          message: "Enter MCP server name",
+          validate: (x) => (x && x.length > 0 ? undefined : "Required"),
+        })
+        if (prompts.isCancel(name)) throw new UI.CancelledError()
 
         if (type === "local") {
           const command = await prompts.text({
@@ -577,6 +623,14 @@ export const McpAddCommand = cmd({
         prompts.outro("MCP server added successfully")
       },
     })
+  },
+})
+
+export const McpStataServerCommand = cmd({
+  command: "stata-server",
+  describe: "start the built-in Stata MCP server",
+  async handler() {
+    await runBundledStataMcpServer()
   },
 })
 

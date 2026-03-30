@@ -10,6 +10,7 @@ import { Flag } from "@/flag/flag"
 import { Bus } from "@/bus"
 import { Session } from "@/session"
 import { builtinSkillsRoot, doctorSkillFile, importedSkillsRoot, pathWithin, SkillSource } from "./manage"
+import { legacyUserSkillRoot } from "@/killstata/runtime-config"
 
 export namespace Skill {
   const log = Log.create({ service: "skill" })
@@ -121,7 +122,9 @@ export namespace Skill {
       })
 
       for (const match of matches) {
-        await addSkill(match, pathWithin(importedSkillsRoot(), match) ? "imported" : "user")
+        const imported =
+          pathWithin(importedSkillsRoot(), match) || pathWithin(path.join(legacyUserSkillRoot(), "imported"), match)
+        await addSkill(match, imported ? "imported" : "user")
       }
     }
 

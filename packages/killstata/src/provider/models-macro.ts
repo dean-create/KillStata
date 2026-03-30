@@ -44,9 +44,9 @@ export async function data() {
       google: {
         id: "google",
         name: "Google AI Studio",
-        api: "https://generativelanguage.googleapis.com/v1beta/openai/",
+        api: "https://generativelanguage.googleapis.com/v1beta/openai",
         env: ["GOOGLE_GENERATIVE_AI_API_KEY"],
-        npm: "@ai-sdk/google",
+        npm: "@ai-sdk/openai-compatible",
         models: {
           "gemini-2.5-flash": {
             id: "gemini-2.5-flash",

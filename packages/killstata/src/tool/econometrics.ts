@@ -4,7 +4,6 @@ import * as path from "path"
 import { spawn, exec } from "child_process"
 import DESCRIPTION from "./econometrics.txt"
 import { Instance } from "../project/instance"
-import * as os from "os"
 import { Log } from "../util/log"
 import { Tool } from "./tool"
 import { Question } from "../question"
@@ -19,30 +18,20 @@ import {
   reportOutputPath,
   resolveArtifactInput,
 } from "./analysis-state"
-import { classifyToolFailure, persistToolReflection } from "./analysis-reflection"
+import { classifyToolFailure, evaluateQaGate, persistToolReflection } from "./analysis-reflection"
 import { AnalysisIntent } from "./analysis-intent"
 import {
   createEconometricsNumericSnapshot,
   type NumericSnapshotDocument,
-  snapshotPreview,
 } from "./analysis-grounding"
 import { generateRegressionTable } from "./regression-table"
+import { relativeWithinProject, resolveToolPath } from "./analysis-path"
+import { numericSnapshotPreview } from "./analysis-tool-metadata"
+import { pythonInstallCommand, resolveRuntimePythonCommand } from "@/killstata/runtime-config"
 
 const log = Log.create({ service: "econometrics-tool" })
 
 // Python环境路径配置
-let PYTHON_CMD = process.env.KILLSTATA_PYTHON
-if (!PYTHON_CMD) {
-  const configFile = path.join(os.homedir(), ".killstata", "config.json")
-  if (fs.existsSync(configFile)) {
-    try {
-      const config = JSON.parse(fs.readFileSync(configFile, "utf-8"))
-      if (config.python_executable) PYTHON_CMD = config.python_executable
-    } catch (e) {}
-  }
-}
-PYTHON_CMD = PYTHON_CMD ?? (process.platform === "win32" ? "python" : "python3")
-
 const ECONOMETRICS_DIR = path.join(__dirname, "../../python/econometrics")
 const PYTHON_RESULT_PREFIX = "__KILLSTATA_JSON__"
 
@@ -133,12 +122,35 @@ const METHOD_REQUIRED_OPTIONS: Partial<Record<MethodName, string[]>> = {
   iv_test: ["iv_variable"],
   did_static: ["treatment_entity_dummy", "treatment_finished_dummy"],
   did_staggered: ["treatment_entity_dummy", "treatment_finished_dummy"],
-  did_event_study: ["treatment_entity_dummy", "treatment_finished_dummy", "relative_time_variable"],
-  did_event_study_viz: ["treatment_entity_dummy", "treatment_finished_dummy", "relative_time_variable"],
+  did_event_study: ["treatment_entity_dummy", "treatment_finished_dummy"],
+  did_event_study_viz: ["treatment_entity_dummy", "treatment_finished_dummy"],
   rdd_sharp: ["running_variable"],
   rdd_fuzzy: ["running_variable"],
   rdd_fuzzy_global: ["running_variable"],
 }
+
+const METHOD_NEEDS_PANEL_KEYS = new Set<MethodName>([
+  "panel_fe_regression",
+  "baseline_regression",
+  "did_static",
+  "did_staggered",
+  "did_event_study",
+  "did_event_study_viz",
+])
+
+const REGRESSION_TABLE_METHODS = new Set<MethodName>([
+  "ols_regression",
+  "panel_fe_regression",
+  "baseline_regression",
+  "iv_2sls",
+  "psm_regression",
+  "psm_dr_ipw_ra",
+  "did_static",
+  "did_staggered",
+  "did_event_study",
+  "rdd_sharp",
+  "rdd_fuzzy_global",
+])
 
 const METHOD_NEEDS_TREATMENT = new Set<MethodName>([
   "ols_regression",
@@ -178,6 +190,7 @@ type PythonResult = {
   diagnostics_path?: string
   metadata_path?: string
   narrative_path?: string
+  summary_path?: string
   numeric_snapshot_path?: string
   qa_status?: string
   warnings?: string[]
@@ -191,18 +204,10 @@ type PythonResult = {
   stage_id?: string
   run_id?: string
   branch?: string
+  table_variables?: string[]
   academic_table_markdown_path?: string
   academic_table_latex_path?: string
   academic_table_workbook_path?: string
-}
-
-function resolveWithinProject(filePath: string) {
-  if (path.isAbsolute(filePath)) return filePath
-  return path.join(Instance.directory, filePath)
-}
-
-function relativeWithinProject(filePath: string) {
-  return path.relative(Instance.directory, filePath)
 }
 
 function validateMethodOptions(params: {
@@ -216,7 +221,7 @@ function validateMethodOptions(params: {
     throw new Error(`Method ${params.methodName} requires treatmentVar`)
   }
 
-  if ((params.methodName === "panel_fe_regression" || params.methodName === "baseline_regression") && (!params.entityVar || !params.timeVar)) {
+  if (METHOD_NEEDS_PANEL_KEYS.has(params.methodName) && (!params.entityVar || !params.timeVar)) {
     throw new Error(`Method ${params.methodName} requires entityVar and timeVar`)
   }
 
@@ -235,20 +240,91 @@ function significanceStars(pValue: number | undefined) {
   return ""
 }
 
+function hasNonEmptyCoefficientTable(filePath?: string) {
+  if (!filePath || !fs.existsSync(filePath)) return false
+  const lines = fs.readFileSync(filePath, "utf-8").split(/\r?\n/).filter((line) => line.trim().length > 0)
+  return lines.length > 1
+}
+
+function regressionTableTitle(methodName: MethodName) {
+  switch (methodName) {
+    case "panel_fe_regression":
+      return "固定效应回归结果表"
+    case "baseline_regression":
+      return "回归结果表"
+    case "ols_regression":
+      return "OLS回归结果表"
+    case "iv_2sls":
+      return "工具变量回归结果表"
+    case "psm_regression":
+      return "倾向得分回归结果表"
+    case "psm_dr_ipw_ra":
+      return "双重稳健回归结果表"
+    case "did_static":
+      return "静态DID结果表"
+    case "did_staggered":
+      return "渐进DID结果表"
+    case "did_event_study":
+      return "事件研究结果表"
+    case "rdd_sharp":
+      return "Sharp RDD结果表"
+    case "rdd_fuzzy_global":
+      return "全局多项式RDD结果表"
+    default:
+      return "回归结果表"
+  }
+}
+
+function regressionTableSubtitle(methodName: MethodName) {
+  switch (methodName) {
+    case "panel_fe_regression":
+      return "固定效应回归"
+    case "baseline_regression":
+      return "基准回归"
+    case "ols_regression":
+      return "OLS"
+    case "iv_2sls":
+      return "IV-2SLS"
+    case "psm_regression":
+      return "PSM回归调整"
+    case "psm_dr_ipw_ra":
+      return "双重稳健IPW-RA"
+    case "did_static":
+      return "静态DID"
+    case "did_staggered":
+      return "渐进DID"
+    case "did_event_study":
+      return "事件研究"
+    case "rdd_sharp":
+      return "Sharp RDD"
+    case "rdd_fuzzy_global":
+      return "全局多项式RDD"
+    default:
+      return "回归"
+  }
+}
+
 function buildPanelFePythonScript(payloadB64: string) {
   return `
 import base64
 import json
+import sys
 import traceback
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 from scipy import stats
 
 RESULT_PREFIX = "${PYTHON_RESULT_PREFIX}"
 PROJECT_DIR = r"${Instance.directory.replace(/\\/g, "\\\\")}"
+ECONOMETRICS_DIR = r"${ECONOMETRICS_DIR.replace(/\\/g, "\\\\")}"
 ERRORS_DIR = r"${projectErrorsRoot().replace(/\\/g, "\\\\")}"
+
+sys.path.insert(0, ECONOMETRICS_DIR)
+
+from econometric_algorithm import run_core_diagnostics, run_robustness_checks
 
 def emit(result):
     print(f"{RESULT_PREFIX}{json.dumps(result, ensure_ascii=False)}")
@@ -272,7 +348,21 @@ def read_table(file_path):
     if suffix in [".xlsx", ".xls"]:
         return pd.read_excel(file_path)
     if suffix == ".dta":
-        return pd.read_stata(file_path, preserve_dtypes=False)
+        read_error = None
+        for encoding in [None, "gbk", "latin1"]:
+            try:
+                kwargs = {"preserve_dtypes": False}
+                if encoding is not None:
+                    kwargs["encoding"] = encoding
+                df = pd.read_stata(file_path, **kwargs)
+                df.attrs["_source_encoding"] = encoding or "default"
+                return df
+            except Exception as exc:
+                read_error = exc
+                message = str(exc).lower()
+                if encoding is None and not isinstance(exc, UnicodeDecodeError) and "unicode" not in message and "codec" not in message:
+                    raise
+        raise read_error
     if suffix == ".parquet":
         return pd.read_parquet(file_path)
     raise ValueError(f"Unsupported econometrics input format: {suffix}")
@@ -379,6 +469,134 @@ def adjusted_r_squared(outcome, residuals, n, k):
         return 0.0
     return float(1 - (rss / (n - k)) / (tss / (n - 1)))
 
+def empty_coefficient_table():
+    return pd.DataFrame(columns=["term", "coefficient", "std_error", "t_stat", "p_value", "ci_lower", "ci_upper"])
+
+def scalar_coefficient_table(term, coefficient=None, std_error=None, p_value=None, ci_lower=None, ci_upper=None):
+    t_stat = None
+    if coefficient is not None and std_error not in [None, 0]:
+        t_stat = float(coefficient / std_error)
+    return pd.DataFrame([{
+        "term": term,
+        "coefficient": None if coefficient is None else float(coefficient),
+        "std_error": None if std_error is None else float(std_error),
+        "t_stat": t_stat,
+        "p_value": None if p_value is None else float(p_value),
+        "ci_lower": None if ci_lower is None else float(ci_lower),
+        "ci_upper": None if ci_upper is None else float(ci_upper),
+    }])
+
+def model_coefficient_table(model):
+    if model is None or not hasattr(model, "params"):
+        return empty_coefficient_table()
+    params = model.params
+    std_errors = getattr(model, "std_errors", getattr(model, "bse", None))
+    p_values = getattr(model, "pvalues", None)
+    conf_int = model.conf_int() if hasattr(model, "conf_int") else None
+    rows = []
+    for term, coefficient in params.items():
+        std_error = None if std_errors is None else std_errors.get(term)
+        p_value = None if p_values is None else p_values.get(term)
+        ci_lower = None
+        ci_upper = None
+        if conf_int is not None and term in conf_int.index:
+            if "lower" in conf_int.columns and "upper" in conf_int.columns:
+                ci_lower = conf_int.loc[term, "lower"]
+                ci_upper = conf_int.loc[term, "upper"]
+            else:
+                ci_lower = conf_int.loc[term].iloc[0]
+                ci_upper = conf_int.loc[term].iloc[-1]
+        t_stat = None
+        if std_error not in [None, 0]:
+            t_stat = float(coefficient / std_error)
+        rows.append({
+            "term": str(term),
+            "coefficient": float(coefficient),
+            "std_error": None if std_error is None else float(std_error),
+            "t_stat": t_stat,
+            "p_value": None if p_value is None else float(p_value),
+            "ci_lower": None if ci_lower is None else float(ci_lower),
+            "ci_upper": None if ci_upper is None else float(ci_upper),
+        })
+    return pd.DataFrame(rows, columns=["term", "coefficient", "std_error", "t_stat", "p_value", "ci_lower", "ci_upper"])
+
+def first_non_const_term(coefficients):
+    if coefficients.empty:
+        return None
+    for term in coefficients["term"].tolist():
+        if term != "const":
+            return term
+    return coefficients.iloc[0]["term"]
+
+def build_table_variables(method, treatment_name, covariate_names, coefficients, explicit_primary_term=None):
+    if method == "did_static":
+        return ["treatment_group_treated", *covariate_names]
+    if method == "did_staggered":
+        return [explicit_primary_term or "treatment_entity_treated", *covariate_names]
+    if method == "did_event_study":
+        terms = [term for term in coefficients["term"].tolist() if term != "const"]
+        return terms
+    if method in ["ols_regression", "iv_2sls", "psm_regression", "psm_dr_ipw_ra", "rdd_sharp", "rdd_fuzzy_global"]:
+        primary_term = explicit_primary_term or treatment_name or first_non_const_term(coefficients)
+        return [item for item in [primary_term, *covariate_names] if item]
+    return []
+
+def prepare_panel_inputs(df, payload, covariate_names):
+    entity_var = payload.get("entity_var")
+    time_var = payload.get("time_var")
+    if not entity_var or not time_var:
+        raise ValueError(f"Method {method} requires entity_var and time_var")
+    required = [entity_var, time_var, payload["dependent_var"], *covariate_names]
+    treatment_name = payload.get("treatment_var")
+    if treatment_name:
+        required.append(treatment_name)
+    missing = sorted(set([col for col in required if col not in df.columns]))
+    if missing:
+        raise ValueError(f"Missing panel columns in dataset: {missing}")
+    panel_df = df.set_index([entity_var, time_var]).sort_index()
+    dependent_var = panel_df[payload["dependent_var"]]
+    treatment_var = panel_df[treatment_name] if treatment_name else None
+    covariates = panel_df[covariate_names] if covariate_names else None
+    return panel_df, dependent_var, treatment_var, covariates
+
+def persist_common_outputs(payload, result, qa, diagnostics, metadata, coefficients, summary_text, narrative_text):
+    output_dir = Path(payload["output_dir"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    coefficients_path = output_dir / "coefficient_table.csv"
+    workbook_path = output_dir / "coefficient_table.xlsx"
+    diagnostics_path = output_dir / "diagnostics.json"
+    metadata_path = output_dir / "model_metadata.json"
+    narrative_path = output_dir / "narrative.md"
+    output_path = output_dir / "results.json"
+    summary_path = output_dir / "model_summary.txt"
+
+    coefficients = coefficients if coefficients is not None else empty_coefficient_table()
+    coefficients.to_csv(coefficients_path, index=False, encoding="utf-8-sig")
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        coefficients.to_excel(writer, sheet_name="coefficients", index=False)
+
+    result["output_path"] = str(output_path)
+    result["coefficients_path"] = str(coefficients_path)
+    result["workbook_path"] = str(workbook_path)
+    result["diagnostics_path"] = str(diagnostics_path)
+    result["metadata_path"] = str(metadata_path)
+    result["narrative_path"] = str(narrative_path)
+    result["summary_path"] = str(summary_path)
+    result["qa_status"] = "fail" if qa["blocking_errors"] else "warn" if qa["warnings"] else "pass"
+    result["warnings"] = qa["warnings"]
+    result["blocking_errors"] = qa["blocking_errors"]
+    result["suggested_repairs"] = qa["suggested_repairs"]
+
+    save_json(diagnostics_path, diagnostics)
+    save_json(metadata_path, metadata)
+    save_json(output_path, result)
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write(summary_text)
+    with open(narrative_path, "w", encoding="utf-8") as f:
+        f.write(narrative_text)
+
+    return result
+
 payload = json.loads(base64.b64decode("${payloadB64}").decode("utf-8"))
 method = payload["method"]
 
@@ -459,29 +677,40 @@ try:
     with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
         coefficients.to_excel(writer, sheet_name="coefficients", index=False)
 
+    diagnostic_model = sm.OLS(outcome, design_matrix).fit()
+    panel_info = {
+        "entity_var": entity_var,
+        "time_var": time_var,
+        "cluster_var": cluster_var,
+        "entity_count": int(model_df[entity_var].nunique(dropna=True)),
+        "time_count": int(model_df[time_var].nunique(dropna=True)),
+        "cluster_count": qa["cluster_count"],
+        "duplicate_entity_time_rows": qa["duplicate_entity_time_rows"],
+        "dropped_rows": dropped_rows,
+    }
     diagnostics = {
-        "panel": {
-            "entity_var": entity_var,
-            "time_var": time_var,
-            "cluster_var": cluster_var,
-            "entity_count": int(model_df[entity_var].nunique(dropna=True)),
-            "time_count": int(model_df[time_var].nunique(dropna=True)),
-            "cluster_count": qa["cluster_count"],
-            "duplicate_entity_time_rows": qa["duplicate_entity_time_rows"],
-            "dropped_rows": dropped_rows,
-        },
-        "heteroskedasticity": breusch_pagan(residuals, design_matrix),
-        "multicollinearity": vif_report(model_df[[treatment_var, *covariates]]),
-        "residuals": {
-            "mean": float(residuals.mean()),
-            "std": float(residuals.std()),
-            "min": float(residuals.min()),
-            "max": float(residuals.max()),
-        },
+        "core": run_core_diagnostics(
+            diagnostic_model,
+            regressors=model_df[[treatment_var, *covariates]],
+            treatment_variable=model_df[treatment_var],
+            panel_info=panel_info,
+        ),
+        "robustness": run_robustness_checks(
+            diagnostic_model,
+            frame=model_df,
+            outcome_var=dependent_var,
+            treatment_var=treatment_var,
+            covariates=covariates,
+            cluster_var=cluster_var,
+            placebo_var=payload.get("options", {}).get("placebo_var"),
+            alternative_sets=payload.get("options", {}).get("alternative_specifications"),
+            groups=model_df[cluster_var],
+        ),
         "qa": {
             "warnings": qa["warnings"],
             "blocking_errors": qa["blocking_errors"],
             "suggested_repairs": qa["suggested_repairs"],
+            **panel_info,
         },
     }
     metadata = {
@@ -497,6 +726,8 @@ try:
         "rows_used": int(len(model_df)),
         "rows_dropped": dropped_rows,
         "term_names": term_names,
+        "input_encoding": df.attrs.get("_source_encoding", "default"),
+        "output_kind": "regression",
     }
     treatment_idx = term_names.index(treatment_var)
     result = {
@@ -515,7 +746,7 @@ try:
         "diagnostics_path": str(diagnostics_path),
         "metadata_path": str(metadata_path),
         "narrative_path": str(narrative_path),
-        "qa_status": "warn" if qa["warnings"] else "pass",
+        "qa_status": "fail" if qa["blocking_errors"] else "warn" if qa["warnings"] else "pass",
         "warnings": qa["warnings"],
         "blocking_errors": qa["blocking_errors"],
         "suggested_repairs": qa["suggested_repairs"],
@@ -574,6 +805,8 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
     outputDir: z.string().optional(),
   }),
   async execute(params, ctx) {
+    const pythonCommand = await resolveRuntimePythonCommand()
+    const installCommand = pythonInstallCommand(pythonCommand)
     if (ctx.agent === "analyst") {
       const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
       if (!analystState.asked) {
@@ -622,7 +855,16 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
     const artifactInput = resolveArtifactInput({
       datasetId: params.datasetId,
       stageId: params.stageId,
-      inputPath: params.dataPath ? resolveWithinProject(params.dataPath) : undefined,
+      inputPath: params.dataPath
+        ? await resolveToolPath({
+            filePath: params.dataPath,
+            mode: "read",
+            toolName: "econometrics",
+            sessionID: ctx.sessionID,
+            messageID: ctx.messageID,
+            callID: ctx.callID,
+          })
+        : undefined,
     })
     const dataPath = artifactInput.resolvedInputPath
     if (!dataPath) {
@@ -641,7 +883,14 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
     })
     const outputStamp = buildFileStamp()
     const outputDir = params.outputDir
-      ? resolveWithinProject(params.outputDir)
+      ? await resolveToolPath({
+          filePath: params.outputDir,
+          mode: "write",
+          toolName: "econometrics",
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+          callID: ctx.callID,
+        })
       : datasetManifest
         ? reportOutputPath({
           datasetId: datasetManifest.datasetId,
@@ -656,8 +905,8 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
 
     await ctx.ask({
       permission: "bash",
-      patterns: [`${PYTHON_CMD} *econometrics*`],
-      always: [`${PYTHON_CMD}*`],
+      patterns: [`${pythonCommand} *econometrics*`],
+      always: [`${pythonCommand}*`],
       metadata: {
         description: `Run econometric method: ${params.methodName}`,
       },
@@ -678,7 +927,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
       branch,
       options: params.options ?? {},
       output_dir: outputDir,
-      install_command: `${PYTHON_CMD} -m pip install pandas statsmodels linearmodels openpyxl scipy matplotlib pyarrow`,
+      install_command: installCommand,
     }
 
     const payloadB64 = encodePythonPayload(payload)
@@ -719,8 +968,8 @@ required_option_columns = {
     "iv_test": ["iv_variable"],
     "did_static": ["treatment_entity_dummy", "treatment_finished_dummy"],
     "did_staggered": ["treatment_entity_dummy", "treatment_finished_dummy"],
-    "did_event_study": ["treatment_entity_dummy", "treatment_finished_dummy", "relative_time_variable"],
-    "did_event_study_viz": ["treatment_entity_dummy", "treatment_finished_dummy", "relative_time_variable"],
+    "did_event_study": ["treatment_entity_dummy", "treatment_finished_dummy"],
+    "did_event_study_viz": ["treatment_entity_dummy", "treatment_finished_dummy"],
     "rdd_sharp": ["running_variable"],
     "rdd_fuzzy": ["running_variable"],
     "rdd_fuzzy_global": ["running_variable"],
@@ -979,6 +1228,7 @@ def run_panel_fe(df, payload):
         "diagnostics_path": str(diagnostics_path),
         "metadata_path": str(metadata_path),
         "narrative_path": str(narrative_path),
+        "summary_path": str(summary_path),
         "qa_status": "warn" if qa["warnings"] else "pass",
         "warnings": qa["warnings"],
         "blocking_errors": qa["blocking_errors"],
@@ -986,6 +1236,7 @@ def run_panel_fe(df, payload):
         "backend": "numpy_fe_cluster",
         "dropped_rows": dropped_rows,
         "cluster_var": cluster_var,
+        "table_variables": [treatment_var, *covariates],
     }
 
     save_json(output_path, result)
@@ -1035,11 +1286,15 @@ try:
     if payload.get("treatment_var"):
         required_columns.append(payload["treatment_var"])
     required_columns.extend(payload.get("covariates", []))
+    if method in ["did_static", "did_staggered", "did_event_study", "did_event_study_viz"]:
+        required_columns.extend([payload.get("entity_var"), payload.get("time_var")])
 
     for opt_key in required_option_columns.get(method, []):
         col = options.get(opt_key)
         if isinstance(col, str):
             required_columns.append(col)
+    if isinstance(options.get("relative_time_variable"), str):
+        required_columns.append(options["relative_time_variable"])
 
     missing_columns = sorted(set([c for c in required_columns if c not in df.columns]))
     if missing_columns:
@@ -1059,8 +1314,17 @@ try:
 
     covariate_names = payload.get("covariates", [])
     covariates = df[covariate_names] if covariate_names else None
+    panel_df = None
+    if method in ["did_static", "did_staggered", "did_event_study", "did_event_study_viz"]:
+        panel_df, dependent_var, treatment_var, covariates = prepare_panel_inputs(df, payload, covariate_names)
 
     result = {}
+    model = None
+    coefficients = None
+    propensity_score_series = None
+    output_kind = "analysis"
+    primary_term = treatment_name
+    qa = build_model_qa(df, payload.get("entity_var"), payload.get("time_var"), payload.get("cluster_var"))
 
     if method == "ols_regression":
         model = ordinary_least_square_regression(
@@ -1079,12 +1343,14 @@ try:
             "r_squared": float(model.rsquared_adj),
             "method": "OLS",
         }
+        coefficients = model_coefficient_table(model)
+        output_kind = "regression"
 
     elif method == "did_static":
         model = Static_Diff_in_Diff_regression(
             dependent_var,
-            df[options["treatment_entity_dummy"]],
-            df[options["treatment_finished_dummy"]],
+            panel_df[options["treatment_entity_dummy"]],
+            panel_df[options["treatment_finished_dummy"]],
             covariates,
             entity_effect=options.get("entity_effect", False),
             time_effect=options.get("time_effect", False),
@@ -1099,25 +1365,36 @@ try:
             "p_value": float(model.pvalues["treatment_group_treated"]),
             "method": "Static DID",
         }
+        coefficients = model_coefficient_table(model)
+        output_kind = "regression"
+        primary_term = "treatment_group_treated"
 
     elif method == "psm_matching":
         ps = propensity_score_construction(treatment_var, covariates)
-        ate, att = propensity_score_matching(
+        propensity_score_series = ps
+        target_type = options.get("target_type", "ATE")
+        value = propensity_score_matching(
             dependent_var,
             treatment_var,
             ps,
             matched_num=options.get("matched_num", 1),
-            target_type=options.get("target_type", "ATE"),
+            target_type=target_type,
         )
+        metric_term = "ATE" if target_type == "ATE" else "ATT"
         result = {
             "success": True,
-            "ate": float(ate) if ate is not None else None,
-            "att": float(att) if att is not None else None,
+            "ate": float(value) if target_type == "ATE" else None,
+            "att": float(value) if target_type == "ATT" else None,
             "method": "PSM",
         }
+        coefficients = scalar_coefficient_table(metric_term, coefficient=value)
+        result["table_variables"] = [metric_term]
+        output_kind = "estimator"
+        primary_term = metric_term
 
     elif method == "psm_ipw":
         ps = propensity_score_construction(treatment_var, covariates)
+        propensity_score_series = ps
         ate = propensity_score_inverse_probability_weighting(
             dependent_var,
             treatment_var,
@@ -1129,9 +1406,14 @@ try:
             "ate": float(ate),
             "method": "IPW",
         }
+        coefficients = scalar_coefficient_table("ATE", coefficient=ate)
+        result["table_variables"] = ["ATE"]
+        output_kind = "estimator"
+        primary_term = "ATE"
 
     elif method == "psm_double_robust":
         ps = propensity_score_construction(treatment_var, covariates)
+        propensity_score_series = ps
         ate = propensity_score_double_robust_estimator_augmented_IPW(
             dependent_var,
             treatment_var,
@@ -1144,6 +1426,10 @@ try:
             "ate": float(ate),
             "method": "Double Robust AIPW",
         }
+        coefficients = scalar_coefficient_table("ATE", coefficient=ate)
+        result["table_variables"] = ["ATE"]
+        output_kind = "estimator"
+        primary_term = "ATE"
 
     elif method == "iv_2sls":
         iv_var = df[options["iv_variable"]]
@@ -1163,6 +1449,8 @@ try:
             "p_value": float(model.pvalues[treatment_var.name]),
             "method": "IV-2SLS",
         }
+        coefficients = model_coefficient_table(model)
+        output_kind = "regression"
 
     elif method == "iv_test":
         iv_var = df[options["iv_variable"]]
@@ -1178,13 +1466,15 @@ try:
             "test_results": test_result,
             "method": "IV validity test",
         }
+        coefficients = empty_coefficient_table()
+        output_kind = "test"
 
     elif method == "did_staggered":
         model = Staggered_Diff_in_Diff_regression(
             dependent_var,
-            df[options["treatment_entity_dummy"]],
-            df[options["treatment_finished_dummy"]],
-            covariates,
+            covariate_variables=covariates,
+            treatment_entity_dummy=panel_df[options["treatment_entity_dummy"]],
+            treatment_finished_dummy=panel_df[options["treatment_finished_dummy"]],
             entity_effect=options.get("entity_effect", None),
             time_effect=options.get("time_effect", None),
             cov_type=options.get("cov_type", "unadjusted"),
@@ -1193,19 +1483,22 @@ try:
         )
         result = {
             "success": True,
-            "ate": float(model.params["treatment_group_treated"]),
-            "std_error": float(model.std_errors["treatment_group_treated"]),
-            "p_value": float(model.pvalues["treatment_group_treated"]),
+            "ate": float(model.params["treatment_entity_treated"]),
+            "std_error": float(model.std_errors["treatment_entity_treated"]),
+            "p_value": float(model.pvalues["treatment_entity_treated"]),
             "method": "Staggered DID",
         }
+        coefficients = model_coefficient_table(model)
+        output_kind = "regression"
+        primary_term = "treatment_entity_treated"
 
     elif method == "did_event_study":
         model = Staggered_Diff_in_Diff_Event_Study_regression(
             dependent_var,
-            df[options["treatment_entity_dummy"]],
-            df[options["treatment_finished_dummy"]],
-            df[options["relative_time_variable"]],
-            covariates,
+            covariate_variables=covariates,
+            relative_time_variable=panel_df[options["relative_time_variable"]] if options.get("relative_time_variable") else None,
+            treatment_entity_dummy=panel_df[options["treatment_entity_dummy"]],
+            treatment_finished_dummy=panel_df[options["treatment_finished_dummy"]],
             entity_effect=options.get("entity_effect", None),
             time_effect=options.get("time_effect", None),
             cov_type=options.get("cov_type", "unadjusted"),
@@ -1214,31 +1507,42 @@ try:
         )
         result = {
             "success": True,
+            "coefficient": float(model.params["D0"]) if "D0" in model.params else None,
+            "std_error": float(model.std_errors["D0"]) if "D0" in model.std_errors else None,
+            "p_value": float(model.pvalues["D0"]) if "D0" in model.pvalues else None,
             "coefficients": {k: float(v) for k, v in model.params.items()},
             "std_errors": {k: float(v) for k, v in model.std_errors.items()},
             "p_values": {k: float(v) for k, v in model.pvalues.items()},
             "method": "Event-study DID",
         }
+        coefficients = model_coefficient_table(model)
+        output_kind = "regression"
+        primary_term = "D0"
 
     elif method == "rdd_sharp":
         running_var = df[options["running_variable"]]
         cutoff = options.get("cutoff", 0)
-        late = Sharp_Regression_Discontinuity_Design_regression(
+        model = Sharp_Regression_Discontinuity_Design_regression(
             dependent_var,
             treatment_var,
             running_var,
             covariates,
-            cutoff=cutoff,
-            bandwidth=options.get("bandwidth", None),
+            running_variable_cutoff=cutoff,
+            running_variable_bandwidth=options.get("bandwidth", None),
             cov_info=options.get("cov_type", "nonrobust"),
             target_type="final_model",
             output_tables=True,
         )
+        coefficients = model_coefficient_table(model)
+        primary_term = treatment_name if treatment_name in coefficients["term"].tolist() else first_non_const_term(coefficients)
         result = {
             "success": True,
-            "late": float(late),
+            "late": float(model.params[primary_term]),
+            "std_error": float(model.bse[primary_term]),
+            "p_value": float(model.pvalues[primary_term]),
             "method": "Sharp RDD",
         }
+        output_kind = "regression"
 
     elif method == "rdd_fuzzy":
         running_var = df[options["running_variable"]]
@@ -1248,8 +1552,8 @@ try:
             treatment_var,
             running_var,
             covariates,
-            cutoff=cutoff,
-            bandwidth=options.get("bandwidth", None),
+            running_variable_cutoff=cutoff,
+            running_variable_bandwidth=options.get("bandwidth", None),
             cov_info=options.get("cov_type", "nonrobust"),
             target_type="estimator",
             output_tables=True,
@@ -1259,9 +1563,14 @@ try:
             "late": float(late),
             "method": "Fuzzy RDD",
         }
+        coefficients = scalar_coefficient_table("LATE", coefficient=late)
+        result["table_variables"] = ["LATE"]
+        output_kind = "estimator"
+        primary_term = "LATE"
 
     elif method == "psm_construction":
         ps = propensity_score_construction(treatment_var, covariates)
+        propensity_score_series = ps
         result = {
             "success": True,
             "propensity_scores": ps.to_dict(),
@@ -1269,9 +1578,12 @@ try:
             "mean_control": float(ps[treatment_var == 0].mean()),
             "method": "Propensity score construction",
         }
+        coefficients = empty_coefficient_table()
+        output_kind = "analysis"
 
     elif method == "psm_regression":
         ps = propensity_score_construction(treatment_var, covariates)
+        propensity_score_series = ps
         model = propensity_score_regression(
             dependent_var,
             treatment_var,
@@ -1287,9 +1599,12 @@ try:
             "p_value": float(model.pvalues[treatment_var.name]),
             "method": "PS regression adjustment",
         }
+        coefficients = model_coefficient_table(model)
+        output_kind = "regression"
 
     elif method == "psm_dr_ipw_ra":
         ps = propensity_score_construction(treatment_var, covariates)
+        propensity_score_series = ps
         model = propensity_score_double_robust_estimator_IPW_regression_adjustment(
             dependent_var,
             treatment_var,
@@ -1306,9 +1621,13 @@ try:
             "p_value": float(model.pvalues[treatment_var.name]),
             "method": "Double robust IPW-RA",
         }
+        coefficients = model_coefficient_table(model)
+        output_kind = "regression"
 
     elif method == "psm_visualize":
+        from matplotlib import pyplot as plt
         ps = propensity_score_construction(treatment_var, covariates)
+        propensity_score_series = ps
         output_path = Path(payload["output_dir"]) / "ps_distribution.png"
         propensity_score_visualize_propensity_score_distribution(treatment_var, ps)
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -1318,20 +1637,23 @@ try:
             "plot_path": str(output_path),
             "method": "PS distribution",
         }
+        coefficients = empty_coefficient_table()
+        output_kind = "visualization"
 
     elif method == "did_event_study_viz":
         model = Staggered_Diff_in_Diff_Event_Study_regression(
             dependent_var,
-            df[options["treatment_entity_dummy"]],
-            df[options["treatment_finished_dummy"]],
-            df[options["relative_time_variable"]],
-            covariates,
+            covariate_variables=covariates,
+            relative_time_variable=panel_df[options["relative_time_variable"]] if options.get("relative_time_variable") else None,
+            treatment_entity_dummy=panel_df[options["treatment_entity_dummy"]],
+            treatment_finished_dummy=panel_df[options["treatment_finished_dummy"]],
             entity_effect=options.get("entity_effect", None),
             time_effect=options.get("time_effect", None),
             cov_type=options.get("cov_type", "unadjusted"),
             target_type="final_model",
             output_tables=True,
         )
+        from matplotlib import pyplot as plt
         output_path = Path(payload["output_dir"]) / "event_study.png"
         Staggered_Diff_in_Diff_Event_Study_visualization(
             model,
@@ -1345,6 +1667,8 @@ try:
             "plot_path": str(output_path),
             "method": "Event-study visualization",
         }
+        coefficients = empty_coefficient_table()
+        output_kind = "visualization"
 
     elif method == "rdd_fuzzy_global":
         running_var = df[options["running_variable"]]
@@ -1355,19 +1679,22 @@ try:
             treatment_var,
             running_var,
             covariates,
-            cutoff=cutoff,
-            polynomial_degree=polynomial_degree,
+            running_variable_cutoff=cutoff,
+            max_order=polynomial_degree,
             cov_info=options.get("cov_type", "nonrobust"),
             target_type="final_model",
             output_tables=True,
         )
+        coefficients = model_coefficient_table(model)
+        primary_term = treatment_name if treatment_name in coefficients["term"].tolist() else first_non_const_term(coefficients)
         result = {
             "success": True,
-            "late": float(model.params["treatment"]),
-            "std_error": float(model.bse["treatment"]),
-            "p_value": float(model.pvalues["treatment"]),
+            "late": float(model.params[primary_term]),
+            "std_error": float(model.bse[primary_term]),
+            "p_value": float(model.pvalues[primary_term]),
             "method": "Fuzzy RDD global polynomial",
         }
+        output_kind = "regression"
 
     else:
         result = {
@@ -1375,14 +1702,129 @@ try:
             "error": f"Unsupported method: {method}",
         }
 
-    output_path = Path(payload["output_dir"]) / "results.json"
+    diagnostics = {
+        "core": {"status": "skipped", "reason": "diagnostics unavailable for this method"},
+        "robustness": {"status": "skipped", "reason": "robustness unavailable for this method"},
+        "qa": {
+            "warnings": qa["warnings"],
+            "blocking_errors": qa["blocking_errors"],
+            "suggested_repairs": qa["suggested_repairs"],
+            "duplicate_entity_time_rows": qa["duplicate_entity_time_rows"],
+            "cluster_count": qa["cluster_count"],
+        },
+    }
+
+    if result.get("success") and model is not None:
+        regressors_for_diagnostics = covariates
+        if regressors_for_diagnostics is None and treatment_var is not None:
+            regressors_for_diagnostics = pd.DataFrame({treatment_var.name: treatment_var})
+        panel_info = None
+        if payload.get("entity_var") or payload.get("time_var") or payload.get("cluster_var"):
+            panel_info = {
+                "entity_var": payload.get("entity_var"),
+                "time_var": payload.get("time_var"),
+                "cluster_var": payload.get("cluster_var"),
+                "cluster_count": qa["cluster_count"],
+                "duplicate_entity_time_rows": qa["duplicate_entity_time_rows"],
+            }
+        diagnostics["core"] = run_core_diagnostics(
+            model,
+            regressors=regressors_for_diagnostics,
+            treatment_variable=treatment_var,
+            propensity_score=propensity_score_series,
+            panel_info=panel_info,
+        )
+        diagnostics["robustness"] = run_robustness_checks(
+            model,
+            frame=df,
+            outcome_var=payload["dependent_var"],
+            treatment_var=treatment_name,
+            covariates=covariate_names,
+            cluster_var=payload.get("cluster_var"),
+            placebo_var=options.get("placebo_var"),
+            alternative_sets=options.get("alternative_specifications"),
+            groups=df[payload.get("cluster_var")] if payload.get("cluster_var") in df.columns else None,
+        )
+    elif result.get("success") and propensity_score_series is not None and treatment_var is not None and covariates is not None:
+        diagnostics["core"] = {
+            "balance": balance_test(treatment_var, covariates),
+            "common_support": common_support_report(treatment_var, propensity_score_series),
+        }
+        diagnostics["robustness"] = {
+            "alternative_covariance": {"status": "skipped", "reason": "no fitted model available"},
+            "leave_one_cluster_out": {"status": "skipped", "reason": "no fitted model available"},
+            "placebo": {"status": "skipped", "reason": "no fitted model available"},
+            "alternative_specification": {"status": "skipped", "reason": "no fitted model available"},
+        }
+
     if isinstance(result, dict):
+        coefficients = coefficients if coefficients is not None else empty_coefficient_table()
+        primary_term = primary_term or first_non_const_term(coefficients)
+        if primary_term and not coefficients.empty and primary_term in coefficients["term"].tolist():
+            coefficient_row = coefficients.loc[coefficients["term"] == primary_term].iloc[0]
+            if result.get("coefficient") is None and pd.notna(coefficient_row.get("coefficient")):
+                result["coefficient"] = float(coefficient_row["coefficient"])
+            if result.get("std_error") is None and pd.notna(coefficient_row.get("std_error")):
+                result["std_error"] = float(coefficient_row["std_error"])
+            if result.get("p_value") is None and pd.notna(coefficient_row.get("p_value")):
+                result["p_value"] = float(coefficient_row["p_value"])
+        if not result.get("table_variables"):
+            result["table_variables"] = build_table_variables(method, treatment_name, covariate_names, coefficients, primary_term)
         result["dataset_id"] = payload.get("dataset_id")
         result["stage_id"] = payload.get("stage_id")
         result["branch"] = payload.get("branch")
-    save_json(output_path, result)
-
-    result["output_path"] = str(output_path)
+    metadata = {
+        "method": method,
+        "backend": "econometric_algorithm",
+        "dependent_var": payload.get("dependent_var"),
+        "treatment_var": treatment_name,
+        "covariates": covariate_names,
+        "entity_var": payload.get("entity_var"),
+        "time_var": payload.get("time_var"),
+        "cluster_var": payload.get("cluster_var"),
+        "options": options,
+        "rows_used": int(getattr(model, "nobs", len(dependent_var))) if result.get("success") else 0,
+        "input_encoding": df.attrs.get("_source_encoding", "default"),
+        "output_kind": output_kind,
+        "table_variables": result.get("table_variables"),
+    }
+    summary_text = coefficients.to_string(index=False) if not coefficients.empty else json.dumps(result, ensure_ascii=False, indent=2)
+    narrative_lines = [
+        "# Econometric Analysis Summary",
+        "",
+        f"- Method: {result.get('method', method)}",
+        f"- Output kind: {output_kind}",
+        f"- Dependent variable: {payload.get('dependent_var')}",
+    ]
+    if treatment_name:
+        narrative_lines.append(f"- Treatment variable: {treatment_name}")
+    if covariate_names:
+        narrative_lines.append(f"- Covariates: {covariate_names}")
+    if primary_term:
+        narrative_lines.append(f"- Primary term: {primary_term}")
+    if result.get("coefficient") is not None:
+        narrative_lines.append(f"- Primary coefficient: {result['coefficient']}")
+    if result.get("ate") is not None:
+        narrative_lines.append(f"- ATE: {result['ate']}")
+    if result.get("att") is not None:
+        narrative_lines.append(f"- ATT: {result['att']}")
+    if result.get("late") is not None:
+        narrative_lines.append(f"- LATE: {result['late']}")
+    narrative_lines.append(f"- QA status: {'fail' if qa['blocking_errors'] else 'warn' if qa['warnings'] else 'pass'}")
+    if qa["warnings"]:
+        narrative_lines.append(f"- QA warnings: {qa['warnings']}")
+    if qa["blocking_errors"]:
+        narrative_lines.append(f"- QA blocking errors: {qa['blocking_errors']}")
+    result = persist_common_outputs(
+        payload,
+        result,
+        qa,
+        diagnostics,
+        metadata,
+        coefficients,
+        summary_text,
+        "\\n".join(narrative_lines) + "\\n",
+    )
     emit(result)
 
 except Exception as e:
@@ -1404,7 +1846,7 @@ except Exception as e:
     })
 
     const { code, stdout, stderr } = await runInlinePython({
-      command: PYTHON_CMD,
+      command: pythonCommand,
       script: pythonScript,
       cwd: Instance.directory,
     })
@@ -1455,22 +1897,52 @@ except Exception as e:
       throw new Error(message)
     }
 
+    const qaGate = evaluateQaGate({
+      toolName: "econometrics",
+      qaSource: "diagnostics_or_result",
+      warnings: result.warnings,
+      blockingErrors: result.blocking_errors,
+      input: {
+        methodName: params.methodName,
+        dataPath: params.dataPath,
+        datasetId: params.datasetId,
+        stageId: params.stageId,
+        dependentVar: params.dependentVar,
+        treatmentVar: params.treatmentVar,
+      },
+    })
+
+    if (qaGate.reflection) {
+      const reflectionPath = persistToolReflection(qaGate.reflection)
+      await ctx.metadata({
+        metadata: {
+          reflection: {
+            ...qaGate.reflection,
+            reflectionPath: relativeWithinProject(reflectionPath),
+          },
+        },
+      })
+      throw new Error(
+        `Econometrics blocked by QA gate: ${qaGate.qaGateReason}\nReflection log: ${relativeWithinProject(reflectionPath)}`,
+      )
+    }
+
     const visibleOutputs: Array<{ label: string; relativePath: string }> = []
 
-    if ((params.methodName === "panel_fe_regression" || params.methodName === "baseline_regression") && result.output_path) {
+    if (REGRESSION_TABLE_METHODS.has(params.methodName) && hasNonEmptyCoefficientTable(result.coefficients_path)) {
       try {
         const tableResult = await generateRegressionTable({
-          title: params.methodName === "baseline_regression" ? "回归结果表" : "固定效应回归结果表",
+          title: regressionTableTitle(params.methodName),
           modelDirs: [outputDir],
           columnLabels: ["(1)"],
-          columnSubtitles: [params.methodName === "baseline_regression" ? "基准回归" : "固定效应回归"],
-          variables: [params.treatmentVar!, ...(params.covariates ?? [])],
+          columnSubtitles: [regressionTableSubtitle(params.methodName)],
+          variables: result.table_variables,
           notes: undefined,
           formats: ["markdown", "latex", "xlsx"],
           outputDir,
           branch,
           runId: effectiveRunId,
-        })
+        }, ctx)
         if (tableResult.success) {
           result.academic_table_markdown_path = tableResult.markdown_path
           result.academic_table_latex_path = tableResult.latex_path
@@ -1512,7 +1984,7 @@ except Exception as e:
         action: params.methodName,
         outputPath: result.output_path ?? path.join(outputDir, "results.json"),
         workbookPath: result.workbook_path,
-        summaryPath: result.metadata_path,
+        summaryPath: result.summary_path ?? result.metadata_path,
         logPath: result.narrative_path,
         createdAt: new Date().toISOString(),
         metadata: {
@@ -1547,6 +2019,7 @@ except Exception as e:
       publish(`${params.methodName}_coefficients_csv`, `${params.methodName}_coefficients`, result.coefficients_path, { method: params.methodName })
       publish(`${params.methodName}_coefficients_xlsx`, `${params.methodName}_workbook`, result.workbook_path, { method: params.methodName })
       publish(`${params.methodName}_diagnostics`, `${params.methodName}_diagnostics`, result.diagnostics_path, { method: params.methodName })
+      publish(`${params.methodName}_summary_txt`, `${params.methodName}_model_summary`, result.summary_path, { method: params.methodName })
       publish(`${params.methodName}_narrative`, `${params.methodName}_summary`, result.narrative_path, { method: params.methodName })
       publish(`${params.methodName}_academic_markdown`, `${params.methodName}_table_markdown`, result.academic_table_markdown_path, { method: params.methodName })
       publish(`${params.methodName}_academic_latex`, `${params.methodName}_table_latex`, result.academic_table_latex_path, { method: params.methodName })
@@ -1588,24 +2061,21 @@ except Exception as e:
     if (result.backend) output += `- Backend: ${result.backend}\n`
     if (result.dropped_rows !== undefined) output += `- Rows dropped before estimation: ${result.dropped_rows}\n`
     if (result.qa_status) output += `- QA status: ${result.qa_status}\n`
+    if (qaGate.qaGateStatus === "warn") output += `- QA gate: warn\n`
+    if (qaGate.qaGateStatus === "warn" && qaGate.qaGateReason) output += `- QA gate reason: ${qaGate.qaGateReason}\n`
     if (result.warnings?.length) output += `- Warnings: ${result.warnings.join(" | ")}\n`
     if (result.plot_path) output += `- Plot: ${relativeWithinProject(result.plot_path)}\n`
     if (result.coefficients_path) output += `- Coefficients CSV: ${relativeWithinProject(result.coefficients_path)}\n`
     if (result.workbook_path) output += `- Coefficients workbook: ${relativeWithinProject(result.workbook_path)}\n`
-    if (result.diagnostics_path) output += `- Diagnostics JSON: ${relativeWithinProject(result.diagnostics_path)}\n`
-    if (result.metadata_path) output += `- Model metadata: ${relativeWithinProject(result.metadata_path)}\n`
-    if (result.narrative_path) output += `- Narrative summary: ${relativeWithinProject(result.narrative_path)}\n`
+      if (result.diagnostics_path) output += `- Diagnostics JSON: ${relativeWithinProject(result.diagnostics_path)}\n`
+      if (result.metadata_path) output += `- Model metadata: ${relativeWithinProject(result.metadata_path)}\n`
+      if (result.summary_path) output += `- Model summary: ${relativeWithinProject(result.summary_path)}\n`
+      if (result.narrative_path) output += `- Narrative summary: ${relativeWithinProject(result.narrative_path)}\n`
     if (result.numeric_snapshot_path) output += `- Numeric snapshot: ${relativeWithinProject(result.numeric_snapshot_path)}\n`
     if (result.academic_table_markdown_path) output += `- Three-line table Markdown: ${relativeWithinProject(result.academic_table_markdown_path)}\n`
     if (result.academic_table_latex_path) output += `- Three-line table LaTeX: ${relativeWithinProject(result.academic_table_latex_path)}\n`
     if (result.academic_table_workbook_path) output += `- Three-line table Excel: ${relativeWithinProject(result.academic_table_workbook_path)}\n`
     if (result.output_path) output += `- Result JSON: ${relativeWithinProject(result.output_path)}\n`
-    if (visibleOutputs.length) {
-      output += `\nVisible outputs:\n`
-      for (const item of visibleOutputs) {
-        output += `- ${item.label}: ${item.relativePath}\n`
-      }
-    }
     if (visibleManifestPath) output += `Final outputs manifest: ${relativeWithinProject(visibleManifestPath)}\n`
 
     output += `\nResults directory: ${relativeWithinProject(outputDir)}/\n`
@@ -1616,11 +2086,15 @@ except Exception as e:
       metadata: {
         method: params.methodName,
         result,
+        datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
+        stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
         runId: effectiveRunId,
         numericSnapshotPath: result.numeric_snapshot_path ? relativeWithinProject(result.numeric_snapshot_path) : undefined,
-        numericSnapshot: numericSnapshot,
-        numericSnapshotPreview: numericSnapshot ? snapshotPreview(numericSnapshot) : undefined,
+        numericSnapshotPreview: numericSnapshotPreview(numericSnapshot),
         groundingScope: "regression",
+        qaGateStatus: qaGate.qaGateStatus,
+        qaGateReason: qaGate.qaGateReason,
+        qaSource: qaGate.qaSource,
         outputDir: relativeWithinProject(outputDir),
         visibleOutputs,
         finalOutputsPath: visibleManifestPath ? relativeWithinProject(visibleManifestPath) : undefined,

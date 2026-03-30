@@ -14,6 +14,41 @@ import { type SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 
 export namespace MessageV2 {
+  const PROVIDER_METADATA_KEYS = new Set([
+    "amazon-bedrock",
+    "anthropic",
+    "azure",
+    "bedrock",
+    "cerebras",
+    "cohere",
+    "deepinfra",
+    "gateway",
+    "google",
+    "google-vertex",
+    "groq",
+    "mistral",
+    "openai",
+    "openaiCompatible",
+    "openrouter",
+    "perplexity",
+    "togetherai",
+    "vercel",
+    "xai",
+  ])
+
+  function sanitizeProviderMetadata(metadata: Record<string, unknown> | undefined) {
+    if (!metadata) return undefined
+
+    const filtered = Object.fromEntries(
+      Object.entries(metadata).filter(([key, value]) => {
+        if (!PROVIDER_METADATA_KEYS.has(key)) return false
+        return typeof value === "object" && value !== null && !Array.isArray(value)
+      }),
+    )
+
+    return Object.keys(filtered).length > 0 ? filtered : undefined
+  }
+
   export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
   export const AbortedError = NamedError.create("MessageAbortedError", z.object({ message: z.string() }))
   export const AuthError = NamedError.create(
@@ -561,7 +596,7 @@ export namespace MessageV2 {
             assistantMessage.parts.push({
               type: "text",
               text: part.text,
-              ...(differentModel ? {} : { providerMetadata: part.metadata }),
+              ...(differentModel ? {} : { providerMetadata: sanitizeProviderMetadata(part.metadata) }),
             })
           if (part.type === "step-start")
             assistantMessage.parts.push({
@@ -614,7 +649,7 @@ export namespace MessageV2 {
             assistantMessage.parts.push({
               type: "reasoning",
               text: part.text,
-              ...(differentModel ? {} : { providerMetadata: part.metadata }),
+              ...(differentModel ? {} : { providerMetadata: sanitizeProviderMetadata(part.metadata) }),
             })
           }
         }

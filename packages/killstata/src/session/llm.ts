@@ -178,7 +178,14 @@ export namespace LLM {
       })
     }
 
-    return streamText({
+    l.info("stream params ready", {
+      messageCount: input.messages.length,
+      toolCount: Object.keys(tools).length,
+      systemCount: system.length,
+      maxOutputTokens,
+    })
+
+    const result = streamText({
       onError(error) {
         l.error("stream error", {
           error,
@@ -263,6 +270,9 @@ export namespace LLM {
       }),
       experimental_telemetry: { isEnabled: cfg.experimental?.openTelemetry },
     })
+
+    l.info("streamText returned")
+    return result
   }
 
   async function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "user">) {
