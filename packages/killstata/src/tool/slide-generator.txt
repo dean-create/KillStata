@@ -1,0 +1,14 @@
+Generate an academic slide deck specification from existing structured empirical outputs.
+
+Use this after research_brief, baseline econometrics, and optionally heterogeneity/paper draft artifacts already exist.
+
+Outputs:
+- `slides.md`
+- `slides.json`
+- `speaker_notes.md`
+- `slide_asset_manifest.json`
+
+Rules:
+- Default to a grounded 8-12 slide academic seminar structure.
+- Reuse existing tables and figures when available.
+- If no suitable chart exists, recommend a visual instead of inventing one.

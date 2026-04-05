@@ -1,0 +1,8 @@
+interface:
+  display_name: "Panel Data QA"
+  short_description: "Validate entity-time keys, treatment timing, and panel integrity before estimation"
+  default_prompt: "Use $panel-data-qa to verify that this panel dataset is safe for fixed-effects or DID analysis."
+
+policy:
+  allow_implicit_invocation: true
+

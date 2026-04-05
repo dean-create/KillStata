@@ -1,16 +1,16 @@
-import type { ProviderAuthAuthorization } from "@opencode-ai/sdk/v2/client"
-import { Button } from "@opencode-ai/ui/button"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { Dialog } from "@opencode-ai/ui/dialog"
-import { Icon } from "@opencode-ai/ui/icon"
-import { IconButton } from "@opencode-ai/ui/icon-button"
-import type { IconName } from "@opencode-ai/ui/icons/provider"
-import { List, type ListRef } from "@opencode-ai/ui/list"
-import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
-import { Spinner } from "@opencode-ai/ui/spinner"
-import { TextField } from "@opencode-ai/ui/text-field"
-import { showToast } from "@opencode-ai/ui/toast"
-import { iife } from "@opencode-ai/util/iife"
+import type { ProviderAuthAuthorization } from "@killstata/sdk/v2/client"
+import { Button } from "@killstata/ui/button"
+import { useDialog } from "@killstata/ui/context/dialog"
+import { Dialog } from "@killstata/ui/dialog"
+import { Icon } from "@killstata/ui/icon"
+import { IconButton } from "@killstata/ui/icon-button"
+import type { IconName } from "@killstata/ui/icons/provider"
+import { List, type ListRef } from "@killstata/ui/list"
+import { ProviderIcon } from "@killstata/ui/provider-icon"
+import { Spinner } from "@killstata/ui/spinner"
+import { TextField } from "@killstata/ui/text-field"
+import { showToast } from "@killstata/ui/toast"
+import { iife } from "@killstata/util/iife"
 import { createMemo, Match, onCleanup, onMount, Switch } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { Link } from "@/components/link"
@@ -244,20 +244,20 @@ export function DialogConnectProvider(props: { provider: string }) {
                 return (
                   <div class="flex flex-col gap-6">
                     <Switch>
-                      <Match when={provider().id === "opencode"}>
+                      <Match when={provider().id === "killstata"}>
                         <div class="flex flex-col gap-4">
                           <div class="text-14-regular text-text-base">
-                            {language.t("provider.connect.opencodeZen.line1")}
+                            {language.t("provider.connect.killstataZen.line1")}
                           </div>
                           <div class="text-14-regular text-text-base">
-                            {language.t("provider.connect.opencodeZen.line2")}
+                            {language.t("provider.connect.killstataZen.line2")}
                           </div>
                           <div class="text-14-regular text-text-base">
-                            {language.t("provider.connect.opencodeZen.visit.prefix")}
-                            <Link href="https://opencode.ai/zen" tabIndex={-1}>
-                              {language.t("provider.connect.opencodeZen.visit.link")}
+                            {language.t("provider.connect.killstataZen.visit.prefix")}
+                            <Link href="https://killstata.ai/zen" tabIndex={-1}>
+                              {language.t("provider.connect.killstataZen.visit.link")}
                             </Link>
-                            {language.t("provider.connect.opencodeZen.visit.suffix")}
+                            {language.t("provider.connect.killstataZen.visit.suffix")}
                           </div>
                         </div>
                       </Match>

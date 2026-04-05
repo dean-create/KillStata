@@ -1,21 +1,21 @@
 import { createResource, createEffect, createMemo, onCleanup, Show } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { Dialog } from "@opencode-ai/ui/dialog"
-import { List } from "@opencode-ai/ui/list"
-import { TextField } from "@opencode-ai/ui/text-field"
-import { Button } from "@opencode-ai/ui/button"
-import { IconButton } from "@opencode-ai/ui/icon-button"
+import { useDialog } from "@killstata/ui/context/dialog"
+import { Dialog } from "@killstata/ui/dialog"
+import { List } from "@killstata/ui/list"
+import { TextField } from "@killstata/ui/text-field"
+import { Button } from "@killstata/ui/button"
+import { IconButton } from "@killstata/ui/icon-button"
 import { normalizeServerUrl, serverDisplayName, useServer } from "@/context/server"
 import { usePlatform } from "@/context/platform"
-import { createOpencodeClient } from "@opencode-ai/sdk/v2/client"
+import { createKillstataClient } from "@killstata/sdk/v2/client"
 import { useNavigate } from "@solidjs/router"
 import { useLanguage } from "@/context/language"
 
 type ServerStatus = { healthy: boolean; version?: string }
 
 async function checkHealth(url: string, fetch?: typeof globalThis.fetch): Promise<ServerStatus> {
-  const sdk = createOpencodeClient({
+  const sdk = createKillstataClient({
     baseUrl: url,
     fetch,
     signal: AbortSignal.timeout(3000),

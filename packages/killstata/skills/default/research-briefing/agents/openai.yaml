@@ -1,0 +1,8 @@
+interface:
+  display_name: "Research Briefing"
+  short_description: "Build a structured empirical research brief before estimation"
+  default_prompt: "Use $research-briefing to turn this idea into a research brief before estimation."
+
+policy:
+  allow_implicit_invocation: true
+

@@ -1,13 +1,13 @@
-#!/usr/bin/env bun
+﻿#!/usr/bin/env bun
 import { $ } from "bun"
-import { Script } from "@opencode-ai/script"
+import { Script } from "@killstata/script"
 
 if (!Script.preview) {
   // Calculate SHA values
-  const arm64Sha = await $`sha256sum ./dist/opencode-linux-arm64.tar.gz | cut -d' ' -f1`.text().then((x) => x.trim())
-  const x64Sha = await $`sha256sum ./dist/opencode-linux-x64.tar.gz | cut -d' ' -f1`.text().then((x) => x.trim())
-  const macX64Sha = await $`sha256sum ./dist/opencode-darwin-x64.zip | cut -d' ' -f1`.text().then((x) => x.trim())
-  const macArm64Sha = await $`sha256sum ./dist/opencode-darwin-arm64.zip | cut -d' ' -f1`.text().then((x) => x.trim())
+  const arm64Sha = await $`sha256sum ./dist/killstata-linux-arm64.tar.gz | cut -d' ' -f1`.text().then((x) => x.trim())
+  const x64Sha = await $`sha256sum ./dist/killstata-linux-x64.tar.gz | cut -d' ' -f1`.text().then((x) => x.trim())
+  const macX64Sha = await $`sha256sum ./dist/killstata-darwin-x64.zip | cut -d' ' -f1`.text().then((x) => x.trim())
+  const macArm64Sha = await $`sha256sum ./dist/killstata-darwin-arm64.zip | cut -d' ' -f1`.text().then((x) => x.trim())
 
   const [pkgver, _subver = ""] = Script.version.split(/(-.*)/, 2)
 
@@ -16,62 +16,62 @@ if (!Script.preview) {
     "# Maintainer: dax",
     "# Maintainer: adam",
     "",
-    "pkgname='opencode-bin'",
+    "pkgname='killstata-bin'",
     `pkgver=${pkgver}`,
     `_subver=${_subver}`,
     "options=('!debug' '!strip')",
     "pkgrel=1",
     "pkgdesc='The AI coding agent built for the terminal.'",
-    "url='https://github.com/anomalyco/opencode'",
+    "url='https://github.com/anomalyco/killstata'",
     "arch=('aarch64' 'x86_64')",
     "license=('MIT')",
-    "provides=('opencode')",
-    "conflicts=('opencode')",
+    "provides=('killstata')",
+    "conflicts=('killstata')",
     "depends=('ripgrep')",
     "",
-    `source_aarch64=("\${pkgname}_\${pkgver}_aarch64.tar.gz::https://github.com/anomalyco/opencode/releases/download/v\${pkgver}\${_subver}/opencode-linux-arm64.tar.gz")`,
+    `source_aarch64=("\${pkgname}_\${pkgver}_aarch64.tar.gz::https://github.com/anomalyco/killstata/releases/download/v\${pkgver}\${_subver}/killstata-linux-arm64.tar.gz")`,
     `sha256sums_aarch64=('${arm64Sha}')`,
 
-    `source_x86_64=("\${pkgname}_\${pkgver}_x86_64.tar.gz::https://github.com/anomalyco/opencode/releases/download/v\${pkgver}\${_subver}/opencode-linux-x64.tar.gz")`,
+    `source_x86_64=("\${pkgname}_\${pkgver}_x86_64.tar.gz::https://github.com/anomalyco/killstata/releases/download/v\${pkgver}\${_subver}/killstata-linux-x64.tar.gz")`,
     `sha256sums_x86_64=('${x64Sha}')`,
     "",
     "package() {",
-    '  install -Dm755 ./opencode "${pkgdir}/usr/bin/opencode"',
+    '  install -Dm755 ./killstata "${pkgdir}/usr/bin/killstata"',
     "}",
     "",
   ].join("\n")
 
-  // Source-based PKGBUILD for opencode
+  // Source-based PKGBUILD for killstata
   const sourcePkgbuild = [
     "# Maintainer: dax",
     "# Maintainer: adam",
     "",
-    "pkgname='opencode'",
+    "pkgname='killstata'",
     `pkgver=${pkgver}`,
     `_subver=${_subver}`,
     "options=('!debug' '!strip')",
     "pkgrel=1",
     "pkgdesc='The AI coding agent built for the terminal.'",
-    "url='https://github.com/anomalyco/opencode'",
+    "url='https://github.com/anomalyco/killstata'",
     "arch=('aarch64' 'x86_64')",
     "license=('MIT')",
-    "provides=('opencode')",
-    "conflicts=('opencode-bin')",
+    "provides=('killstata')",
+    "conflicts=('killstata-bin')",
     "depends=('ripgrep')",
     "makedepends=('git' 'bun' 'go')",
     "",
-    `source=("opencode-\${pkgver}.tar.gz::https://github.com/anomalyco/opencode/archive/v\${pkgver}\${_subver}.tar.gz")`,
+    `source=("killstata-\${pkgver}.tar.gz::https://github.com/anomalyco/killstata/archive/v\${pkgver}\${_subver}.tar.gz")`,
     `sha256sums=('SKIP')`,
     "",
     "build() {",
-    `  cd "opencode-\${pkgver}"`,
+    `  cd "killstata-\${pkgver}"`,
     `  bun install`,
-    "  cd ./packages/opencode",
-    `  OPENCODE_CHANNEL=latest OPENCODE_VERSION=${pkgver} bun run ./script/build.ts --single`,
+    "  cd ./packages/killstata",
+    `  KILLSTATA_CHANNEL=latest KILLSTATA_VERSION=${pkgver} bun run ./script/build.ts --single`,
     "}",
     "",
     "package() {",
-    `  cd "opencode-\${pkgver}/packages/opencode"`,
+    `  cd "killstata-\${pkgver}/packages/killstata"`,
     '  mkdir -p "${pkgdir}/usr/bin"',
     '  target_arch="x64"',
     '  case "$CARCH" in',
@@ -94,19 +94,19 @@ if (!Script.preview) {
     '      base="-baseline"',
     "    fi",
     "  fi",
-    '  bin="dist/opencode-linux-${target_arch}${base}${libc}/bin/opencode"',
+    '  bin="dist/killstata-linux-${target_arch}${base}${libc}/bin/killstata"',
     '  if [ ! -f "$bin" ]; then',
     '    printf "unable to find binary for %s%s%s\\n" "$target_arch" "$base" "$libc" >&2',
     "    return 1",
     "  fi",
-    '  install -Dm755 "$bin" "${pkgdir}/usr/bin/opencode"',
+    '  install -Dm755 "$bin" "${pkgdir}/usr/bin/killstata"',
     "}",
     "",
   ].join("\n")
 
   for (const [pkg, pkgbuild] of [
-    ["opencode-bin", binaryPkgbuild],
-    ["opencode", sourcePkgbuild],
+    ["killstata-bin", binaryPkgbuild],
+    ["killstata", sourcePkgbuild],
   ]) {
     for (let i = 0; i < 30; i++) {
       try {
@@ -131,45 +131,45 @@ if (!Script.preview) {
     "# frozen_string_literal: true",
     "",
     "# This file was generated by GoReleaser. DO NOT EDIT.",
-    "class Opencode < Formula",
+    "class Killstata < Formula",
     `  desc "The AI coding agent built for the terminal."`,
-    `  homepage "https://github.com/anomalyco/opencode"`,
+    `  homepage "https://github.com/anomalyco/killstata"`,
     `  version "${Script.version.split("-")[0]}"`,
     "",
     `  depends_on "ripgrep"`,
     "",
     "  on_macos do",
     "    if Hardware::CPU.intel?",
-    `      url "https://github.com/anomalyco/opencode/releases/download/v${Script.version}/opencode-darwin-x64.zip"`,
+    `      url "https://github.com/anomalyco/killstata/releases/download/v${Script.version}/killstata-darwin-x64.zip"`,
     `      sha256 "${macX64Sha}"`,
     "",
     "      def install",
-    '        bin.install "opencode"',
+    '        bin.install "killstata"',
     "      end",
     "    end",
     "    if Hardware::CPU.arm?",
-    `      url "https://github.com/anomalyco/opencode/releases/download/v${Script.version}/opencode-darwin-arm64.zip"`,
+    `      url "https://github.com/anomalyco/killstata/releases/download/v${Script.version}/killstata-darwin-arm64.zip"`,
     `      sha256 "${macArm64Sha}"`,
     "",
     "      def install",
-    '        bin.install "opencode"',
+    '        bin.install "killstata"',
     "      end",
     "    end",
     "  end",
     "",
     "  on_linux do",
     "    if Hardware::CPU.intel? and Hardware::CPU.is_64_bit?",
-    `      url "https://github.com/anomalyco/opencode/releases/download/v${Script.version}/opencode-linux-x64.tar.gz"`,
+    `      url "https://github.com/anomalyco/killstata/releases/download/v${Script.version}/killstata-linux-x64.tar.gz"`,
     `      sha256 "${x64Sha}"`,
     "      def install",
-    '        bin.install "opencode"',
+    '        bin.install "killstata"',
     "      end",
     "    end",
     "    if Hardware::CPU.arm? and Hardware::CPU.is_64_bit?",
-    `      url "https://github.com/anomalyco/opencode/releases/download/v${Script.version}/opencode-linux-arm64.tar.gz"`,
+    `      url "https://github.com/anomalyco/killstata/releases/download/v${Script.version}/killstata-linux-arm64.tar.gz"`,
     `      sha256 "${arm64Sha}"`,
     "      def install",
-    '        bin.install "opencode"',
+    '        bin.install "killstata"',
     "      end",
     "    end",
     "  end",
@@ -180,8 +180,8 @@ if (!Script.preview) {
 
   await $`rm -rf ./dist/homebrew-tap`
   await $`git clone https://${process.env["GITHUB_TOKEN"]}@github.com/sst/homebrew-tap.git ./dist/homebrew-tap`
-  await Bun.file("./dist/homebrew-tap/opencode.rb").write(homebrewFormula)
-  await $`cd ./dist/homebrew-tap && git add opencode.rb`
+  await Bun.file("./dist/homebrew-tap/killstata.rb").write(homebrewFormula)
+  await $`cd ./dist/homebrew-tap && git add killstata.rb`
   await $`cd ./dist/homebrew-tap && git commit -m "Update to v${Script.version}"`
   await $`cd ./dist/homebrew-tap && git push`
 }

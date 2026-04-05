@@ -2,14 +2,14 @@ import "@/index.css"
 import { ErrorBoundary, Show, lazy, type ParentProps } from "solid-js"
 import { Router, Route, Navigate } from "@solidjs/router"
 import { MetaProvider } from "@solidjs/meta"
-import { Font } from "@opencode-ai/ui/font"
-import { MarkedProvider } from "@opencode-ai/ui/context/marked"
-import { DiffComponentProvider } from "@opencode-ai/ui/context/diff"
-import { CodeComponentProvider } from "@opencode-ai/ui/context/code"
-import { I18nProvider } from "@opencode-ai/ui/context"
-import { Diff } from "@opencode-ai/ui/diff"
-import { Code } from "@opencode-ai/ui/code"
-import { ThemeProvider } from "@opencode-ai/ui/theme"
+import { Font } from "@killstata/ui/font"
+import { MarkedProvider } from "@killstata/ui/context/marked"
+import { DiffComponentProvider } from "@killstata/ui/context/diff"
+import { CodeComponentProvider } from "@killstata/ui/context/code"
+import { I18nProvider } from "@killstata/ui/context"
+import { Diff } from "@killstata/ui/diff"
+import { Code } from "@killstata/ui/code"
+import { ThemeProvider } from "@killstata/ui/theme"
 import { GlobalSyncProvider } from "@/context/global-sync"
 import { PermissionProvider } from "@/context/permission"
 import { LayoutProvider } from "@/context/layout"
@@ -20,15 +20,15 @@ import { TerminalProvider } from "@/context/terminal"
 import { PromptProvider } from "@/context/prompt"
 import { FileProvider } from "@/context/file"
 import { NotificationProvider } from "@/context/notification"
-import { DialogProvider } from "@opencode-ai/ui/context/dialog"
+import { DialogProvider } from "@killstata/ui/context/dialog"
 import { CommandProvider } from "@/context/command"
 import { LanguageProvider, useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
-import { Logo } from "@opencode-ai/ui/logo"
+import { Logo } from "@killstata/ui/logo"
 import Layout from "@/pages/layout"
 import DirectoryLayout from "@/pages/directory-layout"
 import { ErrorPage } from "./pages/error"
-import { iife } from "@opencode-ai/util/iife"
+import { iife } from "@killstata/util/iife"
 import { Suspense } from "solid-js"
 
 const Home = lazy(() => import("@/pages/home"))
@@ -42,7 +42,7 @@ function UiI18nBridge(props: ParentProps) {
 
 declare global {
   interface Window {
-    __OPENCODE__?: { updaterEnabled?: boolean; serverPassword?: string }
+    __KILLSTATA__?: { updaterEnabled?: boolean; serverPassword?: string }
   }
 }
 
@@ -86,9 +86,9 @@ function ServerKey(props: ParentProps) {
 export function AppInterface(props: { defaultUrl?: string }) {
   const defaultServerUrl = () => {
     if (props.defaultUrl) return props.defaultUrl
-    if (location.hostname.includes("opencode.ai")) return "http://localhost:4096"
+    if (location.hostname.includes("killstata.ai")) return "http://localhost:4096"
     if (import.meta.env.DEV)
-      return `http://${import.meta.env.VITE_OPENCODE_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_OPENCODE_SERVER_PORT ?? "4096"}`
+      return `http://${import.meta.env.VITE_KILLSTATA_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_KILLSTATA_SERVER_PORT ?? "4096"}`
 
     return window.location.origin
   }

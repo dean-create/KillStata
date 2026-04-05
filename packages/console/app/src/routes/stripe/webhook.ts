@@ -1,13 +1,13 @@
-import { Billing } from "@opencode-ai/console-core/billing.js"
+import { Billing } from "@killstata/console-core/billing.js"
 import type { APIEvent } from "@solidjs/start/server"
-import { and, Database, eq, isNull, sql } from "@opencode-ai/console-core/drizzle/index.js"
-import { BillingTable, PaymentTable, SubscriptionTable } from "@opencode-ai/console-core/schema/billing.sql.js"
-import { Identifier } from "@opencode-ai/console-core/identifier.js"
-import { centsToMicroCents } from "@opencode-ai/console-core/util/price.js"
-import { Actor } from "@opencode-ai/console-core/actor.js"
-import { Resource } from "@opencode-ai/console-resource"
-import { UserTable } from "@opencode-ai/console-core/schema/user.sql.js"
-import { AuthTable } from "@opencode-ai/console-core/schema/auth.sql.js"
+import { and, Database, eq, isNull, sql } from "@killstata/console-core/drizzle/index.js"
+import { BillingTable, PaymentTable, SubscriptionTable } from "@killstata/console-core/schema/billing.sql.js"
+import { Identifier } from "@killstata/console-core/identifier.js"
+import { centsToMicroCents } from "@killstata/console-core/util/price.js"
+import { Actor } from "@killstata/console-core/actor.js"
+import { Resource } from "@killstata/console-resource"
+import { UserTable } from "@killstata/console-core/schema/user.sql.js"
+import { AuthTable } from "@killstata/console-core/schema/auth.sql.js"
 
 export async function POST(input: APIEvent) {
   const body = await Billing.stripe().webhooks.constructEventAsync(

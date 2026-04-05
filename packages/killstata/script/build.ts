@@ -13,11 +13,12 @@ const dir = path.resolve(__dirname, "..")
 process.chdir(dir)
 
 import pkg from "../package.json"
-import { Script } from "@opencode-ai/script"
+import { Script } from "@killstata/script"
 
 const singleFlag = process.argv.includes("--single")
 const baselineFlag = process.argv.includes("--baseline")
 const skipInstall = process.argv.includes("--skip-install")
+const cliBinaryName = "killstata"
 
 const allTargets: {
   os: string
@@ -139,21 +140,27 @@ for (const item of targets) {
       autoloadTsconfig: true,
       autoloadPackageJson: true,
       target: name.replace(pkg.name, "bun") as any,
-      outfile: `dist/${name}/bin/opencode`,
-      execArgv: [`--user-agent=opencode/${Script.version}`, "--use-system-ca", "--"],
+      outfile: `dist/${name}/bin/${cliBinaryName}`,
+      execArgv: [`--user-agent=killstata/${Script.version}`, "--use-system-ca", "--"],
       windows: {},
     },
     entrypoints: ["./src/index.ts", parserWorker, workerPath],
     define: {
-      OPENCODE_VERSION: `'${Script.version}'`,
+      KILLSTATA_VERSION: `'${Script.version}'`,
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
-      OPENCODE_WORKER_PATH: workerPath,
-      OPENCODE_CHANNEL: `'${Script.channel}'`,
-      OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
+      KILLSTATA_WORKER_PATH: workerPath,
+      KILLSTATA_CHANNEL: `'${Script.channel}'`,
+      KILLSTATA_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
     },
   })
 
   await $`rm -rf ./dist/${name}/bin/tui`
+  const binaryEntry = [`./bin/${cliBinaryName}.exe`, `./bin/${cliBinaryName}`].find((item) =>
+    fs.existsSync(path.join(dir, "dist", name, item.replace("./", ""))),
+  )
+  if (!binaryEntry) {
+    throw new Error(`Failed to locate compiled ${cliBinaryName} binary for ${name}`)
+  }
   await Bun.file(`dist/${name}/package.json`).write(
     JSON.stringify(
       {
@@ -161,6 +168,9 @@ for (const item of targets) {
         version: Script.version,
         os: [item.os],
         cpu: [item.arch],
+        bin: {
+          [cliBinaryName]: binaryEntry,
+        },
       },
       null,
       2,

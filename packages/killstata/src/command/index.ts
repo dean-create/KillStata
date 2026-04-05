@@ -27,6 +27,11 @@ export namespace Command {
       agent: z.string().optional(),
       model: z.string().optional(),
       mcp: z.boolean().optional(),
+      availability: z.array(z.string()).optional(),
+      queueBehavior: z.enum(["queued", "immediate"]).optional(),
+      workflowAware: z.boolean().optional(),
+      immediate: z.boolean().optional(),
+      remoteSafe: z.boolean().optional(),
       // workaround for zod not supporting async functions natively so we use getters
       // https://zod.dev/v4/changelog?id=zfunction
       template: z.promise(z.string()).or(z.string()),
@@ -53,7 +58,40 @@ export namespace Command {
   export const Default = {
     INIT: "init",
     REVIEW: "review",
+    WORKFLOW: "workflow",
+    STAGE: "stage",
+    RERUN: "rerun",
+    ARTIFACT: "artifact",
+    DOCTOR: "doctor",
+    VERIFY: "verify",
   } as const
+
+  export function capabilityTags(command: Pick<Info, "availability" | "queueBehavior" | "workflowAware" | "immediate" | "remoteSafe">) {
+    return [
+      command.workflowAware ? "workflow" : undefined,
+      ...(command.availability ?? []),
+      command.queueBehavior ?? (command.immediate ? "immediate" : undefined),
+      command.remoteSafe ? "remote-safe" : undefined,
+    ].filter((item, index, arr): item is string => typeof item === "string" && arr.indexOf(item) === index)
+  }
+
+  function workflowTemplate(input: {
+    action: "status" | "stage" | "artifacts" | "doctor" | "verify" | "rerun_plan"
+    guidance: string[]
+  }) {
+    return [
+      `You are handling the /${input.action === "status" ? "workflow" : input.action === "stage" ? "stage" : input.action === "artifacts" ? "artifact" : input.action === "doctor" ? "doctor" : input.action === "verify" ? "verify" : "rerun"} command.`,
+      `Always call the workflow tool with action="${input.action}" first.`,
+      "If the user supplied $ARGUMENTS, treat them as an optional stage identifier or filter and pass them through when appropriate.",
+      ...input.guidance,
+    ].join("\n")
+  }
+
+  function applyDisabledCommands(commands: Record<string, Info>, disabled: string[] | undefined) {
+    if (!disabled?.length) return commands
+    const blocked = new Set(disabled)
+    return Object.fromEntries(Object.entries(commands).filter(([name]) => !blocked.has(name)))
+  }
 
   const state = Instance.state(async () => {
     const cfg = await Config.get()
@@ -75,6 +113,102 @@ export namespace Command {
         },
         subtask: true,
         hints: hints(PROMPT_REVIEW),
+      },
+      [Default.WORKFLOW]: {
+        name: Default.WORKFLOW,
+        description: "show the current econometrics workflow run, active stage, verifier status, and next actions",
+        workflowAware: true,
+        availability: ["workflow"],
+        queueBehavior: "queued",
+        remoteSafe: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "status",
+          guidance: [
+            "Summarize the active workflow run, active stage, latest failure, verifier state, and trusted artifacts.",
+            "Keep the answer procedural and stage-oriented.",
+          ],
+        }),
+      },
+      [Default.STAGE]: {
+        name: Default.STAGE,
+        description: "inspect a workflow stage, including replay input, artifacts, and verifier evidence",
+        workflowAware: true,
+        availability: ["workflow"],
+        queueBehavior: "queued",
+        remoteSafe: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "stage",
+          guidance: [
+            "Explain the selected stage or the active stage if no stage id is supplied.",
+            "Include inputs, outputs, artifacts, and the verifier outcome if present.",
+          ],
+        }),
+      },
+      [Default.RERUN]: {
+        name: Default.RERUN,
+        description: "rerun only the failed or selected stage; do not restart successful earlier stages",
+        workflowAware: true,
+        availability: ["workflow"],
+        queueBehavior: "queued",
+        remoteSafe: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "rerun_plan",
+          guidance: [
+            "If the rerun plan is blocked, explain the exact reason and stop.",
+            "If the rerun plan is runnable, rerun only the target stage with the recorded replay input, then run workflow verification again.",
+            "Do not rerun already successful upstream stages.",
+          ],
+        }),
+      },
+      [Default.ARTIFACT]: {
+        name: Default.ARTIFACT,
+        description: "list canonical parquet, diagnostics, numeric snapshots, audits, and report artifacts for the current workflow",
+        workflowAware: true,
+        availability: ["workflow"],
+        queueBehavior: "queued",
+        remoteSafe: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "artifacts",
+          guidance: [
+            "List artifact paths clearly and identify which ones are trusted for downstream reporting.",
+          ],
+        }),
+      },
+      [Default.DOCTOR]: {
+        name: Default.DOCTOR,
+        description: "check workflow health, runtime python setup, MCP availability, and current workflow readiness",
+        workflowAware: true,
+        availability: ["workflow"],
+        queueBehavior: "immediate",
+        immediate: true,
+        remoteSafe: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "doctor",
+          guidance: [
+            "Highlight missing dependencies, workflow blockers, and the minimum repair needed before the next stage can continue.",
+          ],
+        }),
+      },
+      [Default.VERIFY]: {
+        name: Default.VERIFY,
+        description: "run the structured workflow verifier against the current or selected stage",
+        workflowAware: true,
+        availability: ["workflow"],
+        queueBehavior: "queued",
+        remoteSafe: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "verify",
+          guidance: [
+            "Return the verifier result first.",
+            "If verification blocks, stop and report only the repair stage that must run next.",
+          ],
+        }),
       },
     }
 
@@ -118,7 +252,7 @@ export namespace Command {
       }
     }
 
-    return result
+    return applyDisabledCommands(result, cfg.disabled_commands)
   })
 
   export async function get(name: string) {

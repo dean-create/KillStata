@@ -64,6 +64,7 @@
   "devDependencies": {
     "@actions/artifact": "5.0.1",
     "@tsconfig/bun": "catalog:",
+    "baseline-browser-mapping": "2.10.12",
     "husky": "9.1.7",
     "prettier": "3.6.2",
     "semver": "^7.6.0",
@@ -72,9 +73,9 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.933.0",
-    "@opencode-ai/plugin": "workspace:*",
-    "@opencode-ai/script": "workspace:*",
-    "@opencode-ai/sdk": "workspace:*",
+    "@killstata/plugin": "workspace:*",
+    "@killstata/script": "workspace:*",
+    "@killstata/sdk": "workspace:*",
     "typescript": "catalog:"
   },
   "repository": {

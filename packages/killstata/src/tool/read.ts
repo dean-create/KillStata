@@ -8,6 +8,7 @@ import DESCRIPTION from "./read.txt"
 import { Instance } from "../project/instance"
 import { Identifier } from "../id/id"
 import { assertExternalDirectory } from "./external-directory"
+import { resolveWorkspacePath } from "./analysis-path"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -21,10 +22,7 @@ export const ReadTool = Tool.define("read", {
     limit: z.coerce.number().describe("The number of lines to read (defaults to 2000)").optional(),
   }),
   async execute(params, ctx) {
-    let filepath = params.filePath
-    if (!path.isAbsolute(filepath)) {
-      filepath = path.join(process.cwd(), filepath)
-    }
+    const filepath = resolveWorkspacePath(params.filePath)
     const title = path.relative(Instance.worktree, filepath)
 
     await assertExternalDirectory(ctx, filepath, {

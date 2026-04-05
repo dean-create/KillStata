@@ -16,18 +16,21 @@ ts-dist
 /result
 refs
 Session.vim
-opencode.json
+killstata.json
 a.out
 target
 .scripts
 .direnv/
 
 # Local dev files
-opencode-dev
+killstata-dev
 logs/
 *.bun-build
 
-.opencode
+.killstata
 .killstata
 results
-packages
+.test-logs/
+.tmp-e2e-logs/
+**/__pycache__/
+*.py[cod]

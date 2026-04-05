@@ -1,4 +1,4 @@
-import type { NamedError } from "@opencode-ai/util/error"
+import type { NamedError } from "@killstata/util/error"
 import { MessageV2 } from "./message-v2"
 
 export namespace SessionRetry {
@@ -6,6 +6,17 @@ export namespace SessionRetry {
   export const RETRY_BACKOFF_FACTOR = 2
   export const RETRY_MAX_DELAY_NO_HEADERS = 30_000 // 30 seconds
   export const RETRY_MAX_DELAY = 2_147_483_647 // max 32-bit signed integer for setTimeout
+
+  function hasTransientDisconnect(message: string | undefined) {
+    if (!message) return false
+    const lower = message.toLowerCase()
+    return (
+      lower.includes("stream disconnected before completion") ||
+      lower.includes("connection reset by server") ||
+      (lower.includes("error sending request for url") &&
+        (lower.includes("/responses/compact") || lower.includes("/backend-api/codex/responses")))
+    )
+  }
 
   export async function sleep(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -59,11 +70,15 @@ export namespace SessionRetry {
 
   export function retryable(error: ReturnType<NamedError["toObject"]>) {
     if (MessageV2.APIError.isInstance(error)) {
+      if (hasTransientDisconnect(error.data.message)) return "Provider stream disconnected"
       if (!error.data.isRetryable) return undefined
       return error.data.message.includes("Overloaded") ? "Provider is overloaded" : error.data.message
     }
 
     if (typeof error.data?.message === "string") {
+      if (hasTransientDisconnect(error.data.message)) {
+        return "Provider stream disconnected"
+      }
       try {
         const json = JSON.parse(error.data.message)
         if (json.type === "error" && json.error?.type === "too_many_requests") {

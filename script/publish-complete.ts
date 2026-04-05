@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { Script } from "@opencode-ai/script"
+import { Script } from "@killstata/script"
 import { $ } from "bun"
 
 if (!Script.preview) {
@@ -9,6 +9,6 @@ if (!Script.preview) {
 
 await $`bun install`
 
-await $`gh release download --pattern "opencode-linux-*64.tar.gz" --pattern "opencode-darwin-*64.zip" -D dist`
+await $`gh release download --pattern "killstata-linux-*64.tar.gz" --pattern "killstata-darwin-*64.zip" -D dist`
 
-await import(`../packages/opencode/script/publish-registries.ts`)
+await import(`../packages/killstata/script/publish-registries.ts`)

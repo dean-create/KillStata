@@ -35,7 +35,7 @@ import { Command } from "../command"
 import { $, fileURLToPath } from "bun"
 import { ConfigMarkdown } from "../config/markdown"
 import { SessionSummary } from "./summary"
-import { NamedError } from "@opencode-ai/util/error"
+import { NamedError } from "@killstata/util/error"
 import { fn } from "@/util/fn"
 import { SessionProcessor } from "./processor"
 import { TaskTool } from "@/tool/task"
@@ -46,23 +46,30 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
+import { QueryGuard } from "@/runtime/query-guard"
+import { RuntimeEvents } from "@/runtime/events"
+import type { QueuedSessionAction, ToolAvailabilityPolicy, WorkflowInputIntent } from "@/runtime/types"
+import { RuntimeHooks } from "@/runtime/hooks"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
 
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
-  export const OUTPUT_TOKEN_MAX = Flag.OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
+  export const OUTPUT_TOKEN_MAX = Flag.KILLSTATA_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
 
   const state = Instance.state(
     () => {
       const data: Record<
         string,
         {
-          abort: AbortController
+          guard: QueryGuard
+          abort?: AbortController
+          queue: QueuedSessionAction[]
           callbacks: {
+            actionID?: string
             resolve(input: MessageV2.WithParts): void
-            reject(): void
+            reject(error?: unknown): void
           }[]
         }
       > = {}
@@ -70,17 +77,145 @@ export namespace SessionPrompt {
     },
     async (current) => {
       for (const item of Object.values(current)) {
-        item.abort.abort()
+        item.abort?.abort()
         for (const callback of item.callbacks) {
-          callback.reject()
+          callback.reject(new Error("Session prompt runtime disposed"))
         }
       }
     },
   )
 
+  function ensureRuntime(sessionID: string) {
+    const current = state()
+    current[sessionID] ??= {
+      guard: new QueryGuard(),
+      queue: [],
+      callbacks: [],
+    }
+    return current[sessionID]
+  }
+
+  function publishQueue(sessionID: string) {
+    const runtime = ensureRuntime(sessionID)
+    Bus.publish(RuntimeEvents.QueueUpdated, {
+      sessionID,
+      pending: runtime.queue.length,
+      actions: runtime.queue.map((action) => ({
+        id: action.id,
+        type: action.type,
+        priority: action.priority,
+        createdAt: action.createdAt,
+      })),
+    })
+  }
+
+  function publishQueryState(sessionID: string, action?: QueuedSessionAction["type"]) {
+    const runtime = ensureRuntime(sessionID)
+    const snapshot = runtime.guard.snapshot(runtime.queue.length, action ?? runtime.queue[0]?.type)
+    Bus.publish(RuntimeEvents.QueryState, {
+      sessionID,
+      phase: !runtime.guard.active && runtime.queue.length > 0 ? "accepted" : snapshot.phase,
+      generation: snapshot.generation,
+      pending: snapshot.pending,
+      action: snapshot.action,
+    })
+  }
+
+  async function enqueueAction(
+    sessionID: string,
+    action: Omit<QueuedSessionAction, "id" | "sessionID" | "createdAt"> & { metadata?: Record<string, unknown> },
+  ) {
+    const runtime = ensureRuntime(sessionID)
+    const queued = {
+      id: ulid(),
+      sessionID,
+      createdAt: Date.now(),
+      ...action,
+    } satisfies QueuedSessionAction
+    runtime.queue.push(queued)
+    runtime.queue.sort((a, b) => b.priority - a.priority || a.createdAt - b.createdAt)
+    publishQueue(sessionID)
+    publishQueryState(sessionID, action.type)
+    await RuntimeHooks.inputAccepted({
+      sessionID,
+      action: action.type,
+      metadata: action.metadata,
+    })
+    return queued
+  }
+
+  function waitForAction(sessionID: string, actionID?: string) {
+    const runtime = ensureRuntime(sessionID)
+    return new Promise<MessageV2.WithParts>((resolve, reject) => {
+      runtime.callbacks.push({ actionID, resolve, reject })
+    })
+  }
+
+  function resolveCallbacks(sessionID: string, message: MessageV2.WithParts, actionID?: string) {
+    const runtime = ensureRuntime(sessionID)
+    let genericResolved = false
+    runtime.callbacks = runtime.callbacks.filter((callback) => {
+      if (actionID && callback.actionID === actionID) {
+        callback.resolve(message)
+        return false
+      }
+      if (!callback.actionID && !genericResolved) {
+        genericResolved = true
+        callback.resolve(message)
+        return false
+      }
+      return true
+    })
+  }
+
+  function rejectCallbacks(sessionID: string, error?: unknown) {
+    const runtime = ensureRuntime(sessionID)
+    for (const callback of runtime.callbacks) {
+      callback.reject(error)
+    }
+    runtime.callbacks = []
+  }
+
+  function startDispatch(sessionID: string) {
+    void dispatch(sessionID).catch((error) => {
+      log.error("dispatch failed", { sessionID, error })
+      rejectCallbacks(sessionID, error)
+      const runtime = ensureRuntime(sessionID)
+      runtime.abort = undefined
+      runtime.queue = []
+      runtime.guard = new QueryGuard()
+      publishQueue(sessionID)
+      publishQueryState(sessionID)
+      SessionStatus.set(sessionID, { type: "idle" })
+    })
+  }
+
+  function nextQueuedAction(sessionID: string) {
+    const runtime = ensureRuntime(sessionID)
+    const next = runtime.queue.shift()
+    publishQueue(sessionID)
+    publishQueryState(sessionID, next?.type)
+    return next
+  }
+
+  function completedReplyForAction(
+    action: QueuedSessionAction,
+    messages: MessageV2.WithParts[],
+  ): MessageV2.WithParts | undefined {
+    if (action.type !== "prompt" && action.type !== "command" && action.type !== "shell") return undefined
+    const messageID = typeof action.metadata?.["messageID"] === "string" ? action.metadata["messageID"] : undefined
+    if (!messageID) return undefined
+    return messages.findLast(
+      (message) =>
+        message.info.role === "assistant" &&
+        message.info.parentID === messageID &&
+        !!message.info.finish &&
+        !["tool-calls", "unknown"].includes(message.info.finish),
+    )
+  }
+
   export function assertNotBusy(sessionID: string) {
-    const match = state()[sessionID]
-    if (match) throw new Session.BusyError(sessionID)
+    if (ensureRuntime(sessionID).guard.active) throw new Session.BusyError(sessionID)
   }
 
   export const PromptInput = z.object({
@@ -102,6 +237,10 @@ export namespace SessionPrompt {
       ),
     system: z.string().optional(),
     variant: z.string().optional(),
+    queuePriority: z.number().int().optional(),
+    queueActionType: z.enum(["prompt", "command", "shell", "continue", "retry", "repair", "compaction"]).optional(),
+    queueMetadata: z.record(z.string(), z.any()).optional(),
+    intent: z.enum(["status", "repair", "verify", "report", "analysis"]).optional(),
     parts: z.array(
       z.discriminatedUnion("type", [
         MessageV2.TextPart.omit({
@@ -192,11 +331,24 @@ export namespace SessionPrompt {
       return message
     }
 
+    const queued = await enqueueAction(input.sessionID, {
+      type: input.queueActionType ?? "prompt",
+      priority: input.queuePriority ?? 10,
+      metadata: {
+        messageID: message.info.id,
+        intent: input.intent,
+        hasImageInput: input.parts.some((part) => part.type === "file" && part.mime?.startsWith("image/")),
+        ...(input.queueMetadata ?? {}),
+      },
+    })
+    const completion = waitForAction(input.sessionID, queued.id)
+
     log.info("prompt entering loop", {
       sessionID: input.sessionID,
       messageID: message.info.id,
     })
-    return loop(input.sessionID)
+    startDispatch(input.sessionID)
+    return completion
   })
 
   export async function resolvePromptParts(template: string): Promise<PromptInput["parts"]> {
@@ -251,40 +403,61 @@ export namespace SessionPrompt {
   }
 
   function start(sessionID: string) {
-    const s = state()
-    if (s[sessionID]) return
+    const runtime = ensureRuntime(sessionID)
+    if (runtime.abort) return
     const controller = new AbortController()
-    s[sessionID] = {
-      abort: controller,
-      callbacks: [],
-    }
+    runtime.abort = controller
     return controller.signal
   }
 
   export function cancel(sessionID: string) {
     log.info("cancel", { sessionID })
-    const s = state()
-    const match = s[sessionID]
-    if (!match) return
-    match.abort.abort()
-    for (const item of match.callbacks) {
-      item.reject()
-    }
-    delete s[sessionID]
+    const runtime = ensureRuntime(sessionID)
+    runtime.abort?.abort()
+    runtime.abort = undefined
+    runtime.queue = []
+    runtime.guard = new QueryGuard()
+    rejectCallbacks(sessionID, new Error("Session prompt cancelled"))
+    publishQueue(sessionID)
+    publishQueryState(sessionID)
     SessionStatus.set(sessionID, { type: "idle" })
     return
   }
 
   export const loop = fn(Identifier.schema("session"), async (sessionID) => {
-    const abort = start(sessionID)
-    if (!abort) {
-      return new Promise<MessageV2.WithParts>((resolve, reject) => {
-        const callbacks = state()[sessionID].callbacks
-        callbacks.push({ resolve, reject })
-      })
+    const completion = waitForAction(sessionID)
+    startDispatch(sessionID)
+    return completion
+  })
+
+  async function dispatch(sessionID: string) {
+    const runtime = ensureRuntime(sessionID)
+    const generation = runtime.guard.tryDispatch()
+    if (generation === undefined) {
+      return
     }
 
-    using _ = defer(() => cancel(sessionID))
+    publishQueryState(sessionID, runtime.queue[0]?.type)
+    const abort = start(sessionID)
+    if (!abort) {
+      runtime.guard.cancelDispatch(generation)
+      publishQueryState(sessionID)
+      return
+    }
+    runtime.guard.start(generation)
+    publishQueryState(sessionID, runtime.queue[0]?.type)
+    let activeAction: QueuedSessionAction | undefined
+
+    using _ = defer(() => {
+      runtime.abort = undefined
+      runtime.guard.finish(generation)
+      publishQueue(sessionID)
+      publishQueryState(sessionID)
+      SessionStatus.set(sessionID, { type: "idle" })
+      if (runtime.queue.length > 0) {
+        queueMicrotask(() => startDispatch(sessionID))
+      }
+    })
 
     let step = 0
     let analysisRepairAttempts = 0
@@ -293,6 +466,9 @@ export namespace SessionPrompt {
       SessionStatus.set(sessionID, { type: "busy" })
       log.info("loop", { step, sessionID })
       if (abort.aborted) break
+      if (!activeAction && runtime.queue.length > 0) {
+        activeAction = nextQueuedAction(sessionID)
+      }
       let msgs = await MessageV2.filterCompacted(MessageV2.stream(sessionID))
 
       let lastUser: MessageV2.User | undefined
@@ -310,6 +486,13 @@ export namespace SessionPrompt {
         if (task && !lastFinished) {
           tasks.push(...task)
         }
+      }
+
+      const completedAction = activeAction ? completedReplyForAction(activeAction, msgs) : undefined
+      if (completedAction) {
+        resolveCallbacks(sessionID, completedAction, activeAction?.id)
+        activeAction = undefined
+        if (runtime.queue.length > 0) continue
       }
 
       if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
@@ -582,6 +765,8 @@ export namespace SessionPrompt {
         tools: lastUser.tools,
         processor,
         bypassAgentCheck,
+        intent: activeAction?.metadata?.["intent"] as WorkflowInputIntent | undefined,
+        hasImageInput: Boolean(activeAction?.metadata?.["hasImageInput"]),
       })
 
       if (step === 1) {
@@ -612,16 +797,26 @@ export namespace SessionPrompt {
         }
       }
 
-      await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: sessionMessages })
+      const progressive = await SessionCompaction.progressiveContext({
+        sessionID,
+        messages: sessionMessages,
+      })
+      const preparedMessages = progressive.messages
+
+      await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: preparedMessages })
 
       const result = await processor.process({
         user: lastUser,
         agent,
         abort,
         sessionID,
-        system: [...(await SystemPrompt.environment({ messages: msgs })), ...(await SystemPrompt.custom())],
+        system: [
+          ...(await SystemPrompt.environment({ messages: msgs })),
+          ...(await SystemPrompt.custom()),
+          ...progressive.system,
+        ].filter((item): item is string => typeof item === "string"),
         messages: [
-          ...MessageV2.toModelMessages(sessionMessages, model),
+          ...MessageV2.toModelMessages(preparedMessages, model),
           ...(isLastStep
             ? [
               {
@@ -687,14 +882,11 @@ export namespace SessionPrompt {
     SessionCompaction.prune({ sessionID })
     for await (const item of MessageV2.stream(sessionID)) {
       if (item.info.role === "user") continue
-      const queued = state()[sessionID]?.callbacks ?? []
-      for (const q of queued) {
-        q.resolve(item)
-      }
+      resolveCallbacks(sessionID, item)
       return item
     }
     throw new Error("Impossible")
-  })
+  }
 
   async function lastModel(sessionID: string) {
     for await (const item of MessageV2.stream(sessionID)) {
@@ -710,6 +902,8 @@ export namespace SessionPrompt {
     tools?: Record<string, boolean>
     processor: SessionProcessor.Info
     bypassAgentCheck: boolean
+    intent?: WorkflowInputIntent
+    hasImageInput?: boolean
   }) {
     using _ = log.time("resolveTools")
     const tools: Record<string, AITool> = {}
@@ -805,9 +999,25 @@ export namespace SessionPrompt {
       },
     })
 
+    const toolAvailability: ToolAvailabilityPolicy = {
+      sessionID: input.session.id,
+      agent: input.agent.name,
+      inputIntent: input.intent,
+      platformCapabilities: {
+        mcp: true,
+        images: input.hasImageInput ?? false,
+        remote: Flag.KILLSTATA_CLIENT !== "cli",
+      },
+      modelCapabilities: {
+        supportsTools: true,
+        supportsImages: /vision|vl|omni|gpt-4o|gpt-5/i.test(input.model.api.id),
+      },
+    }
+
     for (const item of await ToolRegistry.tools(
       { modelID: input.model.api.id, providerID: input.model.providerID },
       input.agent,
+      toolAvailability,
     )) {
       let schema
       try {
@@ -842,28 +1052,33 @@ export namespace SessionPrompt {
           const normalizedArgs = normalizeToolArgs(item.id, args)
 
           const ctx = context(normalizedArgs, options)
-          await Plugin.trigger(
-            "tool.execute.before",
-            {
-              tool: item.id,
-              sessionID: ctx.sessionID,
-              callID: ctx.callID,
+          return input.processor.executeTool(item.id, normalizedArgs, {
+            callID: options.toolCallId,
+            run: async () => {
+              await Plugin.trigger(
+                "tool.execute.before",
+                {
+                  tool: item.id,
+                  sessionID: ctx.sessionID,
+                  callID: ctx.callID,
+                },
+                {
+                  args: normalizedArgs,
+                },
+              )
+              const result = await item.execute(normalizedArgs, ctx)
+              await Plugin.trigger(
+                "tool.execute.after",
+                {
+                  tool: item.id,
+                  sessionID: ctx.sessionID,
+                  callID: ctx.callID,
+                },
+                result,
+              )
+              return result
             },
-            {
-              args: normalizedArgs,
-            },
-          )
-          const result = await item.execute(normalizedArgs, ctx)
-          await Plugin.trigger(
-            "tool.execute.after",
-            {
-              tool: item.id,
-              sessionID: ctx.sessionID,
-              callID: ctx.callID,
-            },
-            result,
-          )
-          return result
+          })
         },
       })
     }
@@ -879,85 +1094,90 @@ export namespace SessionPrompt {
 
         const ctx = context(normalizedArgs, opts)
 
-        await Plugin.trigger(
-          "tool.execute.before",
-          {
-            tool: key,
-            sessionID: ctx.sessionID,
-            callID: opts.toolCallId,
-          },
-          {
-            args: normalizedArgs,
-          },
-        )
+        return input.processor.executeTool(key, normalizedArgs, {
+          callID: opts.toolCallId,
+          run: async () => {
+            await Plugin.trigger(
+              "tool.execute.before",
+              {
+                tool: key,
+                sessionID: ctx.sessionID,
+                callID: opts.toolCallId,
+              },
+              {
+                args: normalizedArgs,
+              },
+            )
 
-        await ctx.ask({
-          permission: key,
-          metadata: {},
-          patterns: ["*"],
-          always: ["*"],
-        })
-
-        const result = await execute(normalizedArgs, opts)
-
-        await Plugin.trigger(
-          "tool.execute.after",
-          {
-            tool: key,
-            sessionID: ctx.sessionID,
-            callID: opts.toolCallId,
-          },
-          result,
-        )
-
-        const textParts: string[] = []
-        const attachments: MessageV2.FilePart[] = []
-
-        for (const contentItem of result.content) {
-          if (contentItem.type === "text") {
-            textParts.push(contentItem.text)
-          } else if (contentItem.type === "image") {
-            attachments.push({
-              id: Identifier.ascending("part"),
-              sessionID: input.session.id,
-              messageID: input.processor.message.id,
-              type: "file",
-              mime: contentItem.mimeType,
-              url: `data:${contentItem.mimeType};base64,${contentItem.data}`,
+            await ctx.ask({
+              permission: key,
+              metadata: {},
+              patterns: ["*"],
+              always: ["*"],
             })
-          } else if (contentItem.type === "resource") {
-            const { resource } = contentItem
-            if (resource.text) {
-              textParts.push(resource.text)
-            }
-            if (resource.blob) {
-              attachments.push({
-                id: Identifier.ascending("part"),
-                sessionID: input.session.id,
-                messageID: input.processor.message.id,
-                type: "file",
-                mime: resource.mimeType ?? "application/octet-stream",
-                url: `data:${resource.mimeType ?? "application/octet-stream"};base64,${resource.blob}`,
-                filename: resource.uri,
-              })
-            }
-          }
-        }
 
-        const truncated = await Truncate.output(textParts.join("\n\n"), {}, input.agent)
-        const metadata = {
-          ...(result.metadata ?? {}),
-          truncated: truncated.truncated,
-          ...(truncated.truncated && { outputPath: truncated.outputPath }),
-        }
+            const result = await execute(normalizedArgs, opts)
 
-        return {
-          title: "",
-          metadata,
-          output: truncated.content,
-          attachments,
-          content: result.content, // directly return content to preserve ordering when outputting to model
-        }
+            await Plugin.trigger(
+              "tool.execute.after",
+              {
+                tool: key,
+                sessionID: ctx.sessionID,
+                callID: opts.toolCallId,
+              },
+              result,
+            )
+
+            const textParts: string[] = []
+            const attachments: MessageV2.FilePart[] = []
+
+            for (const contentItem of result.content) {
+              if (contentItem.type === "text") {
+                textParts.push(contentItem.text)
+              } else if (contentItem.type === "image") {
+                attachments.push({
+                  id: Identifier.ascending("part"),
+                  sessionID: input.session.id,
+                  messageID: input.processor.message.id,
+                  type: "file",
+                  mime: contentItem.mimeType,
+                  url: `data:${contentItem.mimeType};base64,${contentItem.data}`,
+                })
+              } else if (contentItem.type === "resource") {
+                const { resource } = contentItem
+                if (resource.text) {
+                  textParts.push(resource.text)
+                }
+                if (resource.blob) {
+                  attachments.push({
+                    id: Identifier.ascending("part"),
+                    sessionID: input.session.id,
+                    messageID: input.processor.message.id,
+                    type: "file",
+                    mime: resource.mimeType ?? "application/octet-stream",
+                    url: `data:${resource.mimeType ?? "application/octet-stream"};base64,${resource.blob}`,
+                    filename: resource.uri,
+                  })
+                }
+              }
+            }
+
+            const truncated = await Truncate.output(textParts.join("\n\n"), {}, input.agent)
+            const metadata = {
+              ...(result.metadata ?? {}),
+              truncated: truncated.truncated,
+              ...(truncated.truncated && { outputPath: truncated.outputPath }),
+            }
+
+            return {
+              title: "",
+              metadata,
+              output: truncated.content,
+              attachments,
+              content: result.content,
+            }
+          },
+        })
       }
       tools[key] = item
     }
@@ -1363,7 +1583,7 @@ export namespace SessionPrompt {
     if (!userMessage) return input.messages
 
     // Original logic when experimental explorer mode is disabled
-    if (!Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE) {
+    if (!Flag.KILLSTATA_EXPERIMENTAL_PLAN_MODE) {
       if (input.agent.name === "explorer") {
         userMessage.parts.push({
           id: Identifier.ascending("part"),
@@ -1766,6 +1986,24 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     log.info("command", input)
     const command = await Command.get(input.command)
     const agentName = command.agent ?? input.agent ?? (await Agent.defaultAgent())
+    const intent: WorkflowInputIntent | undefined =
+      input.command === "workflow" || input.command === "stage" || input.command === "artifact" || input.command === "doctor"
+        ? "status"
+        : input.command === "verify"
+          ? "verify"
+          : input.command === "rerun"
+            ? "repair"
+            : command.workflowAware
+              ? "analysis"
+              : undefined
+    const queuePriority =
+      command.queueBehavior === "immediate"
+        ? 100
+        : input.command === "verify"
+          ? 70
+          : input.command === "rerun"
+            ? 60
+            : 20
 
     const raw = input.arguments.match(argsRegex) ?? []
     const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
@@ -1894,6 +2132,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       agent: userAgent,
       parts,
       variant: input.variant,
+      intent,
+      queueActionType: "command",
+      queuePriority,
+      queueMetadata: {
+        command: input.command,
+        queueBehavior: command.queueBehavior ?? (command.immediate ? "immediate" : "queued"),
+        workflowAware: command.workflowAware ?? false,
+      },
     })) as MessageV2.WithParts
 
     Bus.publish(Command.Event.Executed, {

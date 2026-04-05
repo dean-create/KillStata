@@ -32,7 +32,7 @@ import {
   stageOutputPath,
   upsertDatasetIndexEntry,
 } from "./analysis-state"
-import { classifyToolFailure, evaluateQaGate, persistToolReflection } from "./analysis-reflection"
+import { checkRetryBudget, classifyToolFailure, evaluateQaGate, persistToolReflection } from "./analysis-reflection"
 import { AnalysisIntent } from "./analysis-intent"
 import {
   createCorrelationNumericSnapshot,
@@ -41,7 +41,7 @@ import {
 } from "./analysis-grounding"
 import { relativeWithinProject, resolveToolPath } from "./analysis-path"
 import { numericSnapshotPreview } from "./analysis-tool-metadata"
-import { pythonInstallCommand, resolveRuntimePythonCommand } from "@/killstata/runtime-config"
+import { formatRuntimePythonSetupError, getRuntimePythonStatus } from "@/killstata/runtime-config"
 
 const log = Log.create({ service: "data-import-tool" })
 
@@ -99,6 +99,7 @@ type PythonResult = {
   error?: string
   traceback?: string
   error_log_path?: string
+  resolved_python_executable?: string
   status?: string
   input_path?: string
   output_path?: string
@@ -280,28 +281,45 @@ export const DataImportTool = Tool.define("data_import", {
     options: z.object({}).passthrough().optional(),
   }),
   async execute(params, ctx) {
-    const pythonCommand = await resolveRuntimePythonCommand()
-    const installCommand = pythonInstallCommand(pythonCommand)
+    const retryBudget = checkRetryBudget("data_import", ctx.sessionID)
+    if (!retryBudget.allowed) {
+      throw new Error(
+        `Retry budget exhausted for data_import in this session (${retryBudget.count}/${retryBudget.max}). Inspect the reflection logs and repair the failed stage before retrying.`,
+      )
+    }
+    const pythonStatus = await getRuntimePythonStatus()
+    if (!pythonStatus.ok || pythonStatus.missing.length) {
+      throw new Error(formatRuntimePythonSetupError("data_import", pythonStatus))
+    }
+    const pythonCommand = pythonStatus.executable
+    const installCommand = pythonStatus.installCommand
     if (ctx.agent === "analyst" && params.action !== "healthcheck") {
       const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
       if (!analystState.asked) {
-        const answers = await Question.ask({
-          sessionID: ctx.sessionID,
-          questions: [
-            {
-              header: "Analysis Plan",
-              question: "Before I start the econometric workflow, do you want me to list a concise plan first and then execute it?",
-              custom: false,
-              options: [
-                { label: "Yes", description: "List a concise plan first, then execute the econometric workflow" },
-                { label: "No", description: "Skip the plan and proceed directly" },
-              ],
-            },
-          ],
-          tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
-        })
+        let preference: "plan_first" | "direct" = "direct"
+        try {
+          const answers = await Question.ask({
+            sessionID: ctx.sessionID,
+            questions: [
+              {
+                header: "Analysis Plan",
+                question:
+                  "Before I start the econometric workflow, do you want me to list a concise plan first and then execute it?",
+                custom: false,
+                options: [
+                  { label: "Yes", description: "List a concise plan first, then execute the econometric workflow" },
+                  { label: "No", description: "Skip the plan and proceed directly" },
+                ],
+              },
+            ],
+            tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+          })
 
-        const preference = answers[0]?.[0] === "Yes" ? "plan_first" : "direct"
+          preference = answers[0]?.[0] === "Yes" ? "plan_first" : "direct"
+        } catch (error) {
+          if (!(error instanceof Question.RejectedError)) throw error
+        }
+
         AnalysisIntent.setAnalyst(ctx.sessionID, {
           asked: true,
           preference,
@@ -900,14 +918,14 @@ try:
         save_json(summary_path, {"result": result, "quality": build_quality_report(df), "schema": build_schema(df)})
         with open(log_path, "w", encoding="utf-8") as f:
             f.write("# Data Import Log\\n\\n")
-            f.write(f"Input: {input_path}\\\\n")
-            f.write(f"Output: {output_path}\\\\n")
+            f.write(f"Input: {input_path}\\n")
+            f.write(f"Output: {output_path}\\n")
             if inspection_csv_path:
-                f.write(f"Inspection CSV: {inspection_csv_path}\\\\n")
+                f.write(f"Inspection CSV: {inspection_csv_path}\\n")
             if inspection_workbook_path:
-                f.write(f"Inspection workbook: {inspection_workbook_path}\\\\n")
-            f.write(f"Rows: {rows_before}\\\\n")
-            f.write(f"Columns: {columns_before}\\\\n")
+                f.write(f"Inspection workbook: {inspection_workbook_path}\\n")
+            f.write(f"Rows: {rows_before}\\n")
+            f.write(f"Columns: {columns_before}\\n")
         emit(result)
         raise SystemExit(0)
 
@@ -1273,7 +1291,7 @@ except Exception as exc:
         })
       } catch (error) {
         throw new Error(
-          `Failed to launch python command "${pythonCommand}". Run killstata config to set Python if needed.\n${error instanceof Error ? error.message : String(error)}`,
+          `Failed to launch python command "${pythonCommand}". Run \`killstata config\` to set Python if needed.\n${error instanceof Error ? error.message : String(error)}`,
         )
       }
 
@@ -1281,14 +1299,15 @@ except Exception as exc:
 
       if (code !== 0) {
         log.error("python failed", { code, stderr })
-        throw new Error(`Data import failed (exit code ${code})\n${stderr}\n${stdout}`)
+        throw new Error(`Data import failed with Python ${pythonCommand} (exit code ${code})\n${stderr}\n${stdout}`)
       }
 
       try {
         result = parsePythonResult<PythonResult>(stdout)
       } catch (error) {
-        throw new Error(`Failed to parse python result: ${error}\nRaw output:\n${stdout}\nStderr:\n${stderr}`)
+        throw new Error(`Failed to parse python result from ${pythonCommand}: ${error}\nRaw output:\n${stdout}\nStderr:\n${stderr}`)
       }
+      result.resolved_python_executable = pythonCommand
     }
     const effectiveRunId = inferRunId({
       requestedRunId: result.run_id ?? runId,
@@ -1317,6 +1336,7 @@ except Exception as exc:
           datasetId: params.datasetId,
           stageId: params.stageId,
         },
+        sessionId: ctx.sessionID,
       })
       const reflectionPath = persistToolReflection(reflection)
       await ctx.metadata({
@@ -1328,6 +1348,7 @@ except Exception as exc:
         },
       })
       let message = `Data operation failed: ${result.error ?? "unknown error"}`
+      if (result.resolved_python_executable) message += `\nPython interpreter: ${result.resolved_python_executable}`
       if (result.error_log_path) message += `\nError log: ${relativeWithinProject(result.error_log_path)}`
       message += `\nReflection log: ${relativeWithinProject(reflectionPath)}`
       if (result.install_command) message += `\nInstall command: ${result.install_command}`
@@ -1346,6 +1367,7 @@ except Exception as exc:
         datasetId: params.datasetId,
         stageId: params.stageId,
       },
+      sessionId: ctx.sessionID,
     })
 
     if (qaGate.reflection) {

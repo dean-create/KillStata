@@ -20,10 +20,10 @@ body:
       required: false
 
   - type: input
-    id: opencode-version
+    id: killstata-version
     attributes:
-      label: OpenCode version
-      description: What version of OpenCode are you using?
+      label: Killstata version
+      description: What version of Killstata are you using?
     validations:
       required: false
 

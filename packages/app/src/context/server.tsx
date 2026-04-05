@@ -1,5 +1,5 @@
-import { createOpencodeClient } from "@opencode-ai/sdk/v2/client"
-import { createSimpleContext } from "@opencode-ai/ui/context"
+import { createKillstataClient } from "@killstata/sdk/v2/client"
+import { createSimpleContext } from "@killstata/ui/context"
 import { batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
@@ -92,7 +92,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const [healthy, setHealthy] = createSignal<boolean | undefined>(undefined)
 
     const check = (url: string) => {
-      const sdk = createOpencodeClient({
+      const sdk = createKillstataClient({
         baseUrl: url,
         fetch: platform.fetch,
         signal: AbortSignal.timeout(3000),

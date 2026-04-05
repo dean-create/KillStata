@@ -4,12 +4,12 @@
 
 ### 1. 项目结构搭建 ✅
 
-成功创建killstata项目,从opencode fork并进行了重命名和结构调整:
+成功创建killstata项目,从killstata fork并进行了重命名和结构调整:
 
 ```
 killstata/
 ├── packages/
-│   └── killstata/  (已从opencode重命名)
+│   └── killstata/  (已从killstata重命名)
 │       ├── python/              # 新增Python工具库
 │       │   ├── econometrics/
 │       │   │   ├── __init__.py
@@ -225,7 +225,7 @@ await ctx.ask({
 
 ### 遵循的约束
 
-✅ 不破坏opencode原有能力
+✅ 不破坏killstata原有能力
 ✅ 工具作为独立模块
 ✅ 所有操作可追溯、可重跑
 ✅ 输出文件命名规范

@@ -180,6 +180,8 @@ export function tui(input: {
   })
 }
 
+const CTRL_C_EXIT_WINDOW_MS = 2000
+
 function App() {
   const route = useRoute()
   const dimensions = useTerminalDimensions()
@@ -195,6 +197,42 @@ function App() {
   const sync = useSync()
   const exit = useExit()
   const promptRef = usePromptRef()
+  let lastCtrlCAt = 0
+
+  const copySelectedText = async () => {
+    const text = renderer.getSelection()?.getSelectedText()
+    if (!text || text.length === 0) return false
+
+    await Clipboard.copy(text)
+      .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+      .catch(toast.error)
+    renderer.clearSelection()
+    return true
+  }
+
+  const handleCtrlC = async () => {
+    const copied = await copySelectedText()
+    const now = Date.now()
+
+    if (now - lastCtrlCAt <= CTRL_C_EXIT_WINDOW_MS) {
+      lastCtrlCAt = 0
+      await exit()
+      return
+    }
+
+    lastCtrlCAt = now
+    toast.show({
+      message: copied ? "Copied selection. Press Ctrl+C again to exit" : "Press Ctrl+C again to exit",
+      variant: "info",
+      duration: CTRL_C_EXIT_WINDOW_MS,
+    })
+  }
+
+  useKeyboard(async (evt) => {
+    if (evt.ctrl && evt.name === "c") {
+      await handleCtrlC()
+    }
+  })
 
   // Wire up console copy-to-clipboard via opentui's onCopySelection callback
   renderer.console.onCopySelection = async (text: string) => {
@@ -213,7 +251,7 @@ function App() {
 
   // Update terminal window title based on current route and session
   createEffect(() => {
-    if (!terminalTitleEnabled() || Flag.OPENCODE_DISABLE_TERMINAL_TITLE) return
+    if (!terminalTitleEnabled() || Flag.KILLSTATA_DISABLE_TERMINAL_TITLE) return
 
     if (route.data.type === "home") {
       renderer.setTerminalTitle("Killstata")
@@ -388,6 +426,7 @@ function App() {
       category: "Agent",
       slash: {
         name: "mcps",
+        aliases: ["mcp"],
       },
       onSelect: () => {
         dialog.replace(() => <DialogMcp />)
@@ -438,7 +477,7 @@ function App() {
     {
       title: "View status",
       keybind: "status_view",
-      value: "opencode.status",
+      value: "killstata.status",
       slash: {
         name: "status",
       },
@@ -653,17 +692,11 @@ function App() {
       height={dimensions().height}
       backgroundColor={theme.background}
       onMouseUp={async () => {
-        if (Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) {
+        if (Flag.KILLSTATA_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) {
           renderer.clearSelection()
           return
         }
-        const text = renderer.getSelection()?.getSelectedText()
-        if (text && text.length > 0) {
-          await Clipboard.copy(text)
-            .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
-            .catch(toast.error)
-          renderer.clearSelection()
-        }
+        await copySelectedText()
       }}
     >
       <Switch>
@@ -698,11 +731,9 @@ function ErrorComponent(props: {
       handleExit()
     }
   })
+  
   const [copied, setCopied] = createSignal(false)
-
-  const issueURL = new URL("https://github.com/anomalyco/opencode/issues/new?template=bug-report.yml")
-
-  // Choose safe fallback colors per mode since theme context may not be available
+  const issueURL = new URL("https://killstata.io/support?template=bug-report.yml")
   const isLight = props.mode === "light"
   const colors = {
     bg: isLight ? "#ffffff" : "#0a0a0a",
@@ -722,7 +753,7 @@ function ErrorComponent(props: {
     )
   }
 
-  issueURL.searchParams.set("opencode-version", Installation.VERSION)
+  issueURL.searchParams.set("killstata-version", Installation.VERSION)
 
   const copyIssueURL = () => {
     Clipboard.copy(issueURL.toString()).then(() => {

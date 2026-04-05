@@ -1,11 +1,15 @@
-import { Bus } from "../bus"
-import { Installation } from "../installation"
+﻿import { Bus } from "../bus"
 import { Session } from "../session"
 import { MessageV2 } from "../session/message-v2"
 import { Log } from "../util/log"
 
 export namespace Share {
   const log = Log.create({ service: "share" })
+  const explicitUrl = process.env["KILLSTATA_SHARE_URL"]?.trim()
+  const disabled =
+    process.env["KILLSTATA_DISABLE_SHARE"] === "true" ||
+    process.env["KILLSTATA_DISABLE_SHARE"] === "1" ||
+    !explicitUrl
 
   let queue: Promise<void> = Promise.resolve()
   const pending = new Map<string, any>()
@@ -66,14 +70,14 @@ export namespace Share {
     })
   }
 
-  export const URL =
-    process.env["OPENCODE_API"] ??
-    (Installation.isPreview() || Installation.isLocal() ? "https://api.dev.opencode.ai" : "https://api.opencode.ai")
+  export const URL = explicitUrl ?? ""
 
-  const disabled = process.env["OPENCODE_DISABLE_SHARE"] === "true" || process.env["OPENCODE_DISABLE_SHARE"] === "1"
+  function unavailable() {
+    return new Error("Killstata share is unavailable in this build. Set KILLSTATA_SHARE_URL to a self-hosted endpoint.")
+  }
 
   export async function create(sessionID: string) {
-    if (disabled) return { url: "", secret: "" }
+    if (disabled) throw unavailable()
     return fetch(`${URL}/share_create`, {
       method: "POST",
       body: JSON.stringify({ sessionID: sessionID }),
@@ -83,7 +87,7 @@ export namespace Share {
   }
 
   export async function remove(sessionID: string, secret: string) {
-    if (disabled) return {}
+    if (disabled) throw unavailable()
     return fetch(`${URL}/share_delete`, {
       method: "POST",
       body: JSON.stringify({ sessionID, secret }),

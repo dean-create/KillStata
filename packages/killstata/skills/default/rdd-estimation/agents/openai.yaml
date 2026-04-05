@@ -1,0 +1,8 @@
+interface:
+  display_name: "RDD Estimation"
+  short_description: "Run sharp or fuzzy regression-discontinuity workflows around a cutoff"
+  default_prompt: "Use $rdd-estimation to estimate this cutoff-based design as an RDD."
+
+policy:
+  allow_implicit_invocation: true
+

@@ -1,7 +1,7 @@
-import z from "zod"
+﻿import z from "zod"
 import path from "path"
 import { Instance } from "../project/instance"
-import { NamedError } from "@opencode-ai/util/error"
+import { NamedError } from "@killstata/util/error"
 import { ConfigMarkdown } from "../config/markdown"
 import { Log } from "../util/log"
 import { Global } from "@/global"
@@ -9,7 +9,7 @@ import { Filesystem } from "@/util/filesystem"
 import { Flag } from "@/flag/flag"
 import { Bus } from "@/bus"
 import { Session } from "@/session"
-import { builtinSkillsRoot, doctorSkillFile, importedSkillsRoot, pathWithin, SkillSource } from "./manage"
+import { builtinSkillsRoot, defaultSkillsRoot, doctorSkillFile, importedSkillsRoot, pathWithin, SkillSource } from "./manage"
 import { legacyUserSkillRoot } from "@/killstata/runtime-config"
 
 export namespace Skill {
@@ -43,9 +43,17 @@ export namespace Skill {
   const KILLSTATA_SKILL_GLOB = new Bun.Glob("{skill,skills}/**/SKILL.md")
   const CLAUDE_SKILL_GLOB = new Bun.Glob("skills/**/SKILL.md")
   const BUILTIN_SKILL_GLOB = new Bun.Glob("**/SKILL.md")
+  const SKILL_SOURCE_PRIORITY: Record<SkillSource, number> = {
+    builtin: 0,
+    default: 1,
+    imported: 2,
+    user: 3,
+    project: 4,
+  }
 
   function classifyKillstataSource(root: string, match: string): SkillSource {
     if (pathWithin(builtinSkillsRoot(), match)) return "builtin"
+    if (pathWithin(defaultSkillsRoot(), match)) return "default"
     if (pathWithin(importedSkillsRoot(), match)) return "imported"
     if (pathWithin(path.join(Global.Path.home, ".killstata"), root)) return "user"
     return "project"
@@ -69,13 +77,14 @@ export namespace Skill {
       const parsed = Info.pick({ name: true, description: true }).safeParse(md.data)
       if (!parsed.success) return
 
-      // Warn on duplicate skill names
-      if (skills[parsed.data.name]) {
+      const existing = skills[parsed.data.name]
+      if (existing) {
         log.warn("duplicate skill name", {
           name: parsed.data.name,
-          existing: skills[parsed.data.name].location,
+          existing: existing.location,
           duplicate: match,
         })
+        if (SKILL_SOURCE_PRIORITY[source] < SKILL_SOURCE_PRIORITY[existing.source]) return
       }
 
       skills[parsed.data.name] = {
@@ -98,8 +107,8 @@ export namespace Skill {
       }
     }
 
-    const userDirs = [path.join(Global.Path.home, ".killstata"), path.join(Global.Path.home, ".opencode")]
-    if (!Flag.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS) {
+    const userDirs = [path.join(Global.Path.home, ".killstata")]
+    if (!Flag.KILLSTATA_DISABLE_CLAUDE_CODE_SKILLS) {
       userDirs.push(path.join(Global.Path.home, ".claude"))
     }
 
@@ -122,15 +131,19 @@ export namespace Skill {
       })
 
       for (const match of matches) {
-        const imported =
-          pathWithin(importedSkillsRoot(), match) || pathWithin(path.join(legacyUserSkillRoot(), "imported"), match)
-        await addSkill(match, imported ? "imported" : "user")
+        const source: SkillSource =
+          pathWithin(defaultSkillsRoot(), match) || pathWithin(path.join(legacyUserSkillRoot(), "default"), match)
+            ? "default"
+            : pathWithin(importedSkillsRoot(), match) || pathWithin(path.join(legacyUserSkillRoot(), "imported"), match)
+              ? "imported"
+              : "user"
+        await addSkill(match, source)
       }
     }
 
     const projectDirs = await Array.fromAsync(
       Filesystem.up({
-        targets: !Flag.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS ? [".killstata", ".opencode", ".claude"] : [".killstata", ".opencode"],
+        targets: !Flag.KILLSTATA_DISABLE_CLAUDE_CODE_SKILLS ? [".killstata", ".claude"] : [".killstata"],
         start: Instance.directory,
         stop: Instance.worktree,
       }),

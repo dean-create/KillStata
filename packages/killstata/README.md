@@ -1,6 +1,6 @@
 # killstata
 
-killstata 是一个基于 opencode 的 CLI 计量经济学智能助理。
+killstata 是一个基于 killstata 的 CLI 计量经济学智能助理。
 
 ## 简介
 
@@ -51,4 +51,4 @@ killstata
 
 ---
 
-基于 [OpenCode](https://github.com/anomalyco/opencode) 构建
+基于 [Killstata](https://github.com/anomalyco/killstata) 构建

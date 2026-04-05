@@ -1,0 +1,75 @@
+
+  ___  ____  ____  ____  ____ ®
+ /__    /   ____/   /   ____/      17.0
+___/   /   /___/   /   /___/       MP—Parallel Edition
+
+ Statistics and Data Science       Copyright 1985-2021 StataCorp LLC
+                                   StataCorp
+                                   4905 Lakeway Drive
+                                   College Station, Texas 77845 USA
+                                   800-STATA-PC        https://www.stata.com
+                                   979-696-4600        stata@stata.com
+
+Stata license: Single-user 4-core  perpetual
+Serial number: 501806300204
+  Licensed to: 帅气的
+               成伟同学
+
+Notes:
+      1. Stata is running in batch mode.
+      2. Unicode is supported; see help unicode_advice.
+      3. More than 2 billion observations are allowed; see help obs_advice.
+      4. Maximum number of variables is set to 5,000 but can be increased;
+          see help set_maxvar.
+
+. do C:\Users\15831\.killstata\stata-mcp\sessions\test_session\wrapper-ee5d23ef
+> 4a3940d5b39faf8172682c3e.do 
+
+. capture log close _all
+
+. log using "C:\Users\15831\.killstata\stata-mcp\sessions\test_session\wrapper-
+> 250cbd5d0a14454aaf67ccf882e1cf53.log", text replace
+(file
+    C:\Users\15831\.killstata\stata-mcp\sessions\test_session\wrapper-250cbd5
+    > d0a14454aaf67ccf882e1cf53.log not found)
+-------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  C:\Users\15831\.killstata\stata-mcp\sessions\test_session\wrapper-
+> 250cbd5d0a14454aaf67ccf882e1cf53.log
+  log type:  text
+ opened on:   2 Apr 2026, 12:07:52
+
+. set more off
+
+. capture noisily cd "D:\SMWPD\Project_all\openstata\killstata\packages\killsta
+> ta"
+D:\SMWPD\Project_all\openstata\killstata\packages\killstata
+
+. capture confirm file "C:\Users\15831\.killstata\stata-mcp\sessions\test_sessi
+> on\state.dta"
+
+. if _rc == 0 {
+.   capture noisily use "C:\Users\15831\.killstata\stata-mcp\sessions\test_sess
+> ion\state.dta", clear
+. }
+
+. capture noisily do "C:\Users\15831\.killstata\stata-mcp\sessions\test_session
+> \selection-8ca1569aa0244fc49863060df97e8a6c.do"
+
+. display "✅ Stata is working!"
+✅ Stata is working!
+
+. 
+end of do-file
+
+. local killstata_rc = _rc
+
+. capture noisily save "C:\Users\15831\.killstata\stata-mcp\sessions\test_sessi
+> on\state.dta", replace
+no variables defined
+
+. capture log close _all
+
+. exit `killstata_rc'
+
+end of do-file

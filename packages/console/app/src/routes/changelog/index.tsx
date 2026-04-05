@@ -17,10 +17,10 @@ type Release = {
 
 const getReleases = query(async () => {
   "use server"
-  const response = await fetch("https://api.github.com/repos/anomalyco/opencode/releases?per_page=20", {
+  const response = await fetch("https://api.github.com/repos/anomalyco/killstata/releases?per_page=20", {
     headers: {
       Accept: "application/vnd.github.v3+json",
-      "User-Agent": "OpenCode-Console",
+      "User-Agent": "Killstata-Console",
     },
     cf: {
       cacheTtl: 60 * 5,
@@ -92,9 +92,9 @@ export default function Changelog() {
 
   return (
     <main data-page="changelog">
-      <Title>OpenCode | Changelog</Title>
+      <Title>Killstata | Changelog</Title>
       <Link rel="canonical" href={`${config.baseUrl}/changelog`} />
-      <Meta name="description" content="OpenCode release notes and changelog" />
+      <Meta name="description" content="Killstata release notes and changelog" />
 
       <div data-component="container">
         <Header hideGetStarted />
@@ -102,7 +102,7 @@ export default function Changelog() {
         <div data-component="content">
           <section data-component="changelog-hero">
             <h1>Changelog</h1>
-            <p>New updates and improvements to OpenCode</p>
+            <p>New updates and improvements to Killstata</p>
           </section>
 
           <section data-component="releases">

@@ -1,30 +1,15 @@
 #!/usr/bin/env node
 
-/**
- * killstata CLI 启动器
- * 
- * 职责：
- * 1. 检测 Bun 运行时是否可用
- * 2. 使用 Bun 执行 TypeScript 源码入口
- * 3. 回退到 Node.js 执行打包后的 JS（如果有）
- */
-
 const { execSync, spawn } = require("child_process")
-const path = require("path")
 const fs = require("fs")
 const os = require("os")
+const path = require("path")
 
-// killstata 包根目录（bin 的上一级）
 const PACKAGE_ROOT = path.resolve(__dirname, "..")
+const PACKAGE_NAME = "killstata"
 
-/**
- * 检测某个命令是否在系统 PATH 中可用
- * @param {string} cmd - 要检测的命令名
- * @returns {boolean} 是否可用
- */
 function commandExists(cmd) {
   try {
-    // Windows 用 where，Unix 用 which
     const check = os.platform() === "win32" ? "where" : "which"
     execSync(`${check} ${cmd}`, { stdio: "ignore" })
     return true
@@ -33,25 +18,18 @@ function commandExists(cmd) {
   }
 }
 
-/**
- * 用指定的运行时启动 killstata
- * @param {string} runtime - 运行时命令（bun 或 node）
- * @param {string} entryFile - 入口文件路径
- */
 function launch(runtime, entryFile) {
-  // 传递用户的所有命令行参数
-  const args = [entryFile, ...process.argv.slice(2)]
+  const args = entryFile ? [entryFile, ...process.argv.slice(2)] : [...process.argv.slice(2)]
 
-  // 如果是 bun 运行 TS，需要加上 --conditions=browser（因为 @opentui 用了 browser 条件导出）
   if (runtime === "bun" && entryFile.endsWith(".ts")) {
     args.unshift("run", "--conditions=browser")
   }
 
   const child = spawn(runtime, args, {
-    stdio: "inherit",  // 继承标准输入输出，让 TUI 正常工作
+    stdio: "inherit",
     env: {
       ...process.env,
-      KILLSTATA: "1",  // 标记 killstata 环境
+      KILLSTATA: "1",
     },
   })
 
@@ -60,41 +38,62 @@ function launch(runtime, entryFile) {
   })
 
   child.on("error", (err) => {
-    console.error(`启动失败: ${err.message}`)
+    console.error(`Failed to launch killstata: ${err.message}`)
     process.exit(1)
   })
 }
 
-// ============== 主逻辑 ==============
+function installedBinaryCandidates() {
+  const platform = os.platform() === "win32" ? "windows" : os.platform()
+  const arch = os.arch() === "x64" || os.arch() === "arm64" ? os.arch() : "x64"
+  const names = [`${PACKAGE_NAME}-${platform}-${arch}`]
+  const nodeModulesRoots = [path.join(PACKAGE_ROOT, "node_modules"), path.resolve(PACKAGE_ROOT, "..")]
 
-// 优先级1：如果设置了 KILLSTATA_BIN_PATH 环境变量，直接用它
+  if (platform === "linux") {
+    names.push(
+      `${PACKAGE_NAME}-${platform}-${arch}-musl`,
+      `${PACKAGE_NAME}-${platform}-${arch}-baseline`,
+      `${PACKAGE_NAME}-${platform}-${arch}-baseline-musl`,
+    )
+  } else if (arch === "x64") {
+    names.push(`${PACKAGE_NAME}-${platform}-${arch}-baseline`)
+  }
+
+  return nodeModulesRoots.flatMap((root) =>
+    names.flatMap((name) => {
+      const base = path.join(root, name, "bin")
+      return [path.join(base, `${PACKAGE_NAME}.exe`), path.join(base, PACKAGE_NAME)]
+    }),
+  )
+}
+
 if (process.env.KILLSTATA_BIN_PATH) {
   launch(process.env.KILLSTATA_BIN_PATH, "")
   return
 }
 
-// 优先级2：检测 Bun 是否可用，用 Bun 直接运行 TS 源码
+for (const binaryPath of installedBinaryCandidates()) {
+  if (fs.existsSync(binaryPath)) {
+    launch(binaryPath, "")
+    return
+  }
+}
+
 const tsEntry = path.join(PACKAGE_ROOT, "src", "index.ts")
 if (commandExists("bun") && fs.existsSync(tsEntry)) {
   launch("bun", tsEntry)
   return
 }
 
-// 优先级3：如果有预编译的 JS 产物（未来 build 步骤会生成），用 Node.js 运行
 const jsEntry = path.join(PACKAGE_ROOT, "dist", "index.js")
 if (fs.existsSync(jsEntry)) {
   launch("node", jsEntry)
   return
 }
 
-// 都没有，给出错误提示
 console.error(`
-  killstata 需要 Bun 运行时才能启动。
-
-  安装 Bun:
-    curl -fsSL https://bun.sh/install | bash      (macOS/Linux)
-    powershell -c "irm bun.sh/install.ps1 | iex"  (Windows)
-
-  或访问: https://bun.sh
+  killstata could not find a bundled native binary, a local dist build, or a Bun runtime.
+  Reinstall the npm package for your platform, or install Bun for source-mode development:
+    https://bun.sh
 `)
 process.exit(1)

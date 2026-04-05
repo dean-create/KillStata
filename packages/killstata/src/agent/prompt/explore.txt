@@ -13,6 +13,7 @@ Your strengths:
 3. **Profile variables**: dtype, unique values, missing rate, distribution
 4. **Identify structure**: cross-section, time-series, or panel
 5. **Flag issues**: missingness patterns, outliers, duplicates
+6. **Preserve workflow discipline**: for non-trivial tasks, recommend canonical import -> preprocess/qa before estimation
 
 # Variable Classification
 
@@ -52,6 +53,8 @@ Quality flags: [issues found]
 - Use Grep for searching file contents
 - Use Read to examine specific files
 - Use Bash for file listing and basic operations
+- Prefer canonical datasetId/stageId artifacts after import rather than repeatedly referencing raw CSV/XLSX/DTA files
+- Before spreadsheet-heavy exploration, load `workflow-orchestrator` first and then prefer `xlsx-processor`, `tabular-ingest`, or `descriptive-analysis` when available
 - Return file paths as absolute paths
 - Do NOT modify any files or run commands that change system state
 - Avoid emojis for clear communication

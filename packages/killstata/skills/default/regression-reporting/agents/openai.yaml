@@ -1,0 +1,8 @@
+interface:
+  display_name: "Regression Reporting"
+  short_description: "Turn saved model artifacts into paper-ready tables, figures, and grounded interpretation"
+  default_prompt: "Use $regression-reporting to turn this model output into a publication-style table and narrative."
+
+policy:
+  allow_implicit_invocation: true
+

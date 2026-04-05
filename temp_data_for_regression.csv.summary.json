@@ -1,0 +1,55 @@
+{
+  "success": true,
+  "action": "export",
+  "input_path": "D:\\SMWPD\\Project_all\\openstata\\killstata\\.killstata\\datasets\\did_18e405d7\\stages\\stage_000_import_20260331-213238.parquet",
+  "output_path": "D:\\SMWPD\\Project_all\\openstata\\killstata\\temp_data_for_regression.csv",
+  "rows_before": 4709,
+  "rows_after": 4709,
+  "columns_before": 35,
+  "columns_after": 35,
+  "column_info": {
+    "Category": [
+      "city"
+    ],
+    "Numeric": [
+      "year",
+      "did",
+      "time",
+      "人口规模",
+      "人口密度",
+      "经济发展水平",
+      "金融发展程度",
+      "城镇化水平",
+      "政府干预程度",
+      "财政投资力度",
+      "财政分权度",
+      "产业结构整体升级",
+      "产业结构高级化",
+      "产业结构合理化",
+      "教育水平支出",
+      "科学技术水平",
+      "科教支出",
+      "人力资本",
+      "人力资本存量",
+      "环境规制",
+      "基础设施",
+      "市场化水平",
+      "高质量发展指数",
+      "产业结构高级化2",
+      "产业结构合理化2",
+      "生产性服务业占比",
+      "包容性TFP指数",
+      "创新指数",
+      "二氧化硫去除率",
+      "工业固废综合利用率",
+      "pm25",
+      "人均GDP"
+    ],
+    "Datetime": [],
+    "Others": [
+      "省份",
+      "地区"
+    ]
+  },
+  "summary_path": "D:\\SMWPD\\Project_all\\openstata\\killstata\\temp_data_for_regression.csv.summary.json"
+}

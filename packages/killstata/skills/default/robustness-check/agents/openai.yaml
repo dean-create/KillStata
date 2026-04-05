@@ -1,0 +1,7 @@
+interface:
+  display_name: "Robustness Check"
+  short_description: "Test whether baseline findings survive diagnostics and alternative specifications"
+  default_prompt: "Use $robustness-check to evaluate whether this baseline result is stable."
+
+policy:
+  allow_implicit_invocation: true

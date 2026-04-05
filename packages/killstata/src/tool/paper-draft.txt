@@ -1,0 +1,14 @@
+Generate a paper-first empirical draft from structured research and estimation artifacts.
+
+Use this after a research brief and baseline econometric outputs already exist. The tool only consumes saved structured artifacts and must not invent unsupported numbers.
+
+Outputs:
+- `paper_draft.md`
+- `paper_draft.json`
+- `paper_appendix_outline.md`
+- `paper_asset_manifest.json`
+
+Rules:
+- Numeric claims must be traceable to structured result artifacts from the same run.
+- If heterogeneity or mechanism artifacts are missing, mark those sections as `待补充`.
+- Do not fabricate references.

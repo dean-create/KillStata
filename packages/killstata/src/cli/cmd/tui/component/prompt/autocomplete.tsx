@@ -45,6 +45,23 @@ function extractLineRange(input: string) {
   }
 }
 
+function commandCapabilityDescription(command: {
+  description?: string
+  availability?: string[]
+  queueBehavior?: "queued" | "immediate"
+  workflowAware?: boolean
+  immediate?: boolean
+  remoteSafe?: boolean
+}) {
+  const tags = [
+    command.workflowAware ? "workflow" : undefined,
+    ...(command.availability ?? []),
+    command.queueBehavior ?? (command.immediate ? "immediate" : undefined),
+    command.remoteSafe ? "remote-safe" : undefined,
+  ].filter((item, index, arr): item is string => typeof item === "string" && arr.indexOf(item) === index)
+  return [command.description, tags.length ? `[${tags.join("] [")}]` : undefined].filter(Boolean).join(" ")
+}
+
 export type AutocompleteRef = {
   onInput: (value: string) => void
   onKeyDown: (e: KeyEvent) => void
@@ -347,7 +364,7 @@ export function Autocomplete(props: {
     for (const serverCommand of sync.data.command) {
       results.push({
         display: "/" + serverCommand.name + (serverCommand.mcp ? " (MCP)" : ""),
-        description: serverCommand.description,
+        description: commandCapabilityDescription(serverCommand),
         onSelect: () => {
           const newText = "/" + serverCommand.name + " "
           const cursor = props.input().logicalCursor

@@ -3,7 +3,7 @@ import { xdgData, xdgCache, xdgConfig, xdgState } from "xdg-basedir"
 import path from "path"
 import os from "os"
 
-const app = "opencode"
+const app = "killstata"
 
 const data = path.join(xdgData!, app)
 const cache = path.join(xdgCache!, app)
@@ -12,9 +12,9 @@ const state = path.join(xdgState!, app)
 
 export namespace Global {
   export const Path = {
-    // Allow override via OPENCODE_TEST_HOME for test isolation
+    // Allow override via KILLSTATA_TEST_HOME for test isolation
     get home() {
-      return process.env.OPENCODE_TEST_HOME || os.homedir()
+      return process.env.KILLSTATA_TEST_HOME || os.homedir()
     },
     data,
     bin: path.join(data, "bin"),
@@ -24,7 +24,7 @@ export namespace Global {
     state,
     // Allow overriding models.dev URL for offline deployments
     get modelsDevUrl() {
-      return process.env.OPENCODE_MODELS_URL || "https://models.dev"
+      return process.env.KILLSTATA_MODELS_URL || "https://models.dev"
     },
   }
 }

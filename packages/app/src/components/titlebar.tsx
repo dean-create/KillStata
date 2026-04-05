@@ -1,9 +1,9 @@
 import { createEffect, createMemo, Show } from "solid-js"
-import { IconButton } from "@opencode-ai/ui/icon-button"
-import { Icon } from "@opencode-ai/ui/icon"
-import { Button } from "@opencode-ai/ui/button"
-import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
-import { useTheme } from "@opencode-ai/ui/theme"
+import { IconButton } from "@killstata/ui/icon-button"
+import { Icon } from "@killstata/ui/icon"
+import { Button } from "@killstata/ui/button"
+import { TooltipKeybind } from "@killstata/ui/tooltip"
+import { useTheme } from "@killstata/ui/theme"
 
 import { useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
@@ -137,10 +137,10 @@ export function Titlebar() {
             </div>
           </Button>
         </TooltipKeybind>
-        <div id="opencode-titlebar-left" class="flex items-center gap-3 min-w-0 px-2" data-tauri-drag-region />
+        <div id="killstata-titlebar-left" class="flex items-center gap-3 min-w-0 px-2" data-tauri-drag-region />
         <div class="flex-1 h-full" data-tauri-drag-region />
         <div
-          id="opencode-titlebar-right"
+          id="killstata-titlebar-right"
           class="flex items-center gap-3 shrink-0 flex-1 justify-end"
           data-tauri-drag-region
         />
@@ -149,7 +149,7 @@ export function Titlebar() {
         </Show>
       </div>
       <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div id="opencode-titlebar-center" class="pointer-events-auto" />
+        <div id="killstata-titlebar-center" class="pointer-events-auto" />
       </div>
     </header>
   )

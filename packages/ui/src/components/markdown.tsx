@@ -1,6 +1,6 @@
 import { useMarked } from "../context/marked"
 import DOMPurify from "dompurify"
-import { checksum } from "@opencode-ai/util/encode"
+import { checksum } from "@killstata/util/encode"
 import { ComponentProps, createResource, splitProps } from "solid-js"
 import { isServer } from "solid-js/web"
 

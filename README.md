@@ -51,4 +51,4 @@ killstata
 
 ---
 
-基于 [OpenCode](https://github.com/anomalyco/opencode) 构建
+基于 [Killstata](https://github.com/anomalyco/killstata) 构建

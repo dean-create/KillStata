@@ -98,11 +98,14 @@ Every action returns a structured artifact trail when applicable:
 
 ## Planning And Skill Guidance
 
-- Before spreadsheet-heavy or CSV/XLSX-oriented tasks, load the most relevant installed skill when available.
+- Before spreadsheet-heavy or CSV/XLSX-oriented tasks, load `workflow-orchestrator` first, then the most relevant specialist skill.
+- Prefer project-local skills under `.killstata/skills` when the same skill exists at multiple tiers.
+- If no project-local override exists, prefer curated `default` skills before `builtin`.
 - Prefer skill aliases rather than hallucinating unavailable names:
-  - Excel/XLSX processing -> `xlsx`
-  - CSV summarization -> `csv-data-summarizer` when installed
-  - Missing-data handling / variable engineering -> use the closest installed skill; otherwise use this tool directly
+  - Excel/XLSX processing -> `xlsx-processor`
+  - Raw file intake -> `tabular-ingest`
+  - Cleaning, missing-data handling, or variable engineering -> `tabular-cleaning`
+  - Panel integrity checks -> `panel-data-qa`
 - Use explicit column names and explicit operation parameters.
 - Preserve the canonical Parquet stage as the working source of truth after import.
 

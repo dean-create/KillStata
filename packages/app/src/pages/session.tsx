@@ -19,18 +19,18 @@ import { selectionFromLines, useFile, type SelectedLineRange } from "@/context/f
 import { createStore } from "solid-js/store"
 import { PromptInput } from "@/components/prompt-input"
 import { SessionContextUsage } from "@/components/session-context-usage"
-import { IconButton } from "@opencode-ai/ui/icon-button"
-import { Button } from "@opencode-ai/ui/button"
-import { Icon } from "@opencode-ai/ui/icon"
-import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
-import { DiffChanges } from "@opencode-ai/ui/diff-changes"
-import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
-import { Tabs } from "@opencode-ai/ui/tabs"
-import { useCodeComponent } from "@opencode-ai/ui/context/code"
-import { SessionTurn } from "@opencode-ai/ui/session-turn"
-import { createAutoScroll } from "@opencode-ai/ui/hooks"
-import { SessionReview } from "@opencode-ai/ui/session-review"
-import { Mark } from "@opencode-ai/ui/logo"
+import { IconButton } from "@killstata/ui/icon-button"
+import { Button } from "@killstata/ui/button"
+import { Icon } from "@killstata/ui/icon"
+import { Tooltip, TooltipKeybind } from "@killstata/ui/tooltip"
+import { DiffChanges } from "@killstata/ui/diff-changes"
+import { ResizeHandle } from "@killstata/ui/resize-handle"
+import { Tabs } from "@killstata/ui/tabs"
+import { useCodeComponent } from "@killstata/ui/context/code"
+import { SessionTurn } from "@killstata/ui/session-turn"
+import { createAutoScroll } from "@killstata/ui/hooks"
+import { SessionReview } from "@killstata/ui/session-review"
+import { Mark } from "@killstata/ui/logo"
 
 import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, closestCenter } from "@thisbeyond/solid-dnd"
 import type { DragEvent } from "@thisbeyond/solid-dnd"
@@ -38,8 +38,8 @@ import { useSync } from "@/context/sync"
 import { useTerminal, type LocalPTY } from "@/context/terminal"
 import { useLayout } from "@/context/layout"
 import { Terminal } from "@/components/terminal"
-import { checksum, base64Encode, base64Decode } from "@opencode-ai/util/encode"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { checksum, base64Encode, base64Decode } from "@killstata/util/encode"
+import { useDialog } from "@killstata/ui/context/dialog"
 import { DialogSelectFile } from "@/components/dialog-select-file"
 import { DialogSelectModel } from "@/components/dialog-select-model"
 import { DialogSelectMcp } from "@/components/dialog-select-mcp"
@@ -47,14 +47,14 @@ import { DialogFork } from "@/components/dialog-fork"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useNavigate, useParams } from "@solidjs/router"
-import { UserMessage } from "@opencode-ai/sdk/v2"
-import type { FileDiff } from "@opencode-ai/sdk/v2/client"
+import { UserMessage } from "@killstata/sdk/v2"
+import type { FileDiff } from "@killstata/sdk/v2/client"
 import { useSDK } from "@/context/sdk"
 import { usePrompt } from "@/context/prompt"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
 import { usePermission } from "@/context/permission"
-import { showToast } from "@opencode-ai/ui/toast"
+import { showToast } from "@killstata/ui/toast"
 import {
   SessionHeader,
   SessionContextTab,
@@ -1052,7 +1052,7 @@ export default function Page() {
   createEffect(() => {
     const sessionID = params.id
     if (!sessionID) return
-    const raw = sessionStorage.getItem("opencode.pendingMessage")
+    const raw = sessionStorage.getItem("killstata.pendingMessage")
     if (!raw) return
     const parts = raw.split("|")
     const pendingSessionID = parts[0]
@@ -1060,7 +1060,7 @@ export default function Page() {
     if (!pendingSessionID || !messageID) return
     if (pendingSessionID !== sessionID) return
 
-    sessionStorage.removeItem("opencode.pendingMessage")
+    sessionStorage.removeItem("killstata.pendingMessage")
     setPendingMessage(messageID)
   })
 

@@ -1,7 +1,7 @@
 import path from "path"
 import z from "zod"
 import { Tool } from "./tool"
-import { Skill } from "../skill"
+import { formatSkillAliasText, resolveSkillAliasAvailability, Skill, writeSkillAliasReport } from "../skill"
 import { ConfigMarkdown } from "../config/markdown"
 import { PermissionNext } from "../permission/next"
 
@@ -16,6 +16,7 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
         return rule.action !== "deny"
       })
     : skills
+  const aliasAvailability = await resolveSkillAliasAvailability(accessibleSkills)
 
   const description =
     accessibleSkills.length === 0
@@ -34,6 +35,7 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
             `  </skill>`,
           ]),
           "</available_skills>",
+          formatSkillAliasText(aliasAvailability),
         ].join(" ")
 
   const examples = accessibleSkills
@@ -66,6 +68,7 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
       // Load and parse skill content
       const parsed = await ConfigMarkdown.parse(skill.location)
       const dir = path.dirname(skill.location)
+      const aliasReportPath = await writeSkillAliasReport(aliasAvailability).catch(() => undefined)
 
       // Format output similar to plugin pattern
       const output = [
@@ -73,9 +76,12 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
         "",
         `**Source**: ${skill.source}`,
         `**Base directory**: ${dir}`,
+        aliasReportPath ? `**Alias report**: ${aliasReportPath}` : "",
         "",
         parsed.content.trim(),
-      ].join("\n")
+      ]
+        .filter(Boolean)
+        .join("\n")
 
       return {
         title: `Loaded skill: ${skill.name}`,
@@ -84,6 +90,10 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
           name: skill.name,
           dir,
           source: skill.source,
+          aliases: aliasAvailability
+            .filter((alias) => alias.matchedSkillName === skill.name)
+            .map((alias) => alias.capability),
+          aliasReportPath,
         },
       }
     },

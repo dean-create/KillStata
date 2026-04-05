@@ -7,9 +7,8 @@ import { Filesystem } from "../util/filesystem"
 import { ModelsDev } from "../provider/models"
 import { mergeDeep, pipe, unique } from "remeda"
 import { Global } from "../global"
-import fs from "fs/promises"
 import { lazy } from "../util/lazy"
-import { NamedError } from "@opencode-ai/util/error"
+import { NamedError } from "@killstata/util/error"
 import { Flag } from "../flag/flag"
 import { Auth } from "../auth"
 import {
@@ -31,8 +30,8 @@ import { Event } from "../server/event"
 
 export namespace Config {
   const log = Log.create({ service: "config" })
-  const PROJECT_CONFIG_DIRS = [".killstata", ".opencode"] as const
-  const PROJECT_CONFIG_FILES = ["config.jsonc", "config.json", "opencode.jsonc", "opencode.json"] as const
+  const PROJECT_CONFIG_DIRS = [".killstata"] as const
+  const PROJECT_CONFIG_FILES = ["killstata.jsonc", "killstata.json"] as const
 
   // Custom merge function that concatenates array fields instead of replacing them
   function mergeConfigConcatArrays(target: Info, source: Info): Info {
@@ -55,18 +54,18 @@ export namespace Config {
     for (const [key, value] of Object.entries(auth)) {
       if (value.type === "wellknown") {
         process.env[value.key] = value.token
-        log.debug("fetching remote config", { url: `${key}/.well-known/opencode` })
-        const response = await fetch(`${key}/.well-known/opencode`)
+        log.debug("fetching remote config", { url: `${key}/.well-known/killstata` })
+        const response = await fetch(`${key}/.well-known/killstata`)
         if (!response.ok) {
           throw new Error(`failed to fetch remote config from ${key}: ${response.status}`)
         }
         const wellknown = (await response.json()) as any
         const remoteConfig = wellknown.config ?? {}
         // Add $schema to prevent load() from trying to write back to a non-existent file
-        if (!remoteConfig.$schema) remoteConfig.$schema = "https://opencode.ai/config.json"
+        if (!remoteConfig.$schema) remoteConfig.$schema = "https://killstata.io/config.json"
         result = mergeConfigConcatArrays(
           result,
-          await load(JSON.stringify(remoteConfig), `${key}/.well-known/opencode`),
+          await load(JSON.stringify(remoteConfig), `${key}/.well-known/killstata`),
         )
         log.debug("loaded remote config from well-known", { url: key })
       }
@@ -76,13 +75,13 @@ export namespace Config {
     result = mergeConfigConcatArrays(result, await global())
 
     // Custom config path overrides global
-    if (Flag.OPENCODE_CONFIG) {
-      result = mergeConfigConcatArrays(result, await loadFile(Flag.OPENCODE_CONFIG))
-      log.debug("loaded custom config", { path: Flag.OPENCODE_CONFIG })
+    if (Flag.KILLSTATA_CONFIG) {
+      result = mergeConfigConcatArrays(result, await loadFile(Flag.KILLSTATA_CONFIG))
+      log.debug("loaded custom config", { path: Flag.KILLSTATA_CONFIG })
     }
 
     // Project config has highest precedence (overrides global and remote)
-    if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+    if (!Flag.KILLSTATA_DISABLE_PROJECT_CONFIG) {
       for (const file of PROJECT_CONFIG_FILES) {
         const found = await Filesystem.findUp(file, Instance.directory, Instance.worktree)
         for (const resolved of found.toReversed()) {
@@ -92,9 +91,9 @@ export namespace Config {
     }
 
     // Inline config content has highest precedence
-    if (Flag.OPENCODE_CONFIG_CONTENT) {
-      result = mergeConfigConcatArrays(result, JSON.parse(Flag.OPENCODE_CONFIG_CONTENT))
-      log.debug("loaded custom config from OPENCODE_CONFIG_CONTENT")
+    if (Flag.KILLSTATA_CONFIG_CONTENT) {
+      result = mergeConfigConcatArrays(result, JSON.parse(Flag.KILLSTATA_CONFIG_CONTENT))
+      log.debug("loaded custom config from KILLSTATA_CONFIG_CONTENT")
     }
 
     result.agent = result.agent || {}
@@ -108,7 +107,7 @@ export namespace Config {
         stop: Global.Path.home,
       }),
     )
-    const projectConfigDirs = !Flag.OPENCODE_DISABLE_PROJECT_CONFIG
+    const projectConfigDirs = !Flag.KILLSTATA_DISABLE_PROJECT_CONFIG
       ? await Array.fromAsync(
           Filesystem.up({
             targets: [...PROJECT_CONFIG_DIRS],
@@ -120,18 +119,18 @@ export namespace Config {
 
     const directories = [
       Global.Path.config,
-      // Load user-level ~/.killstata and ~/.opencode before project-level overrides.
+      // Load user-level ~/.killstata before project-level overrides.
       ...homeConfigDirs,
       ...projectConfigDirs,
     ]
 
-    if (Flag.OPENCODE_CONFIG_DIR) {
-      directories.push(Flag.OPENCODE_CONFIG_DIR)
-      log.debug("loading config from OPENCODE_CONFIG_DIR", { path: Flag.OPENCODE_CONFIG_DIR })
+    if (Flag.KILLSTATA_CONFIG_DIR) {
+      directories.push(Flag.KILLSTATA_CONFIG_DIR)
+      log.debug("loading config from KILLSTATA_CONFIG_DIR", { path: Flag.KILLSTATA_CONFIG_DIR })
     }
 
     for (const dir of unique(directories)) {
-      if (PROJECT_CONFIG_DIRS.some((name) => dir.endsWith(name)) || dir === Flag.OPENCODE_CONFIG_DIR) {
+      if (PROJECT_CONFIG_DIRS.some((name) => dir.endsWith(name)) || dir === Flag.KILLSTATA_CONFIG_DIR) {
         for (const file of PROJECT_CONFIG_FILES) {
           log.debug(`loading config from ${path.join(dir, file)}`)
           result = mergeConfigConcatArrays(result, await loadFile(path.join(dir, file)))
@@ -165,8 +164,8 @@ export namespace Config {
       })
     }
 
-    if (Flag.OPENCODE_PERMISSION) {
-      result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.OPENCODE_PERMISSION))
+    if (Flag.KILLSTATA_PERMISSION) {
+      result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.KILLSTATA_PERMISSION))
     }
 
     // Backwards compatibility: legacy top-level `tools` config
@@ -193,10 +192,10 @@ export namespace Config {
     if (!result.keybinds) result.keybinds = Info.shape.keybinds.parse({})
 
     // Apply flag overrides for compaction settings
-    if (Flag.OPENCODE_DISABLE_AUTOCOMPACT) {
+    if (Flag.KILLSTATA_DISABLE_AUTOCOMPACT) {
       result.compaction = { ...result.compaction, auto: false }
     }
-    if (Flag.OPENCODE_DISABLE_PRUNE) {
+    if (Flag.KILLSTATA_DISABLE_PRUNE) {
       result.compaction = { ...result.compaction, prune: false }
     }
 
@@ -220,7 +219,7 @@ export namespace Config {
     if (!hasGitIgnore) await Bun.write(gitignore, ["node_modules", "package.json", "bun.lock", ".gitignore"].join("\n"))
 
     await BunProc.run(
-      ["add", "@opencode-ai/plugin@" + (Installation.isLocal() ? "latest" : Installation.VERSION), "--exact"],
+      ["add", "@killstata/plugin@" + (Installation.isLocal() ? "latest" : Installation.VERSION), "--exact"],
       {
         cwd: dir,
       },
@@ -286,7 +285,7 @@ export namespace Config {
       })
       if (!md) continue
 
-      const patterns = ["/.killstata/command/", "/.killstata/commands/", "/.opencode/command/", "/.opencode/commands/", "/command/", "/commands/"]
+      const patterns = ["/.killstata/command/", "/.killstata/commands/", "/command/", "/commands/"]
       const file = rel(item, patterns) ?? path.basename(item)
       const name = trim(file)
 
@@ -326,7 +325,7 @@ export namespace Config {
       })
       if (!md) continue
 
-      const patterns = ["/.killstata/agent/", "/.killstata/agents/", "/.opencode/agent/", "/.opencode/agents/", "/agent/", "/agents/"]
+      const patterns = ["/.killstata/agent/", "/.killstata/agents/", "/agent/", "/agents/"]
       const file = rel(item, patterns) ?? path.basename(item)
       const agentName = trim(file)
 
@@ -404,7 +403,7 @@ export namespace Config {
    *
    * @example
    * getPluginName("file:///path/to/plugin/foo.js") // "foo"
-   * getPluginName("oh-my-opencode@2.4.3") // "oh-my-opencode"
+   * getPluginName("oh-my-killstata@2.4.3") // "oh-my-killstata"
    * getPluginName("@scope/pkg@1.0.0") // "@scope/pkg"
    */
   export function getPluginName(plugin: string): string {
@@ -422,20 +421,20 @@ export namespace Config {
    * Deduplicates plugins by name, with later entries (higher priority) winning.
    * Priority order (highest to lowest):
    * 1. Local plugin/ directory
-   * 2. Local opencode.json
+   * 2. Local killstata.json
    * 3. Global plugin/ directory
-   * 4. Global opencode.json
+   * 4. Global killstata.json
    *
    * Since plugins are added in low-to-high priority order,
    * we reverse, deduplicate (keeping first occurrence), then restore order.
    */
   export function deduplicatePlugins(plugins: string[]): string[] {
     // seenNames: canonical plugin names for duplicate detection
-    // e.g., "oh-my-opencode", "@scope/pkg"
+    // e.g., "oh-my-killstata", "@scope/pkg"
     const seenNames = new Set<string>()
 
     // uniqueSpecifiers: full plugin specifiers to return
-    // e.g., "oh-my-opencode@2.4.3", "file:///path/to/plugin.js"
+    // e.g., "oh-my-killstata@2.4.3", "file:///path/to/plugin.js"
     const uniqueSpecifiers: string[] = []
 
     for (const specifier of plugins.toReversed()) {
@@ -673,7 +672,7 @@ export namespace Config {
   export const Keybinds = z
     .object({
       leader: z.string().optional().default("ctrl+x").describe("Leader key for keybind combinations"),
-      app_exit: z.string().optional().default("ctrl+c,ctrl+d,<leader>q").describe("Exit the application"),
+      app_exit: z.string().optional().default("ctrl+d,<leader>q").describe("Exit the application"),
       editor_open: z.string().optional().default("<leader>e").describe("Open external editor"),
       theme_list: z.string().optional().default("<leader>t").describe("List available themes"),
       sidebar_toggle: z.string().optional().default("<leader>b").describe("Toggle sidebar"),
@@ -732,7 +731,7 @@ export namespace Config {
       agent_cycle: z.string().optional().default("tab").describe("Next agent"),
       agent_cycle_reverse: z.string().optional().default("shift+tab").describe("Previous agent"),
       variant_cycle: z.string().optional().default("ctrl+t").describe("Cycle model variants"),
-      input_clear: z.string().optional().default("ctrl+c").describe("Clear input field"),
+      input_clear: z.string().optional().default("none").describe("Clear input field"),
       input_paste: z.string().optional().default("ctrl+v").describe("Paste from clipboard"),
       input_submit: z.string().optional().default("return").describe("Submit input"),
       input_newline: z
@@ -1004,11 +1003,15 @@ export namespace Config {
       keybinds: Keybinds.optional().describe("Custom keybind configurations"),
       logLevel: Log.Level.optional().describe("Log level"),
       tui: TUI.optional().describe("TUI specific settings"),
-      server: Server.optional().describe("Server configuration for opencode serve and web commands"),
+      server: Server.optional().describe("Server configuration for killstata serve and web commands"),
       command: z
         .record(z.string(), Command)
         .optional()
-        .describe("Command configuration, see https://opencode.ai/docs/commands"),
+        .describe("Command configuration, see https://killstata.io/docs/commands"),
+      disabled_commands: z
+        .array(z.string())
+        .optional()
+        .describe("Command names to suppress from slash-command registration, including custom commands"),
       watcher: z
         .object({
           ignore: z.array(z.string()).optional(),
@@ -1075,7 +1078,7 @@ export namespace Config {
         })
         .catchall(Agent)
         .optional()
-        .describe("Agent configuration, see https://opencode.ai/docs/agents"),
+        .describe("Agent configuration, see https://killstata.io/docs/agents"),
       provider: z
         .record(z.string(), Provider)
         .optional()
@@ -1213,27 +1216,13 @@ export namespace Config {
   export type Info = z.output<typeof Info>
 
   export const global = lazy(async () => {
+    const legacyMcpConfigPath = path.join(Global.Path.home, ".killstata", "mcp", "mcp.json")
     let result: Info = pipe(
       {},
-      mergeDeep(await loadFile(path.join(Global.Path.config, "config.json"))),
-      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.json"))),
-      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.jsonc"))),
+      mergeDeep(await loadFile(path.join(Global.Path.config, "killstata.json"))),
+      mergeDeep(await loadFile(path.join(Global.Path.config, "killstata.jsonc"))),
+      mergeDeep(await loadFile(legacyMcpConfigPath)),
     )
-
-    await import(path.join(Global.Path.config, "config"), {
-      with: {
-        type: "toml",
-      },
-    })
-      .then(async (mod) => {
-        const { provider, model, ...rest } = mod.default
-        if (provider && model) result.model = `${provider}/${model}`
-        result["$schema"] = "https://opencode.ai/config.json"
-        result = mergeDeep(result, rest)
-        await Bun.write(path.join(Global.Path.config, "config.json"), JSON.stringify(result, null, 2))
-        await fs.unlink(path.join(Global.Path.config, "config"))
-      })
-      .catch(() => {})
 
     return result
   })
@@ -1264,7 +1253,7 @@ export namespace Config {
 
     const edition = record["stata_edition"]
     return {
-      $schema: "https://opencode.ai/config.json",
+      $schema: "https://killstata.io/config.json",
       killstata: {
         python:
           typeof record["python_executable"] === "string"
@@ -1353,9 +1342,9 @@ export namespace Config {
     const parsed = Info.safeParse(migrateLegacyKillstataConfig(configFilepath, data) ?? data)
     if (parsed.success) {
       if (!parsed.data.$schema) {
-        parsed.data.$schema = "https://opencode.ai/config.json"
+        parsed.data.$schema = "https://killstata.io/config.json"
         // Write the $schema to the original text to preserve variables like {env:VAR}
-        const updated = original.replace(/^\s*\{/, '{\n  "$schema": "https://opencode.ai/config.json",')
+        const updated = original.replace(/^\s*\{/, '{\n  "$schema": "https://killstata.io/config.json",')
         await Bun.write(configFilepath, updated).catch(() => {})
       }
       const data = parsed.data
@@ -1410,14 +1399,14 @@ export namespace Config {
   }
 
   export async function update(config: Info) {
-    const filepath = path.join(Instance.directory, "config.json")
+    const filepath = path.join(Instance.directory, "killstata.json")
     const existing = await loadFile(filepath)
     await Bun.write(filepath, JSON.stringify(mergeDeep(existing, config), null, 2))
     await Instance.dispose()
   }
 
   function globalConfigFile() {
-    const candidates = ["opencode.jsonc", "opencode.json", "config.json"].map((file) =>
+    const candidates = ["killstata.jsonc", "killstata.json"].map((file) =>
       path.join(Global.Path.config, file),
     )
     for (const file of candidates) {

@@ -8,6 +8,10 @@ Execution policy:
 - After a failure, inspect the reflection metadata and rerun only the failed stage.
 - If QA or diagnostics produce blocking_errors, stop and repair the failed stage before continuing.
 - Warnings may continue, but they must be disclosed in the narrative and final reporting.
+- If the user asks for a reasonable baseline, a standard baseline, or asks the tool to choose the baseline without naming a concrete estimator, use `smart_baseline`.
+- If the user asks for method recommendation only and does not want execution yet, use `auto_recommend`.
+- If the user explicitly names a concrete estimator, keep that estimator unless it is not executable with the available variables or identifiers.
+- If an explicitly requested estimator is not executable, rescue to `smart_baseline` or the closest executable baseline and disclose the original request, the failure reason, and the executed method.
 
 Working-format policy:
 - Read canonical dataset stages through datasetId/stageId whenever available
@@ -17,6 +21,8 @@ Working-format policy:
 ## Supported Methods
 
 Core baseline methods:
+- auto_recommend: inspect dataset structure, infer candidate variable roles, and recommend a baseline econometric path
+- smart_baseline: run auto_recommend first, convert the recommendation into an executable baseline, estimate it, run diagnostics, and preserve downgrade decisions
 - panel_fe_regression: two-way fixed-effects panel regression with clustered standard errors
 - baseline_regression: alias of the panel FE baseline path
 - ols_regression: cross-sectional or pooled OLS
@@ -46,7 +52,7 @@ Causal inference methods:
 - datasetId, stageId: canonical Parquet stage reference; prefer this after import
 - runId: optional run identifier; reuse the same runId to publish outputs under one workflow folder
 - branch: analysis branch name for saved outputs
-- dependentVar: dependent variable column name
+- dependentVar: dependent variable column name; optional only for `auto_recommend`, but strongly recommended there as well
 - treatmentVar: key explanatory or treatment variable column name when required
 - covariates: control variable column names
 - entityVar: panel entity identifier for panel_fe_regression / baseline_regression
@@ -74,6 +80,28 @@ For other regression-capable methods, the tool also saves:
 - `narrative.md`
 - `model_summary.txt`
 - `numeric_snapshot.json` when grounded regression output is available
+
+For `auto_recommend`, the tool saves:
+- `profile.json`
+- `recommendation.json`
+- `results.json`
+- `narrative.md`
+
+For `smart_baseline`, the tool saves the recommendation artifacts above and then continues to save the executed baseline regression artifacts in the same run folder.
+
+The `auto_recommend` path should:
+- infer whether the dataset is closer to cross-section, time series, panel, or repeated cross-section
+- identify likely entity, time, treatment, and instrument candidates
+- recommend a baseline method family such as OLS, panel FE, DID-family follow-up, IV/2SLS, or double-robust follow-up
+- recommend a covariance strategy such as nonrobust, robust, cluster, or HAC
+- emit post-estimation downgrade rules such as switching to robust SE after failed heteroskedasticity diagnostics
+
+The `smart_baseline` path should:
+- run `auto_recommend`
+- choose the best executable baseline implied by the recommendation
+- fall back when the recommended family is not executable with the currently available variables
+- run the concrete baseline estimate
+- carry forward downgrade traces such as `did_static -> panel_fe_regression`, `panel_fe_regression -> pooled_ols`, or `nonrobust -> HC1`
 
 Diagnostics follow a three-part structure:
 - `core`
@@ -115,6 +143,10 @@ Two-way fixed-effects baseline regression on a canonical Parquet stage:
 ## Validation Guidance
 
 - Run `data_import` with action="qa" before panel estimation
+- For unclear datasets, run `auto_recommend` first to inspect structure and baseline method suggestions
+- When the user asks for the tool to choose and run the baseline automatically, use `smart_baseline`
+- When the user explicitly names a method, do not route through `smart_baseline` unless the requested method is not executable
+- If you rescue from an explicit method to another baseline, say so clearly in the final narrative
 - If the source was Excel/CSV/DTA, import it first and estimate from the returned Parquet stage
 - Read `diagnostics.json` after the baseline model and before drawing conclusions
 - Run robustness checks after core diagnostics when the design requires them
@@ -125,9 +157,15 @@ Two-way fixed-effects baseline regression on a canonical Parquet stage:
 
 ## Planning And Skill Guidance
 
-- Before spreadsheet-heavy or table-heavy workflows, load the most relevant installed skill when available.
+- Before spreadsheet-heavy or table-heavy workflows, load `workflow-orchestrator` first, then the most relevant specialist skill.
+- Prefer project-local skills under `.killstata/skills` when the same skill exists at multiple tiers.
+- If no project-local override exists, prefer curated `default` skills before `builtin`.
 - Prefer installed skill aliases rather than inventing names:
-  - Excel/XLSX processing -> `xlsx`
-  - CSV summarization -> `csv-data-summarizer` when installed
-  - Diagnostic testing / robustness -> use the closest installed skill if present; otherwise rely on this tool's built-in diagnostics
+  - Excel/XLSX processing -> `xlsx-processor`
+  - Descriptive profiling -> `descriptive-analysis`
+  - DID -> `did-estimation`
+  - IV -> `iv-estimation`
+  - PSM -> `psm-estimation`
+  - RDD -> `rdd-estimation`
+  - Diagnostic testing / robustness -> `robustness-check` or `regression-reporting`
 - Prefer explicit methodName, explicit identifiers, explicit clustering choice, and explicit options over implicit defaults.

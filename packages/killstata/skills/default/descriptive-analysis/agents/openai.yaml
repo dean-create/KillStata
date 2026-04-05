@@ -1,0 +1,8 @@
+interface:
+  display_name: "Descriptive Analysis"
+  short_description: "Produce grounded summary statistics, profiles, and correlation views before modeling"
+  default_prompt: "Use $descriptive-analysis to profile this dataset before estimating a model."
+
+policy:
+  allow_implicit_invocation: true
+

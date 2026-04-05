@@ -243,7 +243,7 @@ export function deriveInactiveColor(brightColor: ColorInput, factor: number = 0.
   return RGBA.fromValues(baseRgba.r, baseRgba.g, baseRgba.b, factor)
 }
 
-export type KnightRiderStyle = "blocks" | "diamonds"
+export type KnightRiderStyle = "blocks" | "diamonds" | "pulse"
 
 export interface KnightRiderOptions {
   width?: number
@@ -316,6 +316,13 @@ export function createFrames(options: KnightRiderOptions = {}): string[] {
           return shapes[Math.min(index, shapes.length - 1)]
         }
         return "·"
+      }
+      if (style === "pulse") {
+        const shapes = ["●", "◉", "◎", "○"]
+        if (index >= 0 && index < trailOptions.colors.length) {
+          return shapes[Math.min(index, shapes.length - 1)]
+        }
+        return "•"
       }
 
       // Default to blocks

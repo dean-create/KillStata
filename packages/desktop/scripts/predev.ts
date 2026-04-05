@@ -6,8 +6,8 @@ const RUST_TARGET = Bun.env.TAURI_ENV_TARGET_TRIPLE
 
 const sidecarConfig = getCurrentSidecar(RUST_TARGET)
 
-const binaryPath = windowsify(`../opencode/dist/${sidecarConfig.ocBinary}/bin/opencode`)
+const binaryPath = windowsify(`../killstata/dist/${sidecarConfig.ocBinary}/bin/killstata`)
 
-await $`cd ../opencode && bun run build --single`
+await $`cd ../killstata && bun run build --single`
 
 await copyBinaryToSidecarFolder(binaryPath, RUST_TARGET)

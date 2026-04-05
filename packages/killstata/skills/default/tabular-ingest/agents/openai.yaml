@@ -1,0 +1,8 @@
+interface:
+  display_name: "Tabular Ingest"
+  short_description: "Import raw Excel, CSV, DTA, or Parquet files into a canonical dataset artifact"
+  default_prompt: "Use $tabular-ingest to import this file into a canonical working dataset."
+
+policy:
+  allow_implicit_invocation: true
+

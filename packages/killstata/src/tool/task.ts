@@ -11,6 +11,27 @@ import { iife } from "@/util/iife"
 import { defer } from "@/util/defer"
 import { Config } from "../config/config"
 import { PermissionNext } from "@/permission/next"
+import { createSubagentContract } from "@/runtime/tool-policy"
+import { RuntimeEvents } from "@/runtime/events"
+
+function collectArtifactHints(messages: MessageV2.WithParts[]) {
+  const artifacts = new Set<string>()
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type === "file" && part.filename) artifacts.add(part.filename)
+      if (
+        part.type === "tool" &&
+        part.state.status === "completed" &&
+        Array.isArray(part.state.metadata?.["trustedArtifactPaths"])
+      ) {
+        for (const artifact of part.state.metadata["trustedArtifactPaths"] as string[]) {
+          artifacts.add(artifact)
+        }
+      }
+    }
+  }
+  return [...artifacts].slice(0, 8)
+}
 
 const parameters = z.object({
   description: z.string().describe("A short (3-5 words) description of the task"),
@@ -105,6 +126,12 @@ export const TaskTool = Tool.define("task", async (ctx) => {
           sessionId: session.id,
         },
       })
+      Bus.publish(RuntimeEvents.SubagentLifecycle, {
+        sessionID: ctx.sessionID,
+        subagentSessionID: session.id,
+        agent: agent.name,
+        phase: "queued",
+      })
 
       const messageID = Identifier.ascending("message")
       const parts: Record<string, { id: string; tool: string; state: { status: string; title?: string } }> = {}
@@ -141,23 +168,40 @@ export const TaskTool = Tool.define("task", async (ctx) => {
       ctx.abort.addEventListener("abort", cancel)
       using _ = defer(() => ctx.abort.removeEventListener("abort", cancel))
       const promptParts = await SessionPrompt.resolvePromptParts(params.prompt)
-
-      const result = await SessionPrompt.prompt({
-        messageID,
-        sessionID: session.id,
-        model: {
-          modelID: model.modelID,
-          providerID: model.providerID,
-        },
+      Bus.publish(RuntimeEvents.SubagentLifecycle, {
+        sessionID: ctx.sessionID,
+        subagentSessionID: session.id,
         agent: agent.name,
-        tools: {
-          todowrite: false,
-          todoread: false,
-          ...(hasTaskPermission ? {} : { task: false }),
-          ...Object.fromEntries((config.experimental?.primary_tools ?? []).map((t) => [t, false])),
-        },
-        parts: promptParts,
+        phase: "running",
       })
+
+      let result: MessageV2.WithParts
+      try {
+        result = await SessionPrompt.prompt({
+          messageID,
+          sessionID: session.id,
+          model: {
+            modelID: model.modelID,
+            providerID: model.providerID,
+          },
+          agent: agent.name,
+          tools: {
+            todowrite: false,
+            todoread: false,
+            ...(hasTaskPermission ? {} : { task: false }),
+            ...Object.fromEntries((config.experimental?.primary_tools ?? []).map((t) => [t, false])),
+          },
+          parts: promptParts,
+        })
+      } catch (error) {
+        Bus.publish(RuntimeEvents.SubagentLifecycle, {
+          sessionID: ctx.sessionID,
+          subagentSessionID: session.id,
+          agent: agent.name,
+          phase: "failed",
+        })
+        throw error
+      }
       unsub()
       const messages = await Session.messages({ sessionID: session.id })
       const summary = messages
@@ -172,14 +216,36 @@ export const TaskTool = Tool.define("task", async (ctx) => {
           },
         }))
       const text = result.parts.findLast((x) => x.type === "text")?.text ?? ""
+      const contract = createSubagentContract({
+        description: params.description,
+        agent: agent.name,
+        sessionID: session.id,
+        summary: text,
+        producedArtifacts: collectArtifactHints(messages),
+        nextStepRecommendation: text ? "Integrate the subagent summary into the parent turn and decide whether follow-up work is needed." : "",
+      })
 
-      const output = text + "\n\n" + ["<task_metadata>", `session_id: ${session.id}`, "</task_metadata>"].join("\n")
+      Bus.publish(RuntimeEvents.SubagentLifecycle, {
+        sessionID: ctx.sessionID,
+        subagentSessionID: session.id,
+        agent: agent.name,
+        phase: "completed",
+      })
+
+      const output = [
+        text,
+        "",
+        "<subagent_result>",
+        JSON.stringify(contract, null, 2),
+        "</subagent_result>",
+      ].join("\n")
 
       return {
         title: params.description,
         metadata: {
           summary,
           sessionId: session.id,
+          contract,
         },
         output,
       }

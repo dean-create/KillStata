@@ -20,6 +20,7 @@ import {
   runBundledStataMcpServer,
   StataEdition,
 } from "../../mcp/stata"
+import { createBuiltInGitGitHubMcpConfig, runBundledGitGitHubMcpServer } from "../../mcp/git-github"
 
 function getAuthStatusIcon(status: MCP.AuthStatus): string {
   switch (status) {
@@ -62,6 +63,7 @@ export const McpCommand = cmd({
     yargs
       .command(McpAddCommand)
       .command(McpStataServerCommand)
+      .command(McpGitGitHubServerCommand)
       .command(McpListCommand)
       .command(McpAuthCommand)
       .command(McpLogoutCommand)
@@ -168,7 +170,7 @@ export const McpAuthCommand = cmd({
 
         if (oauthServers.length === 0) {
           prompts.log.warn("No OAuth-capable MCP servers configured")
-          prompts.log.info("Remote MCP servers support OAuth by default. Add a remote server in opencode.json:")
+          prompts.log.info("Remote MCP servers support OAuth by default. Add a remote server in killstata.json:")
           prompts.log.info(`
   "mcp": {
     "my-server": {
@@ -387,11 +389,11 @@ export const McpLogoutCommand = cmd({
 })
 
 async function resolveConfigPath(baseDir: string, global = false) {
-  // Check for existing config files (prefer .jsonc over .json, check .opencode/ subdirectory too)
-  const candidates = [path.join(baseDir, "opencode.json"), path.join(baseDir, "opencode.jsonc")]
+  // Check for existing config files (prefer .jsonc over .json, check .killstata/ subdirectory too)
+  const candidates = [path.join(baseDir, "killstata.json"), path.join(baseDir, "killstata.jsonc")]
 
   if (!global) {
-    candidates.push(path.join(baseDir, ".opencode", "opencode.json"), path.join(baseDir, ".opencode", "opencode.jsonc"))
+    candidates.push(path.join(baseDir, ".killstata", "killstata.json"), path.join(baseDir, ".killstata", "killstata.jsonc"))
   }
 
   for (const candidate of candidates) {
@@ -400,7 +402,7 @@ async function resolveConfigPath(baseDir: string, global = false) {
     }
   }
 
-  // Default to opencode.json if none exist
+  // Default to killstata.json if none exist
   return candidates[0]
 }
 
@@ -467,6 +469,11 @@ export const McpAddCommand = cmd({
           message: "Select MCP server type or preset",
           options: [
             {
+              label: "Git & GitHub (built-in)",
+              value: "git-github",
+              hint: "Commit, push, inspect diffs, and manage PRs/issues from chat",
+            },
+            {
               label: "Stata (built-in)",
               value: "stata",
               hint: "Set a Stata path once and use Stata directly from chat",
@@ -484,6 +491,15 @@ export const McpAddCommand = cmd({
           ],
         })
         if (prompts.isCancel(type)) throw new UI.CancelledError()
+
+        if (type === "git-github") {
+          const mcpConfig = createBuiltInGitGitHubMcpConfig()
+          await addMcpToConfig("git_github", mcpConfig, configPath)
+          prompts.log.success(`Built-in Git/GitHub MCP added to ${configPath}`)
+          prompts.log.info("GitHub tools use KILLSTATA_GITHUB_TOKEN, GITHUB_TOKEN, or GH_TOKEN from your environment.")
+          prompts.outro("MCP server added successfully")
+          return
+        }
 
         if (type === "stata") {
           const stataPath = await prompts.text({
@@ -634,6 +650,14 @@ export const McpStataServerCommand = cmd({
   },
 })
 
+export const McpGitGitHubServerCommand = cmd({
+  command: "git-github-server",
+  describe: "start the built-in Git and GitHub MCP server",
+  async handler() {
+    await runBundledGitGitHubMcpServer()
+  },
+})
+
 export const McpDebugCommand = cmd({
   command: "debug <name>",
   describe: "debug OAuth connection for an MCP server",
@@ -717,7 +741,7 @@ export const McpDebugCommand = cmd({
               params: {
                 protocolVersion: "2024-11-05",
                 capabilities: {},
-                clientInfo: { name: "opencode-debug", version: Installation.VERSION },
+                clientInfo: { name: "killstata-debug", version: Installation.VERSION },
               },
               id: 1,
             }),
@@ -758,7 +782,7 @@ export const McpDebugCommand = cmd({
 
             try {
               const client = new Client({
-                name: "opencode-debug",
+                name: "killstata-debug",
                 version: Installation.VERSION,
               })
               await client.connect(transport)

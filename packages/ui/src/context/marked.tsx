@@ -6,9 +6,9 @@ import { bundledLanguages, type BundledLanguage } from "shiki"
 import { createSimpleContext } from "./helper"
 import { getSharedHighlighter, registerCustomTheme, ThemeRegistrationResolved } from "@pierre/diffs"
 
-registerCustomTheme("OpenCode", () => {
+registerCustomTheme("Killstata", () => {
   return Promise.resolve({
-    name: "OpenCode",
+    name: "Killstata",
     colors: {
       "editor.background": "transparent",
       "editor.foreground": "var(--text-base)",
@@ -428,7 +428,7 @@ async function highlightCodeBlocks(html: string): Promise<string> {
   const matches = [...html.matchAll(codeBlockRegex)]
   if (matches.length === 0) return html
 
-  const highlighter = await getSharedHighlighter({ themes: ["OpenCode"], langs: [] })
+  const highlighter = await getSharedHighlighter({ themes: ["Killstata"], langs: [] })
 
   let result = html
   for (const match of matches) {
@@ -450,7 +450,7 @@ async function highlightCodeBlocks(html: string): Promise<string> {
 
     const highlighted = highlighter.codeToHtml(code, {
       lang: language,
-      theme: "OpenCode",
+      theme: "Killstata",
       tabindex: false,
     })
     result = result.replace(fullMatch, () => highlighted)
@@ -478,7 +478,7 @@ export const { use: useMarked, provider: MarkedProvider } = createSimpleContext(
       }),
       markedShiki({
         async highlight(code, lang) {
-          const highlighter = await getSharedHighlighter({ themes: ["OpenCode"], langs: [] })
+          const highlighter = await getSharedHighlighter({ themes: ["Killstata"], langs: [] })
           if (!(lang in bundledLanguages)) {
             lang = "text"
           }
@@ -487,7 +487,7 @@ export const { use: useMarked, provider: MarkedProvider } = createSimpleContext(
           }
           return highlighter.codeToHtml(code, {
             lang: lang || "text",
-            theme: "OpenCode",
+            theme: "Killstata",
             tabindex: false,
           })
         },

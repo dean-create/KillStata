@@ -1,4 +1,4 @@
-import type { Argv } from "yargs"
+﻿import type { Argv } from "yargs"
 import { cmd } from "./cmd"
 import { Session } from "../../session"
 import { bootstrap } from "../bootstrap"
@@ -20,8 +20,8 @@ function pagerCmd(): string[] {
     if (Bun.file(lessOnPath).size) return [lessOnPath, ...lessOptions]
   }
 
-  if (Flag.OPENCODE_GIT_BASH_PATH) {
-    const less = path.join(Flag.OPENCODE_GIT_BASH_PATH, "..", "..", "usr", "bin", "less.exe")
+  if (Flag.KILLSTATA_GIT_BASH_PATH) {
+    const less = path.join(Flag.KILLSTATA_GIT_BASH_PATH, "..", "..", "usr", "bin", "less.exe")
     if (Bun.file(less).size) return [less, ...lessOptions]
   }
 
@@ -111,7 +111,7 @@ function formatSessionTable(sessions: Session.Info[]): string {
 
   const header = `Session ID${" ".repeat(maxIdWidth - 10)}  Title${" ".repeat(maxTitleWidth - 5)}  Updated`
   lines.push(header)
-  lines.push("─".repeat(header.length))
+  lines.push("鈹€".repeat(header.length))
   for (const session of sessions) {
     const truncatedTitle = Locale.truncate(session.title, maxTitleWidth)
     const timeStr = Locale.todayTimeOrDateTime(session.time.updated)

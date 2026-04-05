@@ -1,5 +1,5 @@
-import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2/client"
-import { createSimpleContext } from "@opencode-ai/ui/context"
+import { createKillstataClient, type Event } from "@killstata/sdk/v2/client"
+import { createSimpleContext } from "@killstata/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { batch, onCleanup } from "solid-js"
 import { usePlatform } from "./platform"
@@ -12,7 +12,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
     const platform = usePlatform()
     const abort = new AbortController()
 
-    const eventSdk = createOpencodeClient({
+    const eventSdk = createKillstataClient({
       baseUrl: server.url,
       signal: abort.signal,
       fetch: platform.fetch,
@@ -95,7 +95,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
       stop()
     })
 
-    const sdk = createOpencodeClient({
+    const sdk = createKillstataClient({
       baseUrl: server.url,
       fetch: platform.fetch,
       throwOnError: true,

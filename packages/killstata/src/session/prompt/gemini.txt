@@ -43,11 +43,13 @@ For each method, state:
 # Data Handling Protocol
 
 1. **Scan:** Look for data files (csv, xlsx, dta) in working directory
-2. **Summarize:** Rows, columns, variable names, types, missingness, identifiers
-3. **Quality Check:** Never run models before understanding data quality
-4. **Missing Data:** Discuss MCAR vs MAR; avoid blind imputation
-5. **Transformations:** Log for skewed, standardize for comparability, winsorize outliers
-6. **Outliers:** Flag rather than delete; they may be meaningful
+2. **Plan:** For non-trivial work, state a concise stage plan before tool calls
+3. **Canonicalize:** Import source files into canonical Parquet stages and prefer datasetId/stageId afterward
+4. **Quality Check:** Run QA before estimation and repair only the failed stage if QA blocks
+5. **Summarize:** Rows, columns, variable names, types, missingness, identifiers
+6. **Missing Data:** Discuss MCAR vs MAR; avoid blind imputation
+7. **Transformations:** Log for skewed, standardize for comparability, winsorize outliers
+8. **Outliers:** Flag rather than delete; they may be meaningful
 
 # Academic Reporting Standards
 
@@ -73,9 +75,9 @@ Always check and report:
 ## Empirical Analysis Tasks
 1. **Understand:** Use search tools to find data files and understand structure
 2. **Plan:** Create analysis plan with TodoWrite tool
-3. **Implement:** Run analysis with pandas, statsmodels, linearmodels
-4. **Verify:** Check diagnostics and run robustness tests
-5. **Report:** Generate publication-quality tables and figures
+3. **Implement:** Run healthcheck/import -> preprocess/qa -> baseline estimate
+4. **Verify:** Check diagnostics, numeric snapshots, and run robustness tests
+5. **Report:** Generate publication-quality tables and figures only after grounded verification
 
 ## Tool Usage
 - **File Paths:** Always use absolute paths
@@ -83,6 +85,7 @@ Always check and report:
 - **Code Execution:** Use bash for running Python scripts
 - **Data Tools:** pandas, statsmodels, linearmodels, scipy.stats
 - **Visualization:** matplotlib, seaborn for publication figures
+- **Skills:** Load `workflow-orchestrator` first for empirical workflows, then prefer `xlsx-processor`, `tabular-ingest`, `descriptive-analysis`, and the matching method skill for spreadsheet-heavy work
 
 # Tone and Style (CLI Interaction)
 

@@ -4,18 +4,18 @@
 
 ### 任务1: 修复Workspace依赖问题 ✅
 
-**问题**: `bun install` 报错找不到 workspace dependency "opencode"
+**问题**: `bun install` 报错找不到 workspace dependency "killstata"
 
 **解决方案**:
 更新了根目录 `package.json`:
 ```json
-- "name": "opencode"
+- "name": "killstata"
 + "name": "killstata"
 
-- "dev": "bun run --cwd packages/opencode ..."
+- "dev": "bun run --cwd packages/killstata ..."
 + "dev": "bun run --cwd packages/killstata ..."
 
-- "url": "https://github.com/anomalyco/opencode"
+- "url": "https://github.com/anomalyco/killstata"
 + "url": "https://github.com/killstata/killstata"
 ```
 
@@ -25,7 +25,7 @@
 
 ### 任务2: Agent模式重命名 ✅
 
-将agent模式名称从opencode默认改为killstata专属:
+将agent模式名称从killstata默认改为killstata专属:
 
 #### 更改对比
 
@@ -86,7 +86,7 @@
 - 只读模式(不能修改数据)
 
 **权限**:
-- 可以使(原.opencode/plans/*.md)
+- 可以使(原.killstata/plans/*.md)
 - 可以调用plan_exit退出到analyst模式
 - 不能编辑数据文件
 
@@ -103,7 +103,7 @@
 ### 保留的代码
 ✅ `plan_enter`和`plan_exit`工具名称保持不变
 ✅ 权限名称`plan_enter`, `plan_exit`保持不变
-✅ 文件路径`.opencode/plans/`保持不变 (向后兼容)
+✅ 文件路径`.killstata/plans/`保持不变 (向后兼容)
 
 这是合理的,因为:
 1. 工具名称是API的一部分,改名会破坏兼容性
@@ -129,7 +129,7 @@ killstata
 
 而不再是:
 ```
-opencode
+killstata
 > 当前模式: build
 > 切换到plan模式
 ```
@@ -160,7 +160,7 @@ bun install
 ## ⚠️ 注意事项
 
 ### 兼容性考虑
-- `.opencode/plans/`目录保持不变
+- `.killstata/plans/`目录保持不变
 - 权限标识符未更改
 - 工具名称保持稳定
 

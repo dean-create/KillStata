@@ -4,7 +4,7 @@ import { createStore } from "solid-js/store"
 import { useTheme } from "../../context/theme"
 import { Locale } from "@/util/locale"
 import path from "path"
-import type { AssistantMessage } from "@opencode-ai/sdk/v2"
+import type { AssistantMessage } from "@killstata/sdk/v2"
 import { Global } from "@/global"
 import { Installation } from "@/installation"
 import { useKeybind } from "../../context/keybind"
@@ -21,10 +21,10 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const messages = createMemo(() => sync.data.message[props.sessionID] ?? [])
 
   const [expanded, setExpanded] = createStore({
-    mcp: true,
-    diff: true,
-    todo: true,
-    lsp: true,
+    mcp: false,
+    diff: false,
+    todo: false,
+    lsp: false,
   })
 
   // Sort MCP servers alphabetically for consistent display order
@@ -63,7 +63,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const directory = useDirectory()
   const kv = useKV()
 
-  const hasProviders = createMemo(() => sync.data.provider.some((x) => x.id !== "opencode"))
+  const hasProviders = createMemo(() => sync.data.provider.some((x) => x.id !== "killstata"))
   const gettingStartedDismissed = createMemo(() => kv.get("dismissed_getting_started", false))
 
   return (

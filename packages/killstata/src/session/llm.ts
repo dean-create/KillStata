@@ -1,4 +1,4 @@
-import os from "os"
+﻿import os from "os"
 import { Installation } from "@/installation"
 import { Provider } from "@/provider/provider"
 import { Log } from "@/util/log"
@@ -24,11 +24,12 @@ import { SystemPrompt } from "./system"
 import { Flag } from "@/flag/flag"
 import { PermissionNext } from "@/permission/next"
 import { Auth } from "@/auth"
+import { RuntimeHooks } from "@/runtime/hooks"
 
 export namespace LLM {
   const log = Log.create({ service: "llm" })
 
-  export const OUTPUT_TOKEN_MAX = Flag.OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
+  export const OUTPUT_TOKEN_MAX = Flag.KILLSTATA_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
 
   export type StreamInput = {
     user: MessageV2.User
@@ -93,6 +94,15 @@ export namespace LLM {
       const rest = system.slice(1)
       system.length = 0
       system.push(header, rest.join("\n"))
+    }
+
+    const promptHook = await RuntimeHooks.promptAssembled({
+      sessionID: input.sessionID,
+      agent: input.agent.name,
+      system,
+    })
+    if (promptHook.appendSystem?.length) {
+      system.push(...promptHook.appendSystem)
     }
 
     const variant =
@@ -221,16 +231,16 @@ export namespace LLM {
       maxOutputTokens,
       abortSignal: input.abort,
       headers: {
-        ...(input.model.providerID.startsWith("opencode")
+        ...(input.model.providerID.startsWith("killstata")
           ? {
-            "x-opencode-project": Instance.project.id,
-            "x-opencode-session": input.sessionID,
-            "x-opencode-request": input.user.id,
-            "x-opencode-client": Flag.OPENCODE_CLIENT,
+            "x-killstata-project": Instance.project.id,
+            "x-killstata-session": input.sessionID,
+            "x-killstata-request": input.user.id,
+            "x-killstata-client": Flag.KILLSTATA_CLIENT,
           }
           : input.model.providerID !== "anthropic"
             ? {
-              "User-Agent": `opencode/${Installation.VERSION}`,
+              "User-Agent": `killstata/${Installation.VERSION}`,
             }
             : undefined),
         ...input.model.headers,

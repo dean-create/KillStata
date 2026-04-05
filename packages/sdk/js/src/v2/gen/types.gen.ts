@@ -1306,7 +1306,7 @@ export type KeybindsConfig = {
 export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR"
 
 /**
- * Server configuration for opencode serve and web commands
+ * Server configuration for killstata serve and web commands
  */
 export type ServerConfig = {
   /**
@@ -1612,7 +1612,7 @@ export type Config = {
   }
   server?: ServerConfig
   /**
-   * Command configuration, see https://opencode.ai/docs/commands
+   * Command configuration, see https://killstata.ai/docs/commands
    */
   command?: {
     [key: string]: {
@@ -1673,7 +1673,7 @@ export type Config = {
     [key: string]: AgentConfig | undefined
   }
   /**
-   * Agent configuration, see https://opencode.ai/docs/agents
+   * Agent configuration, see https://killstata.ai/docs/agents
    */
   agent?: {
     plan?: AgentConfig
@@ -2077,6 +2077,11 @@ export type Command = {
   agent?: string
   model?: string
   mcp?: boolean
+  availability?: Array<string>
+  queueBehavior?: "queued" | "immediate"
+  workflowAware?: boolean
+  immediate?: boolean
+  remoteSafe?: boolean
   template: string
   subtask?: boolean
   hints: Array<string>

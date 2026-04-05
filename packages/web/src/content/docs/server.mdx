@@ -1,19 +1,19 @@
 ---
 title: Server
-description: Interact with opencode server over HTTP.
+description: Interact with killstata server over HTTP.
 ---
 
 import config from "../../../config.mjs"
 export const typesUrl = `${config.github}/blob/dev/packages/sdk/js/src/gen/types.gen.ts`
 
-The `opencode serve` command runs a headless HTTP server that exposes an OpenAPI endpoint that an opencode client can use.
+The `killstata serve` command runs a headless HTTP server that exposes an OpenAPI endpoint that an killstata client can use.
 
 ---
 
 ### Usage
 
 ```bash
-opencode serve [--port <number>] [--hostname <string>] [--cors <origin>]
+killstata serve [--port <number>] [--hostname <string>] [--cors <origin>]
 ```
 
 #### Options
@@ -28,35 +28,35 @@ opencode serve [--port <number>] [--hostname <string>] [--cors <origin>]
 `--cors` can be passed multiple times:
 
 ```bash
-opencode serve --cors http://localhost:5173 --cors https://app.example.com
+killstata serve --cors http://localhost:5173 --cors https://app.example.com
 ```
 
 ---
 
 ### Authentication
 
-Set `OPENCODE_SERVER_PASSWORD` to protect the server with HTTP basic auth. The username defaults to `opencode`, or set `OPENCODE_SERVER_USERNAME` to override it. This applies to both `opencode serve` and `opencode web`.
+Set `KILLSTATA_SERVER_PASSWORD` to protect the server with HTTP basic auth. The username defaults to `killstata`, or set `KILLSTATA_SERVER_USERNAME` to override it. This applies to both `killstata serve` and `killstata web`.
 
 ```bash
-OPENCODE_SERVER_PASSWORD=your-password opencode serve
+KILLSTATA_SERVER_PASSWORD=your-password killstata serve
 ```
 
 ---
 
 ### How it works
 
-When you run `opencode` it starts a TUI and a server. Where the TUI is the
+When you run `killstata` it starts a TUI and a server. Where the TUI is the
 client that talks to the server. The server exposes an OpenAPI 3.1 spec
 endpoint. This endpoint is also used to generate an [SDK](/docs/sdk).
 
 :::tip
-Use the opencode server to interact with opencode programmatically.
+Use the killstata server to interact with killstata programmatically.
 :::
 
-This architecture lets opencode support multiple clients and allows you to interact with opencode programmatically.
+This architecture lets killstata support multiple clients and allows you to interact with killstata programmatically.
 
-You can run `opencode serve` to start a standalone server. If you have the
-opencode TUI running, `opencode serve` will start a new server.
+You can run `killstata serve` to start a standalone server. If you have the
+killstata TUI running, `killstata serve` will start a new server.
 
 ---
 
@@ -64,7 +64,7 @@ opencode TUI running, `opencode serve` will start a new server.
 
 When you start the TUI it randomly assigns a port and hostname. You can instead pass in the `--hostname` and `--port` [flags](/docs/cli). Then use this to connect to its server.
 
-The [`/tui`](#tui) endpoint can be used to drive the TUI through the server. For example, you can prefill or run a prompt. This setup is used by the OpenCode [IDE](/docs/ide) plugins.
+The [`/tui`](#tui) endpoint can be used to drive the TUI through the server. For example, you can prefill or run a prompt. This setup is used by the Killstata [IDE](/docs/ide) plugins.
 
 ---
 
@@ -82,7 +82,7 @@ For example, `http://localhost:4096/doc`. Use the spec to generate clients or in
 
 ## APIs
 
-The opencode server exposes the following APIs.
+The killstata server exposes the following APIs.
 
 ---
 

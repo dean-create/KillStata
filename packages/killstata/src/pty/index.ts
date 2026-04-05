@@ -1,4 +1,4 @@
-import { BusEvent } from "@/bus/bus-event"
+﻿import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { type IPty } from "bun-pty"
 import z from "zod"
@@ -6,7 +6,7 @@ import { Identifier } from "../id/id"
 import { Log } from "../util/log"
 import type { WSContext } from "hono/ws"
 import { Instance } from "../project/instance"
-import { lazy } from "@opencode-ai/util/lazy"
+import { lazy } from "@killstata/util/lazy"
 import { Shell } from "@/shell/shell"
 
 export namespace Pty {
@@ -106,7 +106,7 @@ export namespace Pty {
       ...process.env,
       ...input.env,
       TERM: "xterm-256color",
-      OPENCODE_TERMINAL: "1",
+      KILLSTATA_TERMINAL: "1",
     } as Record<string, string>
     log.info("creating session", { id, cmd: command, args, cwd })
 

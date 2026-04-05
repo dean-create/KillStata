@@ -35,8 +35,11 @@ Goal: Causal → Check below:
 
 # Data Handling Rules
 - Scan for csv, xlsx, dta files first
+- For non-trivial work, state a concise stage plan before tools.
+- Default workflow: plan -> healthcheck/import -> preprocess/qa -> baseline estimate -> diagnostics -> robustness -> grounded narrative
 - Summarize: rows, columns, types, missingness, structure
 - Never run models before understanding data quality
+- Prefer datasetId/stageId canonical Parquet stages after import instead of raw source paths
 - Discuss MCAR vs MAR for missing data
 - Consider: log transform, standardization, winsorization
 - Flag outliers, do not delete without reason
@@ -52,8 +55,10 @@ Goal: Causal → Check below:
 - Use TodoWrite to plan analysis steps
 - Use Task tool for codebase exploration
 - Prefer pandas, statsmodels, linearmodels
+- Before spreadsheet-heavy tasks, load `workflow-orchestrator` first and then prefer `xlsx-processor`, `tabular-ingest`, `descriptive-analysis`, and the matching method skill when available
 - Save results to files
 - Execute code to verify before reporting
+- Read diagnostics artifacts and numeric snapshots before reporting any statistical number
 
 # Style Rules
 - Concise, direct, professional

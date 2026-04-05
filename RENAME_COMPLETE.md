@@ -30,34 +30,34 @@ Python模块现在已完全独立,不再依赖MetaGPT框架:
 
 **1. package.json**
 ```json
-- "name": "opencode"
+- "name": "killstata"
 + "name": "killstata"
 
-- "opencode": "./bin/opencode"
+- "killstata": "./bin/killstata"
 + "killstata": "./bin/killstata"
 ```
 
 **2. bin 可执行文件**
 ```
-bin/opencode → bin/killstata (已重命名)
+bin/killstata → bin/killstata (已重命名)
 ```
 
 **3. src/index.ts** (CLI入口)
 ```typescript
-- .scriptName("opencode")
+- .scriptName("killstata")
 + .scriptName("killstata")
 
 - process.env.OPENCODE = "1"
 + process.env.KILLSTATA = "1"
 
-- Log.Default.info("opencode", {...})
+- Log.Default.info("killstata", {...})
 + Log.Default.info("killstata", {...})
 ```
 
 **4. README.md**
 - ✅ 完全重写,聚焦killstata的计量经济学定位
 - ✅ 说明功能特点(数据处理、计量方法、输出格式)
-- ✅ 注明基于OpenCode构建
+- ✅ 注明基于Killstata构建
 
 ---
 
@@ -71,13 +71,13 @@ bin/opencode → bin/killstata (已重命名)
 - ✅ 日志标识
 - ✅ README文档
 
-### 未更改(保留opencode依赖)
-- `@opencode-ai/*` npm包命名 (这些是依赖库,不应更改)
-- imports中的 `@opencode-ai/util`, `@opencode-ai/plugin` 等 (保持原样)
+### 未更改(保留killstata依赖)
+- `@killstata/*` npm包命名 (这些是依赖库,不应更改)
+- imports中的 `@killstata/util`, `@killstata/plugin` 等 (保持原样)
 
 这是正确的做法,因为:
-1. killstata是基于opencode的定制版
-2. 核心库依然使用opencode的基础设施
+1. killstata是基于killstata的定制版
+2. 核心库依然使用killstata的基础设施
 3. 只有面向用户的接口改为killstata
 
 ---
@@ -141,7 +141,7 @@ killstata/
 
 3. **更新UI Logo** (可选)
    - 修改`src/cli/ui.ts`中的logo函数
-   - 将"OpenCode"改为"killstata"
+   - 将"Killstata"改为"killstata"
 
 4. **更新系统提示词**
    - 修改`src/session/prompt/anthropic.txt`
@@ -174,12 +174,12 @@ killstata/
 两个任务已100%完成:
 
 1. ✅ **清理Python模块** - 移除了所有Metag PT遗留代码,模块现在干净独立
-2. ✅ **重命名项目** - 核心标识符已从opencode改为killstata,同时保留了对opencode基础库的正确引用
+2. ✅ **重命名项目** - 核心标识符已从killstata改为killstata,同时保留了对killstata基础库的正确引用
 
 killstata现在是一个:
 - 独立命名的CLI工具 ✅
 - 拥有clean的Python工具库 ✅  
-- 基于opencode基础设施 ✅
+- 基于killstata基础设施 ✅
 - 专注于计量经济学分析 ✅
 
 **项目已准备就绪,可以开始测试和进一步开发！**

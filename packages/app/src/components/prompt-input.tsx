@@ -1,4 +1,4 @@
-import { useFilteredList } from "@opencode-ai/ui/hooks"
+import { useFilteredList } from "@killstata/ui/hooks"
 import {
   createEffect,
   on,
@@ -30,17 +30,17 @@ import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
 import { useNavigate, useParams } from "@solidjs/router"
 import { useSync } from "@/context/sync"
-import { FileIcon } from "@opencode-ai/ui/file-icon"
-import { Button } from "@opencode-ai/ui/button"
-import { Icon } from "@opencode-ai/ui/icon"
-import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
-import type { IconName } from "@opencode-ai/ui/icons/provider"
-import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
-import { IconButton } from "@opencode-ai/ui/icon-button"
-import { Select } from "@opencode-ai/ui/select"
-import { getDirectory, getFilename } from "@opencode-ai/util/path"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { ImagePreview } from "@opencode-ai/ui/image-preview"
+import { FileIcon } from "@killstata/ui/file-icon"
+import { Button } from "@killstata/ui/button"
+import { Icon } from "@killstata/ui/icon"
+import { ProviderIcon } from "@killstata/ui/provider-icon"
+import type { IconName } from "@killstata/ui/icons/provider"
+import { Tooltip, TooltipKeybind } from "@killstata/ui/tooltip"
+import { IconButton } from "@killstata/ui/icon-button"
+import { Select } from "@killstata/ui/select"
+import { getDirectory, getFilename } from "@killstata/util/path"
+import { useDialog } from "@killstata/ui/context/dialog"
+import { ImagePreview } from "@killstata/ui/image-preview"
 import { ModelSelectorPopover } from "@/components/dialog-select-model"
 import { DialogSelectModelUnpaid } from "@/components/dialog-select-model-unpaid"
 import { useProviders } from "@/hooks/use-providers"
@@ -52,10 +52,10 @@ import { usePermission } from "@/context/permission"
 import { useLanguage } from "@/context/language"
 import { useGlobalSync } from "@/context/global-sync"
 import { usePlatform } from "@/context/platform"
-import { createOpencodeClient, type Message, type Part } from "@opencode-ai/sdk/v2/client"
-import { Binary } from "@opencode-ai/util/binary"
-import { showToast } from "@opencode-ai/ui/toast"
-import { base64Encode } from "@opencode-ai/util/encode"
+import { createKillstataClient, type Message, type Part } from "@killstata/sdk/v2/client"
+import { Binary } from "@killstata/util/binary"
+import { showToast } from "@killstata/ui/toast"
+import { base64Encode } from "@killstata/util/encode"
 
 const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
@@ -1082,7 +1082,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       }
 
       if (sessionDirectory !== projectDirectory) {
-        client = createOpencodeClient({
+        client = createKillstataClient({
           baseUrl: sdk.url,
           fetch: platform.fetch,
           directory: sessionDirectory,

@@ -19,7 +19,7 @@ import { useRenderer } from "@opentui/solid"
 import { Editor } from "@tui/util/editor"
 import { useExit } from "../../context/exit"
 import { Clipboard } from "../../util/clipboard"
-import type { FilePart } from "@opencode-ai/sdk/v2"
+import type { FilePart } from "@killstata/sdk/v2"
 import { TuiEvent } from "../../event"
 import { iife } from "@/util/iife"
 import { Locale } from "@/util/locale"
@@ -715,17 +715,17 @@ export function Prompt(props: PromptProps) {
     return {
       frames: createFrames({
         color,
-        style: "blocks",
-        inactiveFactor: 0.6,
+        style: "pulse",
+        inactiveFactor: 0.3,
         // enableFading: false,
-        minAlpha: 0.3,
+        minAlpha: 0.1,
       }),
       color: createColors({
         color,
-        style: "blocks",
-        inactiveFactor: 0.6,
+        style: "pulse",
+        inactiveFactor: 0.3,
         // enableFading: false,
-        minAlpha: 0.3,
+        minAlpha: 0.1,
       }),
     }
   })

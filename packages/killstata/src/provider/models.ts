@@ -1,4 +1,4 @@
-import { Global } from "../global"
+﻿import { Global } from "../global"
 import { Log } from "../util/log"
 import path from "path"
 import z from "zod"
@@ -12,28 +12,6 @@ export namespace ModelsDev {
 
   function localFallback() {
     return {
-      opencode: {
-        id: "opencode",
-        name: "Killstata Cloud",
-        api: "https://api.opencode.ai/v1",
-        env: ["OPENCODE_API_KEY"],
-        models: {
-          "gpt-5-nano": {
-            id: "gpt-5-nano",
-            name: "GPT-5 Nano",
-            family: "gpt-5",
-            release_date: "2026-01-01",
-            attachment: false,
-            reasoning: false,
-            temperature: true,
-            tool_call: true,
-            cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
-            limit: { context: 128000, output: 8192 },
-            modalities: { input: ["text"], output: ["text"] },
-            options: {},
-          },
-        },
-      },
       google: {
         id: "google",
         name: "Google AI Studio",
@@ -58,6 +36,12 @@ export namespace ModelsDev {
         },
       },
     } satisfies Record<string, Provider>
+  }
+
+  function removeHostedProviders(providers: Record<string, Provider>) {
+    const result = { ...providers }
+    delete result.killstata
+    return result
   }
 
   export const Model = z.object({
@@ -127,23 +111,23 @@ export namespace ModelsDev {
   export type Provider = z.infer<typeof Provider>
 
   export async function get() {
-    if (!Flag.OPENCODE_DISABLE_MODELS_FETCH) refresh()
+    if (!Flag.KILLSTATA_DISABLE_MODELS_FETCH) refresh()
     const file = Bun.file(filepath)
     const result = await file.json().catch(() => {})
-    if (result) return result as Record<string, Provider>
+    if (result) return removeHostedProviders(result as Record<string, Provider>)
     try {
       if (typeof data === "function") {
         const json = await data()
-        return JSON.parse(json) as Record<string, Provider>
+        return removeHostedProviders(JSON.parse(json) as Record<string, Provider>)
       }
     } catch (error) {
       log.error("failed to load embedded models.dev fallback", { error })
     }
-    return localFallback()
+    return removeHostedProviders(localFallback())
   }
 
   export async function refresh() {
-    if (Flag.OPENCODE_DISABLE_MODELS_FETCH) return
+    if (Flag.KILLSTATA_DISABLE_MODELS_FETCH) return
     const file = Bun.file(filepath)
     log.info("refreshing", {
       file,

@@ -1,4 +1,4 @@
-import z from "zod"
+﻿import z from "zod"
 import fuzzysort from "fuzzysort"
 import { Config } from "../config/config"
 import { mapValues, mergeDeep, omit, pickBy, sortBy } from "remeda"
@@ -7,7 +7,7 @@ import { Log } from "../util/log"
 import { BunProc } from "../bun"
 import { Plugin } from "../plugin"
 import { ModelsDev } from "./models"
-import { NamedError } from "@opencode-ai/util/error"
+import { NamedError } from "@killstata/util/error"
 import { Auth } from "../auth"
 import { Env } from "../env"
 import { Instance } from "../project/instance"
@@ -81,7 +81,7 @@ export namespace Provider {
       async start(controller) {
         const flushLines = (final = false) => {
           const parts = buffer.split("\n")
-          const trailing = final ? undefined : (parts.pop() ?? "")
+          const trailing = final ? "" : (parts.pop() ?? "")
           if (!final) {
             buffer = trailing
           } else {
@@ -184,13 +184,13 @@ export namespace Provider {
         },
       }
     },
-    async opencode(input) {
+    async killstata(input) {
       const hasKey = await (async () => {
         const env = Env.all()
         if (input.env.some((item) => env[item])) return true
         if (await Auth.get(input.id)) return true
         const config = await Config.get()
-        if (config.provider?.["opencode"]?.options?.apiKey) return true
+        if (config.provider?.["killstata"]?.options?.apiKey) return true
         return false
       })()
 
@@ -325,7 +325,7 @@ export namespace Provider {
           }
 
           // Region resolution precedence (highest to lowest):
-          // 1. options.region from opencode.json provider config
+          // 1. options.region from killstata.json provider config
           // 2. defaultRegion from AWS_REGION environment variable
           // 3. Default "us-east-1" (baked into defaultRegion)
           const region = options?.region ?? defaultRegion
@@ -408,8 +408,8 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://opencode.ai/",
-            "X-Title": "opencode",
+            "HTTP-Referer": "https://killstata.ai/",
+            "X-Title": "killstata",
           },
         },
       }
@@ -419,8 +419,8 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "http-referer": "https://opencode.ai/",
-            "x-title": "opencode",
+            "http-referer": "https://killstata.ai/",
+            "x-title": "killstata",
           },
         },
       }
@@ -486,8 +486,8 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://opencode.ai/",
-            "X-Title": "opencode",
+            "HTTP-Referer": "https://killstata.ai/",
+            "X-Title": "killstata",
           },
         },
       }
@@ -553,8 +553,8 @@ export namespace Provider {
             // Cloudflare AI Gateway uses cf-aig-authorization for authenticated gateways
             // This enables Unified Billing where Cloudflare handles upstream provider auth
             ...(apiToken ? { "cf-aig-authorization": `Bearer ${apiToken}` } : {}),
-            "HTTP-Referer": "https://opencode.ai/",
-            "X-Title": "opencode",
+            "HTTP-Referer": "https://killstata.ai/",
+            "X-Title": "killstata",
           },
           // Custom fetch to handle parameter transformation and auth
           fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -586,7 +586,7 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "X-Cerebras-3rd-Party-Integration": "opencode",
+            "X-Cerebras-3rd-Party-Integration": "killstata",
           },
         },
       }
@@ -757,6 +757,132 @@ export namespace Provider {
       env: provider.env ?? [],
       options: {},
       models: mapValues(provider.models, (model) => fromModelsDevModel(provider, model)),
+    }
+  }
+
+  function providerApiKey(provider: Info) {
+    const apiKey = provider.options["apiKey"]
+    if (typeof apiKey === "string" && apiKey.trim()) return apiKey.trim()
+    if (typeof provider.key === "string" && provider.key.trim()) return provider.key.trim()
+    return undefined
+  }
+
+  function providerBaseURL(provider: Info) {
+    const configured = provider.options["baseURL"]
+    if (typeof configured === "string" && configured.trim()) {
+      return configured.replace(/\/+$/, "")
+    }
+    const firstModel = Object.values(provider.models)[0]
+    if (firstModel?.api.url) return firstModel.api.url.replace(/\/+$/, "")
+    return undefined
+  }
+
+  function isDiscoverableOpenAICompatibleProvider(provider: Info) {
+    const firstModel = Object.values(provider.models)[0]
+    const npm = firstModel?.api.npm
+    const baseURL = providerBaseURL(provider)
+    return !!baseURL && (!npm || npm.includes("@ai-sdk/openai-compatible"))
+  }
+
+  function discoveredModel(provider: Info, modelID: string, baseURL: string): Model {
+    const existing = provider.models[modelID]
+    if (existing) return existing
+
+    const npm = Object.values(provider.models)[0]?.api.npm ?? "@ai-sdk/openai-compatible"
+    const model: Model = {
+      id: modelID,
+      providerID: provider.id,
+      name: modelID,
+      family: provider.id,
+      api: {
+        id: modelID,
+        url: baseURL,
+        npm,
+      },
+      status: "active",
+      headers: {},
+      options: {},
+      cost: {
+        input: 0,
+        output: 0,
+        cache: {
+          read: 0,
+          write: 0,
+        },
+      },
+      limit: {
+        context: 0,
+        output: 0,
+      },
+      capabilities: {
+        temperature: true,
+        reasoning: false,
+        attachment: false,
+        toolcall: true,
+        input: {
+          text: true,
+          audio: false,
+          image: false,
+          video: false,
+          pdf: false,
+        },
+        output: {
+          text: true,
+          audio: false,
+          image: false,
+          video: false,
+          pdf: false,
+        },
+        interleaved: false,
+      },
+      release_date: "",
+      variants: {},
+    }
+
+    model.variants = mapValues(ProviderTransform.variants(model), (variant) => variant)
+    return model
+  }
+
+  async function discoverProviderModels(provider: Info) {
+    if (!isDiscoverableOpenAICompatibleProvider(provider)) return []
+
+    const apiKey = providerApiKey(provider)
+    const baseURL = providerBaseURL(provider)
+    if (!apiKey || !baseURL) return []
+
+    const headers = {
+      ...(provider.options["headers"] && typeof provider.options["headers"] === "object" ? provider.options["headers"] : {}),
+      Authorization: `Bearer ${apiKey}`,
+    }
+
+    try {
+      const response = await fetch(`${baseURL}/models`, {
+        method: "GET",
+        headers,
+        signal: AbortSignal.timeout(15_000),
+      })
+
+      if (!response.ok) {
+        throw new Error(`model discovery failed with ${response.status} ${response.statusText}`)
+      }
+
+      const payload = (await response.json()) as {
+        data?: Array<{
+          id?: string
+        }>
+      }
+
+      return (payload.data ?? [])
+        .map((item) => item.id?.trim())
+        .filter((item): item is string => !!item)
+        .filter((item, index, all) => all.indexOf(item) === index)
+    } catch (error) {
+      log.warn("provider model discovery failed", {
+        providerID: provider.id,
+        baseURL,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return []
     }
   }
 
@@ -993,6 +1119,26 @@ export namespace Provider {
     }
 
     for (const [providerID, provider] of Object.entries(providers)) {
+      if (!isProviderAllowed(providerID)) continue
+      const discoveredModels = await discoverProviderModels(provider)
+      if (discoveredModels.length === 0) continue
+
+      const baseURL = providerBaseURL(provider)
+      if (!baseURL) continue
+
+      for (const modelID of discoveredModels) {
+        if (provider.models[modelID]) continue
+        provider.models[modelID] = discoveredModel(provider, modelID, baseURL)
+      }
+
+      log.info("provider model discovery completed", {
+        providerID,
+        discovered: discoveredModels.length,
+        total: Object.keys(provider.models).length,
+      })
+    }
+
+    for (const [providerID, provider] of Object.entries(providers)) {
       if (!isProviderAllowed(providerID)) {
         delete providers[providerID]
         continue
@@ -1004,7 +1150,7 @@ export namespace Provider {
         model.api.id = model.api.id ?? model.id ?? modelID
         if (modelID === "gpt-5-chat-latest" || (providerID === "openrouter" && modelID === "openai/gpt-5-chat"))
           delete provider.models[modelID]
-        if (model.status === "alpha" && !Flag.OPENCODE_ENABLE_EXPERIMENTAL_MODELS) delete provider.models[modelID]
+        if (model.status === "alpha" && !Flag.KILLSTATA_ENABLE_EXPERIMENTAL_MODELS) delete provider.models[modelID]
         if (model.status === "deprecated") delete provider.models[modelID]
         if (
           (configProvider?.blacklist && configProvider.blacklist.includes(modelID)) ||
@@ -1261,6 +1407,19 @@ export namespace Provider {
     )
   }
 
+  export function defaultModelID(provider: Info, cfg?: { model?: string; small_model?: string }) {
+    for (const configured of [cfg?.model, cfg?.small_model]) {
+      if (!configured) continue
+      const parsed = parseModel(configured)
+      if (parsed.providerID !== provider.id) continue
+      if (provider.models[parsed.modelID]) return parsed.modelID
+    }
+
+    const [model] = sort(Object.values(provider.models))
+    if (!model) throw new Error(`no models found for provider ${provider.id}`)
+    return model.id
+  }
+
   export async function defaultModel() {
     const cfg = await Config.get()
     if (cfg.model) return parseModel(cfg.model)
@@ -1271,15 +1430,13 @@ export namespace Provider {
       .then((providers) =>
         providers.find((item) => {
           if (configuredProviderIDs?.length) return configuredProviderIDs.includes(item.id)
-          return item.id !== "opencode"
+          return item.id !== "killstata"
         }),
       )
     if (!provider) throw new Error("no providers found")
-    const [model] = sort(Object.values(provider.models))
-    if (!model) throw new Error("no models found")
     return {
       providerID: provider.id,
-      modelID: model.id,
+      modelID: defaultModelID(provider, cfg),
     }
   }
 

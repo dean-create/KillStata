@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@opencode-ai/sdk",
+  "name": "@killstata/sdk",
   "version": "1.1.31",
   "type": "module",
   "license": "MIT",

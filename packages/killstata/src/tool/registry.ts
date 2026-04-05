@@ -1,4 +1,4 @@
-import { QuestionTool } from "./question"
+﻿import { QuestionTool } from "./question"
 import { BashTool } from "./bash"
 import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
@@ -16,7 +16,7 @@ import { Tool } from "./tool"
 import { Instance } from "../project/instance"
 import { Config } from "../config/config"
 import path from "path"
-import { type ToolDefinition } from "@opencode-ai/plugin"
+import { type ToolDefinition } from "@killstata/plugin"
 import z from "zod"
 import { Plugin } from "../plugin"
 import { WebSearchTool } from "./websearch"
@@ -30,6 +30,13 @@ import { ApplyPatchTool } from "./apply_patch"
 import { EconometricsTool } from "./econometrics"
 import { DataImportTool } from "./data-import"
 import { RegressionTableTool } from "./regression-table"
+import { ResearchBriefTool } from "./research-brief"
+import { HeterogeneityRunnerTool } from "./heterogeneity-runner"
+import { PaperDraftTool } from "./paper-draft"
+import { SlideGeneratorTool } from "./slide-generator"
+import { WorkflowTool } from "./workflow"
+import { filterToolsForWorkflow, workflowToolPolicy } from "@/runtime/workflow"
+import type { ToolAvailabilityPolicy } from "@/runtime/types"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -98,7 +105,7 @@ export namespace ToolRegistry {
 
     return [
       InvalidTool,
-      ...(["app", "cli", "desktop"].includes(Flag.OPENCODE_CLIENT) ? [QuestionTool] : []),
+      ...(["app", "cli", "desktop"].includes(Flag.KILLSTATA_CLIENT) ? [QuestionTool] : []),
       BashTool,
       ReadTool,
       GlobTool,
@@ -112,13 +119,18 @@ export namespace ToolRegistry {
       WebSearchTool,
       CodeSearchTool,
       SkillTool,
+      WorkflowTool,
       ApplyPatchTool,
       EconometricsTool,
       RegressionTableTool,
       DataImportTool,
-      ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
+      ResearchBriefTool,
+      HeterogeneityRunnerTool,
+      PaperDraftTool,
+      SlideGeneratorTool,
+      ...(Flag.KILLSTATA_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
-      ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool, PlanEnterTool] : []),
+      ...(Flag.KILLSTATA_EXPERIMENTAL_PLAN_MODE && Flag.KILLSTATA_CLIENT === "cli" ? [PlanExitTool, PlanEnterTool] : []),
       ...custom,
     ]
   }
@@ -133,14 +145,31 @@ export namespace ToolRegistry {
       modelID: string
     },
     agent?: Agent.Info,
+    context?: ToolAvailabilityPolicy,
   ) {
     const tools = await all()
+    const policy = workflowToolPolicy({
+      ...context,
+      sessionID: context?.sessionID,
+      agent: context?.agent ?? agent?.name,
+      platformCapabilities: {
+        mcp: context?.platformCapabilities?.mcp ?? true,
+        images: context?.platformCapabilities?.images ?? true,
+        remote: context?.platformCapabilities?.remote ?? false,
+      },
+      modelCapabilities: {
+        supportsTools: context?.modelCapabilities?.supportsTools ?? true,
+        supportsImages: context?.modelCapabilities?.supportsImages ?? true,
+      },
+    })
+    const workflowAllowed = new Set(filterToolsForWorkflow({ policy, toolIDs: tools.map((tool) => tool.id) }))
     const result = await Promise.all(
       tools
         .filter((t) => {
+          if (!workflowAllowed.has(t.id)) return false
           // Enable websearch/codesearch for zen users OR via enable flag
           if (t.id === "codesearch" || t.id === "websearch") {
-            return model.providerID === "opencode" || Flag.OPENCODE_ENABLE_EXA
+            return model.providerID === "killstata" || Flag.KILLSTATA_ENABLE_EXA
           }
 
           // use apply tool in same format as codex

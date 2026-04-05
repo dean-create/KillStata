@@ -1,6 +1,6 @@
-# OpenCode Desktop
+# Killstata Desktop
 
-Native OpenCode desktop app, built with Tauri v2.
+Native Killstata desktop app, built with Tauri v2.
 
 ## Development
 

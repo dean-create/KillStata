@@ -1,0 +1,7 @@
+interface:
+  display_name: "Slide Generator"
+  short_description: "Generate a grounded academic seminar deck from saved outputs"
+  default_prompt: "Use $slide-generator to create a seminar deck from the saved empirical artifacts."
+
+policy:
+  allow_implicit_invocation: true

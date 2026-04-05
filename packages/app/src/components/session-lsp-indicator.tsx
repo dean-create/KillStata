@@ -1,7 +1,7 @@
 import { createMemo, Show } from "solid-js"
 import { useSync } from "@/context/sync"
 import { useLanguage } from "@/context/language"
-import { Tooltip } from "@opencode-ai/ui/tooltip"
+import { Tooltip } from "@killstata/ui/tooltip"
 
 export function SessionLspIndicator() {
   const sync = useSync()

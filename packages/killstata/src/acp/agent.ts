@@ -37,13 +37,19 @@ import { Config } from "@/config/config"
 import { Todo } from "@/session/todo"
 import { z } from "zod"
 import { LoadAPIKeyError } from "ai"
-import type { Event, OpencodeClient, SessionMessageResponse } from "@opencode-ai/sdk/v2"
+import type { Event, KillstataClient, SessionMessageResponse } from "@killstata/sdk/v2"
 import { applyPatch } from "diff"
+import { Command } from "@/command"
 
 export namespace ACP {
   const log = Log.create({ service: "acp-agent" })
 
-  export async function init({ sdk: _sdk }: { sdk: OpencodeClient }) {
+  function describeCommand(command: Pick<Command.Info, "description" | "availability" | "queueBehavior" | "workflowAware" | "immediate" | "remoteSafe">) {
+    const tags = Command.capabilityTags(command)
+    return [command.description, tags.length ? `[${tags.join("] [")}]` : undefined].filter(Boolean).join(" ")
+  }
+
+  export async function init({ sdk: _sdk }: { sdk: KillstataClient }) {
     return {
       create: (connection: AgentSideConnection, fullConfig: ACPConfig) => {
         return new Agent(connection, fullConfig)
@@ -54,7 +60,7 @@ export namespace ACP {
   export class Agent implements ACPAgent {
     private connection: AgentSideConnection
     private config: ACPConfig
-    private sdk: OpencodeClient
+    private sdk: KillstataClient
     private sessionManager: ACPSessionManager
     private eventAbort = new AbortController()
     private eventStarted = false
@@ -99,8 +105,161 @@ export namespace ACP {
       }
     }
 
-    private async handleEvent(event: Event) {
+    private async handleEvent(event: Event | { type: string; properties: any }) {
       switch (event.type) {
+        case "runtime.queue.updated": {
+          const props = event.properties as {
+            sessionID: string
+            actions: Array<{ type: string; priority: number }>
+          }
+          const session = this.sessionManager.tryGet(props.sessionID)
+          if (!session) return
+
+          await this.connection
+            .sessionUpdate({
+              sessionId: session.id,
+              update: {
+                sessionUpdate: "plan",
+                entries: props.actions.map((action) => ({
+                  priority: toPlanPriority(action.priority),
+                  status: "pending",
+                  content: `Queued ${action.type}`,
+                })),
+              },
+            })
+            .catch((error) => {
+              log.error("failed to send runtime queue plan to ACP", { error })
+            })
+          return
+        }
+
+        case "runtime.subagent.lifecycle": {
+          const props = event.properties as {
+            sessionID: string
+            subagentSessionID: string
+            agent: string
+            phase: "queued" | "running" | "completed" | "failed"
+          }
+          const session = this.sessionManager.tryGet(props.sessionID)
+          if (!session) return
+
+          const toolCallId = `subagent:${props.subagentSessionID}`
+          if (props.phase === "queued") {
+            await this.connection
+              .sessionUpdate({
+                sessionId: session.id,
+                update: {
+                  sessionUpdate: "tool_call",
+                  toolCallId,
+                  title: `@${props.agent}`,
+                  kind: "other",
+                  status: "pending",
+                  locations: [],
+                  rawInput: {
+                    subagentSessionID: props.subagentSessionID,
+                    agent: props.agent,
+                  },
+                },
+              })
+              .catch((error) => {
+                log.error("failed to send subagent queued update to ACP", { error })
+              })
+            return
+          }
+
+          await this.connection
+            .sessionUpdate({
+              sessionId: session.id,
+              update: {
+                sessionUpdate: "tool_call_update",
+                toolCallId,
+                status: props.phase === "running" ? "in_progress" : props.phase === "completed" ? "completed" : "failed",
+                kind: "other",
+                title: `@${props.agent}`,
+                rawInput: {
+                  subagentSessionID: props.subagentSessionID,
+                  agent: props.agent,
+                },
+                ...(props.phase === "completed" || props.phase === "failed"
+                  ? {
+                      content: [
+                        {
+                          type: "content" as const,
+                          content: {
+                            type: "text" as const,
+                            text:
+                              props.phase === "completed"
+                                ? `Subagent @${props.agent} completed`
+                                : `Subagent @${props.agent} failed`,
+                          },
+                        },
+                      ],
+                    }
+                  : {}),
+              },
+            })
+            .catch((error) => {
+              log.error("failed to send subagent lifecycle update to ACP", { error })
+            })
+          return
+        }
+
+        case "runtime.workflow.state": {
+          const props = event.properties as {
+            sessionID: string
+            activeStage?: string
+            activeStageId?: string
+            repairOnly?: boolean
+            latestFailureCode?: string
+            verifierStatus?: "pass" | "warn" | "block"
+            rerunTargetStageId?: string
+          }
+          const session = this.sessionManager.tryGet(props.sessionID)
+          if (!session) return
+          const entries: PlanEntry[] = []
+          if (props.activeStage) {
+            entries.push({
+              priority: "high",
+              status: "pending",
+              content: `Active stage: ${props.activeStage}${props.activeStageId ? ` (${props.activeStageId})` : ""}`,
+            })
+          }
+          if (props.verifierStatus) {
+            entries.push({
+              priority: props.verifierStatus === "block" ? "high" : "medium",
+              status: props.verifierStatus === "block" ? "in_progress" : "pending",
+              content: `Verifier: ${props.verifierStatus}`,
+            })
+          }
+          if (props.latestFailureCode) {
+            entries.push({
+              priority: "high",
+              status: "pending",
+              content: `Latest failure: ${props.latestFailureCode}`,
+            })
+          }
+          if (props.repairOnly) {
+            entries.push({
+              priority: "high",
+              status: "in_progress",
+              content: `Repair-only mode${props.rerunTargetStageId ? `; rerun target ${props.rerunTargetStageId}` : ""}`,
+            })
+          }
+          if (!entries.length) return
+          await this.connection
+            .sessionUpdate({
+              sessionId: session.id,
+              update: {
+                sessionUpdate: "plan",
+                entries,
+              },
+            })
+            .catch((error) => {
+              log.error("failed to send workflow state update to ACP", { error })
+            })
+          return
+        }
+
         case "permission.asked": {
           const permission = event.properties
           const session = this.sessionManager.tryGet(permission.sessionID)
@@ -286,7 +445,7 @@ export namespace ACP {
                       .sessionUpdate({
                         sessionId,
                         update: {
-                          sessionUpdate: "explorer",
+                          sessionUpdate: "plan",
                           entries: parsedTodos.data.map((todo) => {
                             const status: PlanEntry["status"] =
                               todo.status === "cancelled" ? "completed" : (todo.status as PlanEntry["status"])
@@ -411,7 +570,7 @@ export namespace ACP {
       const authMethod: AuthMethod = {
         description: "Run `killstata auth login` in the terminal",
         name: "Login with Killstata",
-        id: "opencode-login",
+        id: "killstata-login",
       }
 
       // If client supports terminal-auth capability, use that instead.
@@ -768,7 +927,7 @@ export namespace ACP {
                     .sessionUpdate({
                       sessionId,
                       update: {
-                        sessionUpdate: "explorer",
+                        sessionUpdate: "plan",
                         entries: parsedTodos.data.map((todo) => {
                           const status: PlanEntry["status"] =
                             todo.status === "cancelled" ? "completed" : (todo.status as PlanEntry["status"])
@@ -860,7 +1019,7 @@ export namespace ACP {
           }
         } else if (part.type === "file") {
           // Replay file attachments as appropriate ACP content blocks.
-          // OpenCode stores files internally as { type: "file", url, filename, mime }.
+          // Killstata stores files internally as { type: "file", url, filename, mime }.
           // We convert these back to ACP blocks based on the URL scheme and MIME type:
           // - file:// URLs → resource_link
           // - data: URLs with image/* → image block
@@ -997,13 +1156,13 @@ export namespace ACP {
 
       const availableCommands = commands.map((command) => ({
         name: command.name,
-        description: command.description ?? "",
+        description: describeCommand(command),
       }))
       const names = new Set(availableCommands.map((c) => c.name))
       if (!names.has("compact"))
         availableCommands.push({
           name: "compact",
-          description: "compact the session",
+          description: "compact the session [queued]",
         })
 
       const availableModes = agents
@@ -1302,6 +1461,12 @@ export namespace ACP {
     }
   }
 
+  function toPlanPriority(priority: number): PlanEntry["priority"] {
+    if (priority >= 50) return "high"
+    if (priority >= 10) return "medium"
+    return "low"
+  }
+
   function toLocations(toolName: string, input: Record<string, any>): { path: string }[] {
     const tool = toolName.toLocaleLowerCase()
     switch (tool) {
@@ -1359,12 +1524,12 @@ export namespace ACP {
 
     if (specified && !providers.length) return specified
 
-    const opencodeProvider = providers.find((p) => p.id === "opencode")
-    if (opencodeProvider) {
-      if (opencodeProvider.models["big-pickle"]) {
-        return { providerID: "opencode", modelID: "big-pickle" }
+    const killstataProvider = providers.find((p) => p.id === "killstata")
+    if (killstataProvider) {
+      if (killstataProvider.models["big-pickle"]) {
+        return { providerID: "killstata", modelID: "big-pickle" }
       }
-      const [best] = Provider.sort(Object.values(opencodeProvider.models))
+      const [best] = Provider.sort(Object.values(killstataProvider.models))
       if (best) {
         return {
           providerID: best.providerID,
@@ -1384,7 +1549,7 @@ export namespace ACP {
 
     if (specified) return specified
 
-    return { providerID: "opencode", modelID: "big-pickle" }
+    return { providerID: "killstata", modelID: "big-pickle" }
   }
 
   function parseUri(

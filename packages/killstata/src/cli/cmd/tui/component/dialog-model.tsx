@@ -10,7 +10,7 @@ import * as fuzzysort from "fuzzysort"
 
 export function useConnected() {
   const sync = useSync()
-  return createMemo(() => sync.data.provider.some((x) => x.id !== "opencode"))
+  return createMemo(() => sync.data.provider.some((x) => x.id !== "killstata"))
 }
 
 export function DialogModel(props: { providerID?: string }) {
@@ -107,7 +107,7 @@ export function DialogModel(props: { providerID?: string }) {
 
     const providerOptions = pipe(
       sync.data.provider,
-      (providers) => providers.filter((provider) => provider.id !== "opencode"),
+      (providers) => providers.filter((provider) => provider.id !== "killstata"),
       sortBy((provider) => provider.name),
       flatMap((provider) =>
         pipe(

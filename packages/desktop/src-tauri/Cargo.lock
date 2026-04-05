@@ -3021,7 +3021,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "opencode-desktop"
+name = "killstata-desktop"
 version = "0.0.0"
 dependencies = [
  "comrak",

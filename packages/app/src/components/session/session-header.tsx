@@ -6,20 +6,20 @@ import { useLayout } from "@/context/layout"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 // import { useServer } from "@/context/server"
-// import { useDialog } from "@opencode-ai/ui/context/dialog"
+// import { useDialog } from "@killstata/ui/context/dialog"
 import { usePlatform } from "@/context/platform"
 import { useSync } from "@/context/sync"
 import { useGlobalSDK } from "@/context/global-sdk"
-import { getFilename } from "@opencode-ai/util/path"
-import { base64Decode } from "@opencode-ai/util/encode"
+import { getFilename } from "@killstata/util/path"
+import { base64Decode } from "@killstata/util/encode"
 
-import { Icon } from "@opencode-ai/ui/icon"
-import { IconButton } from "@opencode-ai/ui/icon-button"
-import { Button } from "@opencode-ai/ui/button"
-import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
-import { Popover } from "@opencode-ai/ui/popover"
-import { TextField } from "@opencode-ai/ui/text-field"
-import { Keybind } from "@opencode-ai/ui/keybind"
+import { Icon } from "@killstata/ui/icon"
+import { IconButton } from "@killstata/ui/icon-button"
+import { Button } from "@killstata/ui/button"
+import { Tooltip, TooltipKeybind } from "@killstata/ui/tooltip"
+import { Popover } from "@killstata/ui/popover"
+import { TextField } from "@killstata/ui/text-field"
+import { Keybind } from "@killstata/ui/keybind"
 
 export function SessionHeader() {
   const globalSDK = useGlobalSDK()
@@ -124,8 +124,8 @@ export function SessionHeader() {
     platform.openLink(url)
   }
 
-  const centerMount = createMemo(() => document.getElementById("opencode-titlebar-center"))
-  const rightMount = createMemo(() => document.getElementById("opencode-titlebar-right"))
+  const centerMount = createMemo(() => document.getElementById("killstata-titlebar-center"))
+  const rightMount = createMemo(() => document.getElementById("killstata-titlebar-right"))
 
   return (
     <>

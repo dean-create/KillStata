@@ -63,7 +63,7 @@ export const PrCommand = cmd({
               await $`git branch --set-upstream-to=${remoteName}/${headRefName} ${localBranchName}`.nothrow()
             }
 
-            // Check for opencode session link in PR body
+            // Check for killstata session link in PR body
             if (prInfo && prInfo.body) {
               const sessionMatch = prInfo.body.match(/https:\/\/opncd\.ai\/s\/([a-zA-Z0-9_-]+)/)
               if (sessionMatch) {
@@ -91,20 +91,20 @@ export const PrCommand = cmd({
         UI.println("Starting killstata...")
         UI.println()
 
-        // Launch opencode TUI with session ID if available
+        // Launch killstata TUI with session ID if available
         const { spawn } = await import("child_process")
-        const opencodeArgs = sessionId ? ["-s", sessionId] : []
-        const opencodeProcess = spawn("killstata", opencodeArgs, {
+        const killstataArgs = sessionId ? ["-s", sessionId] : []
+        const killstataProcess = spawn("killstata", killstataArgs, {
           stdio: "inherit",
           cwd: process.cwd(),
         })
 
         await new Promise<void>((resolve, reject) => {
-          opencodeProcess.on("exit", (code) => {
+          killstataProcess.on("exit", (code) => {
             if (code === 0) resolve()
             else reject(new Error(`killstata exited with code ${code}`))
           })
-          opencodeProcess.on("error", reject)
+          killstataProcess.on("error", reject)
         })
       },
     })

@@ -12,12 +12,12 @@ export namespace MDNS {
     if (bonjour) unpublish()
 
     try {
-      const name = `opencode-${port}`
+      const name = `killstata-${port}`
       bonjour = new Bonjour()
       const service = bonjour.publish({
         name,
         type: "http",
-        host: "opencode.local",
+        host: "killstata.local",
         port,
         txt: { path: "/" },
       })

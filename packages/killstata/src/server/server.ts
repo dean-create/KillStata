@@ -5,11 +5,10 @@ import { describeRoute, generateSpecs, validator, resolver, openAPIRouteHandler 
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { streamSSE } from "hono/streaming"
-import { proxy } from "hono/proxy"
 import { basicAuth } from "hono/basic-auth"
 import z from "zod"
 import { Provider } from "../provider/provider"
-import { NamedError } from "@opencode-ai/util/error"
+import { NamedError } from "@killstata/util/error"
 import { LSP } from "../lsp"
 import { Format } from "../format"
 import { TuiRoutes } from "./routes/tui"
@@ -78,9 +77,9 @@ export namespace Server {
           })
         })
         .use((c, next) => {
-          const password = Flag.OPENCODE_SERVER_PASSWORD
+          const password = Flag.KILLSTATA_SERVER_PASSWORD
           if (!password) return next()
-          const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
+          const username = Flag.KILLSTATA_SERVER_USERNAME ?? "killstata"
           return basicAuth({ username, password })(c, next)
         })
         .use(async (c, next) => {
@@ -109,10 +108,6 @@ export namespace Server {
               if (input.startsWith("http://127.0.0.1:")) return input
               if (input === "tauri://localhost" || input === "http://tauri.localhost") return input
 
-              // *.opencode.ai (https only, adjust if needed)
-              if (/^https:\/\/([a-z0-9-]+\.)*opencode\.ai$/.test(input)) {
-                return input
-              }
               if (_corsWhitelist.includes(input)) {
                 return input
               }
@@ -123,7 +118,7 @@ export namespace Server {
         )
         .route("/global", GlobalRoutes())
         .use(async (c, next) => {
-          let directory = c.req.query("directory") || c.req.header("x-opencode-directory") || process.cwd()
+          let directory = c.req.query("directory") || c.req.header("x-killstata-directory") || process.cwd()
           try {
             directory = decodeURIComponent(directory)
           } catch {
@@ -498,20 +493,10 @@ export namespace Server {
           },
         )
         .all("/*", async (c) => {
-          const path = c.req.path
-
-          const response = await proxy(`https://app.opencode.ai${path}`, {
-            ...c.req,
-            headers: {
-              ...c.req.raw.headers,
-              host: "app.opencode.ai",
-            },
+          throw new HTTPException(404, {
+            message:
+              "Hosted web proxy is disabled in this build. Run `killstata web` for the local UI instead of relying on a remote app host.",
           })
-          response.headers.set(
-            "Content-Security-Policy",
-            "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' data:",
-          )
-          return response
         }) as unknown as Hono,
   )
 

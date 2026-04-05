@@ -1,7 +1,8 @@
 import { BusEvent } from "@/bus/bus-event"
 import z from "zod"
-import { NamedError } from "@opencode-ai/util/error"
+import { NamedError } from "@killstata/util/error"
 import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessage, type UIMessage } from "ai"
+import type { JSONValue, SharedV2ProviderMetadata } from "@ai-sdk/provider"
 import { Identifier } from "../id/id"
 import { LSP } from "../lsp"
 import { Snapshot } from "@/snapshot"
@@ -36,13 +37,25 @@ export namespace MessageV2 {
     "xai",
   ])
 
-  function sanitizeProviderMetadata(metadata: Record<string, unknown> | undefined) {
+  function isJsonValue(value: unknown): value is JSONValue {
+    if (value === null) return true
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return true
+    if (Array.isArray(value)) return value.every((item) => isJsonValue(item))
+    if (typeof value === "object") {
+      return Object.values(value).every((item) => isJsonValue(item))
+    }
+    return false
+  }
+
+  function sanitizeProviderMetadata(metadata: Record<string, unknown> | undefined): SharedV2ProviderMetadata | undefined {
     if (!metadata) return undefined
 
     const filtered = Object.fromEntries(
-      Object.entries(metadata).filter(([key, value]) => {
+      Object.entries(metadata).filter((entry): entry is [string, Record<string, JSONValue>] => {
+        const [key, value] = entry
         if (!PROVIDER_METADATA_KEYS.has(key)) return false
-        return typeof value === "object" && value !== null && !Array.isArray(value)
+        if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+        return isJsonValue(value)
       }),
     )
 

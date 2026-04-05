@@ -1,4 +1,4 @@
-import type { Argv } from "yargs"
+﻿import type { Argv } from "yargs"
 import path from "path"
 import { UI } from "../ui"
 import { cmd } from "./cmd"
@@ -7,10 +7,11 @@ import { bootstrap } from "../bootstrap"
 import { Command } from "../../command"
 import { EOL } from "os"
 import { select } from "@clack/prompts"
-import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/v2"
+import { createKillstataClient, type KillstataClient } from "@killstata/sdk/v2"
 import { Server } from "../../server/server"
 import { Provider } from "../../provider/provider"
 import { Agent } from "../../agent/agent"
+import { decideNonInteractivePermission, shouldAutoHandleRunPermissions } from "./run-permission"
 
 const TOOL: Record<string, [string, string]> = {
   todowrite: ["Todo", UI.Style.TEXT_WARNING_BOLD],
@@ -91,8 +92,18 @@ export const RunCommand = cmd({
         type: "string",
         describe: "model variant (provider-specific reasoning effort, e.g., high, max, minimal)",
       })
+      .option("cwd", {
+        type: "string",
+        describe: "workspace directory to run the session in",
+      })
   },
   handler: async (args) => {
+    const effectiveCwd = args.cwd ? path.resolve(process.cwd(), args.cwd) : process.cwd()
+    const autoHandlePermissions = shouldAutoHandleRunPermissions({
+      format: args.format as "default" | "json",
+      stdinIsTTY: Boolean(process.stdin.isTTY),
+      stdoutIsTTY: Boolean(process.stdout.isTTY),
+    })
     let message = [...args.message, ...(args["--"] || [])]
       .map((arg) => (arg.includes(" ") ? `"${arg.replace(/"/g, '\\"')}"` : arg))
       .join(" ")
@@ -102,7 +113,7 @@ export const RunCommand = cmd({
       const files = Array.isArray(args.file) ? args.file : [args.file]
 
       for (const filePath of files) {
-        const resolvedPath = path.resolve(process.cwd(), filePath)
+        const resolvedPath = path.resolve(effectiveCwd, filePath)
         const file = Bun.file(resolvedPath)
         const stats = await file.stat().catch(() => {})
         if (!stats) {
@@ -133,7 +144,7 @@ export const RunCommand = cmd({
       process.exit(1)
     }
 
-    const execute = async (sdk: OpencodeClient, sessionID: string) => {
+    const execute = async (sdk: KillstataClient, sessionID: string) => {
       const printEvent = (color: string, type: string, title: string) => {
         UI.println(
           color + `|`,
@@ -209,6 +220,40 @@ export const RunCommand = cmd({
           if (event.type === "permission.asked") {
             const permission = event.properties
             if (permission.sessionID !== sessionID) continue
+            if (autoHandlePermissions) {
+              const decision = decideNonInteractivePermission({
+                workspaceRoot: effectiveCwd,
+                request: {
+                  permission: permission.permission,
+                  patterns: permission.patterns,
+                  metadata: permission.metadata,
+                },
+              })
+              if (
+                outputJsonEvent(decision.response === "reject" ? "permission_auto_rejected" : "permission_auto_allowed", {
+                  permission,
+                  decision,
+                })
+              ) {
+                await sdk.permission.respond({
+                  sessionID,
+                  permissionID: permission.id,
+                  response: decision.response,
+                })
+                continue
+              }
+              UI.println(
+                decision.response === "reject" ? UI.Style.TEXT_WARNING_BOLD + "!" : UI.Style.TEXT_INFO_BOLD + "~",
+                UI.Style.TEXT_NORMAL,
+                `${decision.reason}: ${permission.permission} (${permission.patterns.join(", ")}) -> ${decision.response}`,
+              )
+              await sdk.permission.respond({
+                sessionID,
+                permissionID: permission.id,
+                response: decision.response,
+              })
+              continue
+            }
             const result = await select({
               message: `Permission required: ${permission.permission} (${permission.patterns.join(", ")})`,
               options: [
@@ -224,6 +269,20 @@ export const RunCommand = cmd({
               permissionID: permission.id,
               response,
             })
+          }
+
+          if (event.type === "question.asked") {
+            const question = event.properties
+            if (question.sessionID !== sessionID) continue
+            await sdk.question.reject({
+              requestID: question.id,
+            })
+            if (outputJsonEvent("question_rejected", { question })) continue
+            UI.println(
+              UI.Style.TEXT_WARNING_BOLD + "!",
+              UI.Style.TEXT_NORMAL,
+              `auto-rejecting question request ${question.id}`,
+            )
           }
         }
       })()
@@ -276,7 +335,16 @@ export const RunCommand = cmd({
     }
 
     if (args.attach) {
-      const sdk = createOpencodeClient({ baseUrl: args.attach })
+      const attachFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init)
+        const headers = new Headers(request.headers)
+        headers.set("x-killstata-directory", effectiveCwd)
+        return fetch(request, {
+          ...init,
+          headers,
+        })
+      }) as typeof globalThis.fetch
+      const sdk = createKillstataClient({ baseUrl: args.attach, fetch: attachFetch })
 
       const sessionID = await (async () => {
         if (args.continue) {
@@ -323,7 +391,7 @@ export const RunCommand = cmd({
       }
 
       const cfgResult = await sdk.config.get()
-      if (cfgResult.data && (cfgResult.data.share === "auto" || Flag.OPENCODE_AUTO_SHARE || args.share)) {
+      if (cfgResult.data && (cfgResult.data.share === "auto" || Flag.KILLSTATA_AUTO_SHARE || args.share)) {
         const shareResult = await sdk.session.share({ sessionID }).catch((error) => {
           if (error instanceof Error && error.message.includes("disabled")) {
             UI.println(UI.Style.TEXT_DANGER_BOLD + "!  " + error.message)
@@ -338,12 +406,18 @@ export const RunCommand = cmd({
       return await execute(sdk, sessionID)
     }
 
-    await bootstrap(process.cwd(), async () => {
+    await bootstrap(effectiveCwd, async () => {
       const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
         const request = new Request(input, init)
-        return Server.App().fetch(request)
+        const headers = new Headers(request.headers)
+        headers.set("x-killstata-directory", effectiveCwd)
+        return Server.App().fetch(
+          new Request(request, {
+            headers,
+          }),
+        )
       }) as typeof globalThis.fetch
-      const sdk = createOpencodeClient({ baseUrl: "http://opencode.internal", fetch: fetchFn })
+      const sdk = createKillstataClient({ baseUrl: "http://killstata.internal", fetch: fetchFn })
 
       if (args.command) {
         const exists = await Command.get(args.command)
@@ -367,7 +441,28 @@ export const RunCommand = cmd({
               : args.title
             : undefined
 
-        const result = await sdk.session.create(title ? { title } : {})
+        const result = await sdk.session.create(
+          title
+            ? {
+                title,
+                permission: [
+                  {
+                    permission: "question",
+                    action: "deny",
+                    pattern: "*",
+                  },
+                ],
+              }
+            : {
+                permission: [
+                  {
+                    permission: "question",
+                    action: "deny",
+                    pattern: "*",
+                  },
+                ],
+              },
+        )
         return result.data?.id
       })()
 
@@ -377,7 +472,7 @@ export const RunCommand = cmd({
       }
 
       const cfgResult = await sdk.config.get()
-      if (cfgResult.data && (cfgResult.data.share === "auto" || Flag.OPENCODE_AUTO_SHARE || args.share)) {
+      if (cfgResult.data && (cfgResult.data.share === "auto" || Flag.KILLSTATA_AUTO_SHARE || args.share)) {
         const shareResult = await sdk.session.share({ sessionID }).catch((error) => {
           if (error instanceof Error && error.message.includes("disabled")) {
             UI.println(UI.Style.TEXT_DANGER_BOLD + "!  " + error.message)

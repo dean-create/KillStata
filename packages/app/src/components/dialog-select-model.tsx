@@ -1,14 +1,14 @@
 import { Popover as Kobalte } from "@kobalte/core/popover"
 import { Component, ComponentProps, createMemo, createSignal, JSX, Show, ValidComponent } from "solid-js"
 import { useLocal } from "@/context/local"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { useDialog } from "@killstata/ui/context/dialog"
 import { popularProviders } from "@/hooks/use-providers"
-import { Button } from "@opencode-ai/ui/button"
-import { IconButton } from "@opencode-ai/ui/icon-button"
-import { Tag } from "@opencode-ai/ui/tag"
-import { Dialog } from "@opencode-ai/ui/dialog"
-import { List } from "@opencode-ai/ui/list"
-import { Tooltip } from "@opencode-ai/ui/tooltip"
+import { Button } from "@killstata/ui/button"
+import { IconButton } from "@killstata/ui/icon-button"
+import { Tag } from "@killstata/ui/tag"
+import { Dialog } from "@killstata/ui/dialog"
+import { List } from "@killstata/ui/list"
+import { Tooltip } from "@killstata/ui/tooltip"
 import { DialogSelectProvider } from "./dialog-select-provider"
 import { DialogManageModels } from "./dialog-manage-models"
 import { ModelTooltip } from "./model-tooltip"
@@ -57,7 +57,7 @@ const ModelList: Component<{
             <ModelTooltip
               model={item}
               latest={item.latest}
-              free={item.provider.id === "opencode" && (!item.cost || item.cost.input === 0)}
+              free={item.provider.id === "killstata" && (!item.cost || item.cost.input === 0)}
             />
           }
         >
@@ -74,7 +74,7 @@ const ModelList: Component<{
       {(i) => (
         <div class="w-full flex items-center gap-x-2 text-13-regular">
           <span class="truncate">{i.name}</span>
-          <Show when={i.provider.id === "opencode" && (!i.cost || i.cost?.input === 0)}>
+          <Show when={i.provider.id === "killstata" && (!i.cost || i.cost?.input === 0)}>
             <Tag>{language.t("model.tag.free")}</Tag>
           </Show>
           <Show when={i.latest}>

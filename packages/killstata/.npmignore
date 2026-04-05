@@ -1,0 +1,5 @@
+python/**/__pycache__/
+python/**/*.pyc
+python/**/*.pyo
+*.log
+AGENTS.md

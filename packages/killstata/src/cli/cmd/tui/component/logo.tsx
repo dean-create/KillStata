@@ -1,18 +1,29 @@
 import { TextAttributes } from "@opentui/core"
 import { useTheme } from "@tui/context/theme"
+import { For } from "solid-js"
 
 // KILLSTATA Logo - 纯文本高亮显示
 export function Logo() {
   const { theme } = useTheme()
 
+  const LOGO_LINES = [
+    { text: "██╗  ██╗██╗██╗     ██╗     ███████╗████████╗ █████╗ ████████╗ █████╗ ", color: theme.primary },
+    { text: "██║ ██╔╝██║██║     ██║     ██╔════╝╚══██╔══╝██╔══██╗╚══██╔══╝██╔══██╗", color: theme.info },
+    { text: "█████╔╝ ██║██║     ██║     ███████╗   ██║   ███████║   ██║   ███████║", color: theme.success },
+    { text: "██╔═██╗ ██║██║     ██║     ╚════██║   ██║   ██╔══██║   ██║   ██╔══██║", color: theme.text },
+    { text: "██║  ██╗██║███████╗███████╗███████║   ██║   ██║  ██║   ██║   ██║  ██║", color: theme.textMuted },
+    { text: "╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝", color: theme.border }
+  ]
+
   return (
-    <box flexDirection="row" height={1} alignItems="center" justifyContent="center">
-      <text fg={theme.textMuted} attributes={TextAttributes.BOLD} selectable={false}>
-        KILL
-      </text>
-      <text fg={theme.text} attributes={TextAttributes.BOLD} selectable={false}>
-        STATA
-      </text>
+    <box flexDirection="column" alignItems="center" justifyContent="center">
+      <For each={LOGO_LINES}>
+        {(line) => (
+          <text fg={line.color} attributes={TextAttributes.BOLD} selectable={false}>
+            {line.text}
+          </text>
+        )}
+      </For>
     </box>
   )
 }

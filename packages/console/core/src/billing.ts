@@ -4,13 +4,13 @@ import { BillingTable, PaymentTable, UsageTable } from "./schema/billing.sql"
 import { Actor } from "./actor"
 import { fn } from "./util/fn"
 import { z } from "zod"
-import { Resource } from "@opencode-ai/console-resource"
+import { Resource } from "@killstata/console-resource"
 import { Identifier } from "./identifier"
 import { centsToMicroCents } from "./util/price"
 import { User } from "./user"
 
 export namespace Billing {
-  export const ITEM_CREDIT_NAME = "opencode credits"
+  export const ITEM_CREDIT_NAME = "killstata credits"
   export const ITEM_FEE_NAME = "processing fee"
   export const RELOAD_AMOUNT = 20
   export const RELOAD_AMOUNT_MIN = 10

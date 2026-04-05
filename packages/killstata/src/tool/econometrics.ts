@@ -18,7 +18,13 @@ import {
   reportOutputPath,
   resolveArtifactInput,
 } from "./analysis-state"
-import { classifyToolFailure, evaluateQaGate, persistToolReflection } from "./analysis-reflection"
+import {
+  checkRetryBudget,
+  classifyToolFailure,
+  evaluateQaGate,
+  persistToolReflection,
+  runPostEstimationGates,
+} from "./analysis-reflection"
 import { AnalysisIntent } from "./analysis-intent"
 import {
   createEconometricsNumericSnapshot,
@@ -27,7 +33,14 @@ import {
 import { generateRegressionTable } from "./regression-table"
 import { relativeWithinProject, resolveToolPath } from "./analysis-path"
 import { numericSnapshotPreview } from "./analysis-tool-metadata"
-import { pythonInstallCommand, resolveRuntimePythonCommand } from "@/killstata/runtime-config"
+import { formatRuntimePythonSetupError, getRuntimePythonStatus } from "@/killstata/runtime-config"
+import {
+  buildSmartDatasetProfile,
+  recommendEconometricsPlan,
+  type SmartColumnProfile,
+  type SmartDatasetProfile,
+  type SmartRecommendation,
+} from "./econometrics-smart"
 
 const log = Log.create({ service: "econometrics-tool" })
 
@@ -56,13 +69,71 @@ function parsePythonResult<T>(stdout: string, prefix = PYTHON_RESULT_PREFIX): T 
   throw new Error("Python produced no parseable output")
 }
 
+type InlinePythonExecution = {
+  code: number | null
+  stdout: string
+  stderr: string
+  scriptPath: string
+  cleanup: () => void
+}
+
+function persistPythonFailureArtifacts(input: {
+  label: string
+  command: string
+  cwd: string
+  execution: InlinePythonExecution
+  context?: Record<string, unknown>
+}) {
+  const errorsDir = projectErrorsRoot()
+  fs.mkdirSync(errorsDir, { recursive: true })
+
+  const stamp = buildFileStamp()
+  const base = path.join(errorsDir, `econometrics_${input.label}_${stamp}`)
+  const scriptCopyPath = `${base}.py`
+  const stdoutPath = `${base}.stdout.log`
+  const stderrPath = `${base}.stderr.log`
+  const contextPath = `${base}.context.json`
+
+  fs.copyFileSync(input.execution.scriptPath, scriptCopyPath)
+  fs.writeFileSync(stdoutPath, input.execution.stdout, "utf-8")
+  fs.writeFileSync(stderrPath, input.execution.stderr, "utf-8")
+  fs.writeFileSync(
+    contextPath,
+    JSON.stringify(
+      {
+        label: input.label,
+        command: input.command,
+        cwd: input.cwd,
+        exitCode: input.execution.code,
+        originalScriptPath: input.execution.scriptPath,
+        preservedScriptPath: scriptCopyPath,
+        stdoutPath,
+        stderrPath,
+        ...input.context,
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  )
+
+  input.execution.cleanup()
+
+  return {
+    scriptCopyPath,
+    stdoutPath,
+    stderrPath,
+    contextPath,
+  }
+}
+
 async function runInlinePython(input: { command: string; script: string; cwd: string }) {
   const tempDir = projectTempRoot()
   fs.mkdirSync(tempDir, { recursive: true })
   const tempScriptPath = path.join(tempDir, `econometrics_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.py`)
   fs.writeFileSync(tempScriptPath, input.script, "utf-8")
 
-  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+  return new Promise<InlinePythonExecution>((resolve, reject) => {
     const proc = spawn(input.command, [tempScriptPath], {
       cwd: input.cwd,
       env: {
@@ -81,17 +152,25 @@ async function runInlinePython(input: { command: string; script: string; cwd: st
       stderr += chunk.toString()
     })
     proc.on("error", (error) => {
-      fs.rmSync(tempScriptPath, { force: true })
       reject(error)
     })
     proc.on("close", (code) => {
-      fs.rmSync(tempScriptPath, { force: true })
-      resolve({ code, stdout, stderr })
+      resolve({
+        code,
+        stdout,
+        stderr,
+        scriptPath: tempScriptPath,
+        cleanup: () => {
+          fs.rmSync(tempScriptPath, { force: true })
+        },
+      })
     })
   })
 }
 
 const SUPPORTED_METHODS = [
+  "auto_recommend",
+  "smart_baseline",
   "ols_regression",
   "panel_fe_regression",
   "baseline_regression",
@@ -138,21 +217,8 @@ const METHOD_NEEDS_PANEL_KEYS = new Set<MethodName>([
   "did_event_study_viz",
 ])
 
-const REGRESSION_TABLE_METHODS = new Set<MethodName>([
-  "ols_regression",
-  "panel_fe_regression",
-  "baseline_regression",
-  "iv_2sls",
-  "psm_regression",
-  "psm_dr_ipw_ra",
-  "did_static",
-  "did_staggered",
-  "did_event_study",
-  "rdd_sharp",
-  "rdd_fuzzy_global",
-])
-
 const METHOD_NEEDS_TREATMENT = new Set<MethodName>([
+  "smart_baseline",
   "ols_regression",
   "panel_fe_regression",
   "baseline_regression",
@@ -175,6 +241,7 @@ type PythonResult = {
   error?: string
   traceback?: string
   error_log_path?: string
+  resolved_python_executable?: string
   method?: string
   coefficient?: number
   std_error?: number
@@ -198,6 +265,7 @@ type PythonResult = {
   suggested_repairs?: string[]
   backend?: string
   dropped_rows?: number
+  rows_used?: number
   cluster_var?: string
   test_results?: unknown
   dataset_id?: string
@@ -208,15 +276,59 @@ type PythonResult = {
   academic_table_markdown_path?: string
   academic_table_latex_path?: string
   academic_table_workbook_path?: string
+  profile_path?: string
+  recommendation_path?: string
+  effective_method?: string
+  effective_covariance?: string
+  degraded_from?: string
+  decision_trace?: Array<{ kind: string; message: string }>
+  post_estimation_gates?: Array<{
+    gate: string
+    passed: boolean
+    severity: "info" | "warning" | "blocking"
+    autoFix?: string
+    userMessage: string
+    diagnosticValue?: number
+    threshold?: number
+  }>
+}
+
+type EconometricsVisibleOutput = {
+  label: string
+  relativePath: string
+}
+
+type EconometricsToolMetadata = {
+  method: MethodName
+  result?: PythonResult
+  profile?: SmartDatasetProfile
+  recommendation?: SmartRecommendation
+  datasetId?: string
+  stageId?: string
+  runId?: string
+  numericSnapshotPath?: string
+  numericSnapshotPreview?: ReturnType<typeof numericSnapshotPreview>
+  groundingScope?: string
+  qaGateStatus?: string
+  qaGateReason?: string
+  qaSource?: string
+  outputDir?: string
+  visibleOutputs?: EconometricsVisibleOutput[]
+  finalOutputsPath?: string
 }
 
 function validateMethodOptions(params: {
   methodName: MethodName
+  dependentVar?: string
   treatmentVar?: string
   options?: Record<string, unknown>
   entityVar?: string
   timeVar?: string
 }) {
+  if (params.methodName !== "auto_recommend" && !params.dependentVar) {
+    throw new Error(`Method ${params.methodName} requires dependentVar`)
+  }
+
   if (METHOD_NEEDS_TREATMENT.has(params.methodName) && !params.treatmentVar) {
     throw new Error(`Method ${params.methodName} requires treatmentVar`)
   }
@@ -244,6 +356,419 @@ function hasNonEmptyCoefficientTable(filePath?: string) {
   if (!filePath || !fs.existsSync(filePath)) return false
   const lines = fs.readFileSync(filePath, "utf-8").split(/\r?\n/).filter((line) => line.trim().length > 0)
   return lines.length > 1
+}
+
+function loadJsonFile<T>(filePath?: string) {
+  if (!filePath || !fs.existsSync(filePath)) return undefined
+  return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T
+}
+
+type SmartProfilePythonResult = {
+  success: boolean
+  error?: string
+  traceback?: string
+  row_count: number
+  column_count: number
+  columns: Array<{
+    name: string
+    dtype_family: SmartColumnProfile["dtypeFamily"]
+    non_null_count: number
+    unique_count: number
+    binary: boolean
+    numeric: boolean
+    datetime: boolean
+    integer_like: boolean
+    nonnegative: boolean
+  }>
+  entity_count?: number
+  time_count?: number
+  duplicate_panel_keys?: number
+  avg_periods_per_entity?: number
+  balanced_ratio?: number
+}
+
+type ConcreteMethodName = Exclude<MethodName, "auto_recommend" | "smart_baseline">
+
+type SmartBaselinePlan = {
+  methodName: ConcreteMethodName
+  dependentVar: string
+  treatmentVar: string
+  covariates?: string[]
+  entityVar?: string
+  timeVar?: string
+  clusterVar?: string
+  options?: Record<string, unknown>
+  planningTrace: Array<{ kind: string; message: string }>
+}
+
+function covarianceForGeneralRegression(strategy: SmartRecommendation["covariance"]) {
+  if (strategy === "robust") return "HC1"
+  if (strategy === "hac") return { HAC: 1 }
+  return "nonrobust"
+}
+
+function covarianceForPanelDid(strategy: SmartRecommendation["covariance"], hasPanelKeys: boolean) {
+  if (strategy === "cluster" && hasPanelKeys) return "cluster_entity"
+  if (strategy === "robust" || strategy === "hac") return "robust"
+  return "unadjusted"
+}
+
+function buildSmartBaselinePlan(input: {
+  params: {
+    dependentVar?: string
+    treatmentVar?: string
+    covariates?: string[]
+    entityVar?: string
+    timeVar?: string
+    clusterVar?: string
+    options?: Record<string, unknown>
+  }
+  profile: SmartDatasetProfile
+  recommendation: SmartRecommendation
+}): SmartBaselinePlan {
+  if (!input.params.dependentVar || !input.params.treatmentVar) {
+    throw new Error("smart_baseline requires dependentVar and treatmentVar")
+  }
+
+  const planningTrace: Array<{ kind: string; message: string }> = []
+  const options = { ...(input.params.options ?? {}) }
+  let methodName: ConcreteMethodName = input.recommendation.recommendedMethod
+  let entityVar = input.params.entityVar ?? input.recommendation.preferredEntityVar
+  let timeVar = input.params.timeVar ?? input.recommendation.preferredTimeVar
+  const clusterVar = input.params.clusterVar ?? input.recommendation.preferredClusterVar ?? entityVar
+
+  if (methodName === "panel_fe_regression") {
+    if (!entityVar || !timeVar) {
+      methodName = "ols_regression"
+      planningTrace.push({
+        kind: "fallback",
+        message: "Panel FE was recommended, but entity/time identifiers were incomplete, so smart_baseline fell back to OLS.",
+      })
+    } else {
+      options.auto_downgrade = options.auto_downgrade ?? true
+    }
+  }
+
+  if (methodName === "did_static") {
+    const treatmentEntityDummy = typeof options.treatment_entity_dummy === "string" ? options.treatment_entity_dummy : undefined
+    const treatmentFinishedDummy = typeof options.treatment_finished_dummy === "string" ? options.treatment_finished_dummy : undefined
+    if (!entityVar || !timeVar || !treatmentEntityDummy || !treatmentFinishedDummy) {
+      methodName = entityVar && timeVar ? "panel_fe_regression" : "ols_regression"
+      planningTrace.push({
+        kind: "fallback",
+        message:
+          "DID was suggested, but smart_baseline could not find the required treatment_entity_dummy/treatment_finished_dummy fields, so it fell back to an executable baseline.",
+      })
+      options.auto_downgrade = options.auto_downgrade ?? true
+    } else {
+      options.cov_type = options.cov_type ?? covarianceForPanelDid(input.recommendation.covariance, true)
+    }
+  }
+
+  if (methodName === "iv_2sls") {
+    const ivVariable =
+      typeof options.iv_variable === "string" && options.iv_variable.trim()
+        ? options.iv_variable
+        : input.profile.candidateInstrumentVars[0]
+    if (!ivVariable) {
+      methodName = entityVar && timeVar ? "panel_fe_regression" : "ols_regression"
+      planningTrace.push({
+        kind: "fallback",
+        message: "IV was suggested, but no usable instrument variable could be resolved, so smart_baseline fell back to a directly estimable baseline.",
+      })
+      options.auto_downgrade = options.auto_downgrade ?? true
+    } else {
+      options.iv_variable = ivVariable
+      options.cov_type = options.cov_type ?? covarianceForGeneralRegression(input.recommendation.covariance)
+      planningTrace.push({
+        kind: "selection",
+        message: `Smart_baseline selected ${ivVariable} as the instrument variable for IV-2SLS.`,
+      })
+    }
+  }
+
+  if (methodName === "psm_double_robust") {
+    if (!input.params.covariates?.length) {
+      methodName = "ols_regression"
+      planningTrace.push({
+        kind: "fallback",
+        message: "Double robust PSM was suggested, but no covariates were provided, so smart_baseline fell back to OLS.",
+      })
+    } else {
+      options.cov_type = options.cov_type ?? (input.recommendation.covariance === "robust" ? "HC1" : undefined)
+    }
+  }
+
+  if (methodName === "ols_regression") {
+    options.cov_type = options.cov_type ?? covarianceForGeneralRegression(input.recommendation.covariance)
+  }
+
+  if (methodName === "panel_fe_regression") {
+    options.auto_downgrade = options.auto_downgrade ?? true
+  }
+
+  if (!planningTrace.length) {
+    planningTrace.push({
+      kind: "selection",
+      message: `Smart_baseline selected ${methodName} as the executable baseline implied by the recommendation layer.`,
+    })
+  }
+
+  return {
+    methodName,
+    dependentVar: input.params.dependentVar,
+    treatmentVar: input.params.treatmentVar,
+    covariates: input.params.covariates,
+    entityVar,
+    timeVar,
+    clusterVar,
+    options,
+    planningTrace,
+  }
+}
+
+function buildAutoRecommendPythonScript(payloadBase64: string) {
+  return `
+import base64
+import json
+import os
+import traceback
+from pathlib import Path
+
+import pandas as pd
+from pandas.api.types import is_bool_dtype, is_datetime64_any_dtype, is_numeric_dtype
+
+PAYLOAD = json.loads(base64.b64decode("${payloadBase64}").decode("utf-8"))
+PREFIX = "${PYTHON_RESULT_PREFIX}"
+
+def emit(obj):
+    print(PREFIX + json.dumps(obj, ensure_ascii=False))
+
+def load_dataframe(data_path: str):
+    suffix = Path(data_path).suffix.lower()
+    if suffix == ".csv":
+        return pd.read_csv(data_path)
+    if suffix in [".xlsx", ".xls"]:
+        return pd.read_excel(data_path)
+    if suffix == ".dta":
+        return pd.read_stata(data_path)
+    if suffix == ".parquet":
+        return pd.read_parquet(data_path)
+    raise ValueError(f"Unsupported econometrics input format: {suffix}")
+
+def infer_dtype_family(series):
+    if is_bool_dtype(series):
+        return "boolean"
+    if is_datetime64_any_dtype(series):
+        return "datetime"
+    if is_numeric_dtype(series):
+        return "numeric"
+    return "categorical"
+
+def integer_like(series):
+    if not is_numeric_dtype(series):
+        return False
+    sample = series.dropna()
+    if sample.empty:
+        return False
+    if len(sample) > 5000:
+        sample = sample.sample(5000, random_state=0)
+    numeric = pd.to_numeric(sample, errors="coerce").dropna()
+    if numeric.empty:
+        return False
+    return bool((((numeric - numeric.round()).abs()) < 1e-9).all())
+
+def profile_column(name, series):
+    non_null = series.dropna()
+    unique_count = int(non_null.nunique(dropna=True))
+    numeric = bool(is_numeric_dtype(series))
+    return {
+        "name": name,
+        "dtype_family": infer_dtype_family(series),
+        "non_null_count": int(non_null.shape[0]),
+        "unique_count": unique_count,
+        "binary": bool(unique_count > 0 and unique_count <= 2),
+        "numeric": numeric,
+        "datetime": bool(is_datetime64_any_dtype(series)),
+        "integer_like": bool(integer_like(series)),
+        "nonnegative": bool(numeric and non_null.shape[0] > 0 and pd.to_numeric(non_null, errors="coerce").dropna().ge(0).all()),
+    }
+
+try:
+    df = load_dataframe(PAYLOAD["data_path"])
+    entity_var = PAYLOAD.get("entity_var")
+    time_var = PAYLOAD.get("time_var")
+    duplicate_panel_keys = None
+    entity_count = None
+    time_count = None
+    avg_periods_per_entity = None
+    balanced_ratio = None
+    if entity_var and time_var and entity_var in df.columns and time_var in df.columns:
+        subset = df[[entity_var, time_var]].dropna()
+        entity_count = int(subset[entity_var].nunique(dropna=True))
+        time_count = int(subset[time_var].nunique(dropna=True))
+        duplicate_panel_keys = int(subset.duplicated([entity_var, time_var]).sum())
+        counts = subset.groupby(entity_var)[time_var].nunique(dropna=True)
+        if len(counts) > 0:
+            avg_periods_per_entity = float(counts.mean())
+            if time_count and time_count > 0:
+                balanced_ratio = float(counts.mean() / time_count)
+
+    emit({
+        "success": True,
+        "row_count": int(df.shape[0]),
+        "column_count": int(df.shape[1]),
+        "columns": [profile_column(name, df[name]) for name in df.columns],
+        "entity_count": entity_count,
+        "time_count": time_count,
+        "duplicate_panel_keys": duplicate_panel_keys,
+        "avg_periods_per_entity": avg_periods_per_entity,
+        "balanced_ratio": balanced_ratio,
+    })
+except Exception as exc:
+    emit({
+        "success": False,
+        "error": str(exc),
+        "traceback": traceback.format_exc(),
+    })
+`
+}
+
+async function runAutoRecommend(input: {
+  dataPath: string
+  outputDir: string
+  pythonCommand: string
+  params: {
+    methodName: MethodName
+    dependentVar?: string
+    treatmentVar?: string
+    entityVar?: string
+    timeVar?: string
+  }
+}) {
+  const payloadBase64 = encodePythonPayload({
+    data_path: input.dataPath,
+    dependent_var: input.params.dependentVar ?? null,
+    treatment_var: input.params.treatmentVar ?? null,
+    entity_var: input.params.entityVar ?? null,
+    time_var: input.params.timeVar ?? null,
+  })
+  const execution = await runInlinePython({
+    command: input.pythonCommand,
+    script: buildAutoRecommendPythonScript(payloadBase64),
+    cwd: Instance.directory,
+  })
+  const { code, stdout, stderr } = execution
+
+  if (code !== 0) {
+    const failureArtifacts = persistPythonFailureArtifacts({
+      label: "auto_recommend_nonzero_exit",
+      command: input.pythonCommand,
+      cwd: Instance.directory,
+      execution,
+      context: {
+        dataPath: input.dataPath,
+        params: input.params,
+      },
+    })
+    throw new Error(
+      `Auto recommendation failed with Python ${input.pythonCommand} (exit code ${code})` +
+        `\nCrash script: ${relativeWithinProject(failureArtifacts.scriptCopyPath)}` +
+        `\nStdout log: ${relativeWithinProject(failureArtifacts.stdoutPath)}` +
+        `\nStderr log: ${relativeWithinProject(failureArtifacts.stderrPath)}` +
+        `\nContext: ${relativeWithinProject(failureArtifacts.contextPath)}`,
+    )
+  }
+
+  const profileResult = parsePythonResult<SmartProfilePythonResult>(stdout)
+  execution.cleanup()
+  if (!profileResult.success) {
+    throw new Error(`Auto recommendation profiling failed: ${profileResult.error ?? "unknown error"}\n${profileResult.traceback ?? ""}`)
+  }
+
+  const profile = buildSmartDatasetProfile({
+    rowCount: profileResult.row_count,
+    columns: profileResult.columns.map((column) => ({
+      name: column.name,
+      dtypeFamily: column.dtype_family,
+      nonNullCount: column.non_null_count,
+      uniqueCount: column.unique_count,
+      binary: column.binary,
+      numeric: column.numeric,
+      datetime: column.datetime,
+      integerLike: column.integer_like,
+      nonnegative: column.nonnegative,
+    })),
+    entityVar: input.params.entityVar,
+    timeVar: input.params.timeVar,
+    treatmentVar: input.params.treatmentVar,
+    dependentVar: input.params.dependentVar,
+    entityCount: profileResult.entity_count,
+    timeCount: profileResult.time_count,
+    duplicatePanelKeys: profileResult.duplicate_panel_keys,
+    avgPeriodsPerEntity: profileResult.avg_periods_per_entity,
+    balancedRatio: profileResult.balanced_ratio,
+  })
+  const recommendation = recommendEconometricsPlan(profile)
+
+  const profilePath = path.join(input.outputDir, "profile.json")
+  const recommendationPath = path.join(input.outputDir, "recommendation.json")
+  const outputPath = path.join(input.outputDir, "results.json")
+  const narrativePath = path.join(input.outputDir, "narrative.md")
+
+  fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2), "utf-8")
+  fs.writeFileSync(recommendationPath, JSON.stringify(recommendation, null, 2), "utf-8")
+  fs.writeFileSync(
+    outputPath,
+    JSON.stringify(
+      {
+        success: true,
+        profile,
+        recommendation,
+        output_path: outputPath,
+        profile_path: profilePath,
+        recommendation_path: recommendationPath,
+        narrative_path: narrativePath,
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  )
+
+  const narrative = [
+    "# Smart Econometrics Recommendation",
+    "",
+    `- Data structure: ${profile.dataStructure}`,
+    `- Recommended method: ${recommendation.recommendedMethod}`,
+    `- Suggested covariance: ${recommendation.covariance}`,
+    recommendation.preferredEntityVar ? `- Preferred entity variable: ${recommendation.preferredEntityVar}` : "",
+    recommendation.preferredTimeVar ? `- Preferred time variable: ${recommendation.preferredTimeVar}` : "",
+    recommendation.preferredTreatmentVar ? `- Preferred treatment variable: ${recommendation.preferredTreatmentVar}` : "",
+    recommendation.preferredClusterVar ? `- Preferred cluster variable: ${recommendation.preferredClusterVar}` : "",
+    `- Confidence: ${recommendation.confidence}`,
+    "",
+    "## Reasons",
+    ...recommendation.reasons.map((item) => `- ${item}`),
+    "",
+    "## Warnings",
+    ...(recommendation.warnings.length ? recommendation.warnings.map((item) => `- ${item}`) : ["- None"]),
+    "",
+    "## Post-estimation rules",
+    ...recommendation.postEstimationRules.map((item) => `- ${item}`),
+  ]
+    .filter(Boolean)
+    .join("\n")
+  fs.writeFileSync(narrativePath, narrative + "\n", "utf-8")
+
+  return {
+    profile,
+    recommendation,
+    outputPath,
+    profilePath,
+    recommendationPath,
+    narrativePath,
+  }
 }
 
 function regressionTableTitle(methodName: MethodName) {
@@ -446,6 +971,15 @@ def cluster_covariance(design_matrix, residuals, groups):
     correction = 1.0 if g <= 1 or n <= k else (g / (g - 1)) * ((n - 1) / (n - k))
     return correction * (xtx_inv @ meat @ xtx_inv)
 
+def hc1_covariance(design_matrix, residuals):
+    xtx_inv = np.linalg.pinv(design_matrix.T @ design_matrix)
+    xru = design_matrix * residuals[:, None]
+    meat = xru.T @ xru
+    n = design_matrix.shape[0]
+    k = design_matrix.shape[1]
+    correction = 1.0 if n <= k else n / max(n - k, 1)
+    return correction * (xtx_inv @ meat @ xtx_inv)
+
 def build_coefficient_table(term_names, beta, std_error, p_value, dof):
     critical = float(stats.t.ppf(0.975, dof)) if dof > 0 else 1.96
     rows = []
@@ -540,6 +1074,68 @@ def build_table_variables(method, treatment_name, covariate_names, coefficients,
         primary_term = explicit_primary_term or treatment_name or first_non_const_term(coefficients)
         return [item for item in [primary_term, *covariate_names] if item]
     return []
+
+def iv_strength_diagnostic(treatment_series, iv_series, covariate_frame=None):
+    try:
+        if treatment_series is None or iv_series is None:
+            return {"status": "skipped", "reason": "instrument not available"}
+        treatment = pd.to_numeric(treatment_series, errors="coerce")
+        if isinstance(iv_series, pd.DataFrame):
+            instrument_frame = iv_series.apply(pd.to_numeric, errors="coerce")
+        else:
+            instrument_name = getattr(iv_series, "name", None) or "instrument"
+            instrument_frame = pd.DataFrame({instrument_name: pd.to_numeric(iv_series, errors="coerce")})
+        pieces = [treatment.rename("treatment"), instrument_frame]
+        if covariate_frame is not None and not covariate_frame.empty:
+            pieces.append(covariate_frame.apply(pd.to_numeric, errors="coerce"))
+        joined = pd.concat(pieces, axis=1).dropna()
+        if joined.empty:
+            return {"status": "skipped", "reason": "no complete rows"}
+        outcome = joined.iloc[:, 0].to_numpy(dtype=float)
+        regressors = sm.add_constant(joined.iloc[:, 1:].to_numpy(dtype=float))
+        first_stage = sm.OLS(outcome, regressors).fit()
+        instrument_count = instrument_frame.shape[1]
+        if instrument_count == 1:
+            f_stat = float(first_stage.tvalues[1] ** 2) if len(first_stage.tvalues) > 1 else None
+        else:
+            restriction = np.zeros((instrument_count, regressors.shape[1]))
+            restriction[:, 1:1 + instrument_count] = np.eye(instrument_count)
+            test = first_stage.f_test(restriction)
+            f_stat = float(np.asarray(test.fvalue).item()) if getattr(test, "fvalue", None) is not None else None
+        return {
+            "status": "pass",
+            "f_stat": f_stat,
+            "instrument_count": int(instrument_count),
+            "n_obs": int(len(joined)),
+        }
+    except Exception as exc:
+        return {"status": "skipped", "reason": str(exc)}
+
+def parallel_trends_diagnostic(coefficients):
+    try:
+        if coefficients is None or coefficients.empty or "term" not in coefficients.columns:
+            return {"status": "skipped", "reason": "coefficient table unavailable"}
+        lead_rows = coefficients[coefficients["term"].astype(str).str.startswith("Lead_")].copy()
+        if lead_rows.empty:
+            return {"status": "skipped", "reason": "no lead terms found"}
+        lead_rows["p_value"] = pd.to_numeric(lead_rows["p_value"], errors="coerce")
+        significant = lead_rows[lead_rows["p_value"] < 0.05].copy()
+        min_lead_p_value = None if lead_rows["p_value"].dropna().empty else float(lead_rows["p_value"].dropna().min())
+        return {
+            "status": "pass",
+            "passed": significant.empty,
+            "significant_lead_count": int(len(significant)),
+            "min_lead_p_value": min_lead_p_value,
+            "significant_leads": significant[["term", "coefficient", "p_value"]].to_dict(orient="records"),
+        }
+    except Exception as exc:
+        return {"status": "skipped", "reason": str(exc)}
+
+def load_matplotlib_pyplot():
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+    return plt
 
 def prepare_panel_inputs(df, payload, covariate_names):
     entity_var = payload.get("entity_var")
@@ -651,7 +1247,8 @@ try:
     if not time_dummies.empty:
         matrix_parts.append(time_dummies.to_numpy(dtype=float))
     design_matrix = np.column_stack(matrix_parts)
-    outcome = model_df[dependent_var].to_numpy(dtype=float)
+    raw_outcome = model_df[dependent_var].to_numpy(dtype=float)
+    outcome = raw_outcome
     beta = np.linalg.pinv(design_matrix.T @ design_matrix) @ (design_matrix.T @ outcome)
     fitted = design_matrix @ beta
     residuals = outcome - fitted
@@ -752,6 +1349,7 @@ try:
         "suggested_repairs": qa["suggested_repairs"],
         "backend": "numpy_fe_cluster",
         "dropped_rows": dropped_rows,
+        "rows_used": int(len(model_df)),
         "cluster_var": cluster_var,
     }
 
@@ -795,7 +1393,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
     stageId: z.string().optional(),
     runId: z.string().optional(),
     branch: z.string().optional(),
-    dependentVar: z.string(),
+    dependentVar: z.string().optional(),
     treatmentVar: z.string().optional(),
     covariates: z.array(z.string()).optional(),
     entityVar: z.string().optional(),
@@ -805,28 +1403,44 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
     outputDir: z.string().optional(),
   }),
   async execute(params, ctx) {
-    const pythonCommand = await resolveRuntimePythonCommand()
-    const installCommand = pythonInstallCommand(pythonCommand)
-    if (ctx.agent === "analyst") {
+    const retryBudget = checkRetryBudget("econometrics", ctx.sessionID)
+    if (!retryBudget.allowed) {
+      throw new Error(
+        `Retry budget exhausted for econometrics in this session (${retryBudget.count}/${retryBudget.max}). Inspect the reflection logs and repair the failed stage before retrying.`,
+      )
+    }
+    const pythonStatus = await getRuntimePythonStatus()
+    if (!pythonStatus.ok || pythonStatus.missing.length) {
+      throw new Error(formatRuntimePythonSetupError("econometrics", pythonStatus))
+    }
+    const pythonCommand = pythonStatus.executable
+    const installCommand = pythonStatus.installCommand
+    if (ctx.agent === "analyst" && params.methodName !== "auto_recommend") {
       const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
       if (!analystState.asked) {
-        const answers = await Question.ask({
-          sessionID: ctx.sessionID,
-          questions: [
-            {
-              header: "Analysis Plan",
-              question: "Before I run the econometric analysis, do you want me to list a plan first and then execute it?",
-              custom: false,
-              options: [
-                { label: "Yes", description: "List a concise econometric plan first, then execute" },
-                { label: "No", description: "Skip the plan and run the analysis directly" },
-              ],
-            },
-          ],
-          tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
-        })
+        let preference: "plan_first" | "direct" = "direct"
+        try {
+          const answers = await Question.ask({
+            sessionID: ctx.sessionID,
+            questions: [
+              {
+                header: "Analysis Plan",
+                question: "Before I run the econometric analysis, do you want me to list a plan first and then execute it?",
+                custom: false,
+                options: [
+                  { label: "Yes", description: "List a concise econometric plan first, then execute" },
+                  { label: "No", description: "Skip the plan and run the analysis directly" },
+                ],
+              },
+            ],
+            tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+          })
 
-        const preference = answers[0]?.[0] === "Yes" ? "plan_first" : "direct"
+          preference = answers[0]?.[0] === "Yes" ? "plan_first" : "direct"
+        } catch (error) {
+          if (!(error instanceof Question.RejectedError)) throw error
+        }
+
         AnalysisIntent.setAnalyst(ctx.sessionID, {
           asked: true,
           preference,
@@ -846,6 +1460,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
 
     validateMethodOptions({
       methodName: params.methodName,
+      dependentVar: params.dependentVar,
       treatmentVar: params.treatmentVar,
       options: params.options,
       entityVar: params.entityVar,
@@ -912,6 +1527,228 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
       },
     })
 
+    if (params.methodName === "auto_recommend") {
+      const autoResult = await runAutoRecommend({
+        dataPath,
+        outputDir,
+        pythonCommand,
+        params,
+      })
+
+      const visibleOutputs: EconometricsVisibleOutput[] = []
+      if (datasetManifest) {
+        appendArtifact(datasetManifest, {
+          artifactId: `${params.methodName}_${Date.now()}`,
+          runId,
+          stageId: params.stageId ?? sourceStage?.stageId,
+          branch,
+          action: params.methodName,
+          outputPath: autoResult.outputPath,
+          summaryPath: autoResult.recommendationPath,
+          logPath: autoResult.narrativePath,
+          createdAt: new Date().toISOString(),
+          metadata: {
+            data_structure: autoResult.profile.dataStructure,
+            recommended_method: autoResult.recommendation.recommendedMethod,
+            covariance: autoResult.recommendation.covariance,
+          },
+        })
+
+        const publish = (key: string, label: string, sourcePath?: string) => {
+          if (!sourcePath) return
+          const visiblePath = publishVisibleOutput({
+            manifest: datasetManifest,
+            key,
+            label,
+            sourcePath,
+            runId,
+            branch: path.join("econometrics", params.methodName),
+            stageId: params.stageId ?? sourceStage?.stageId,
+          })
+          visibleOutputs.push({
+            label,
+            relativePath: relativeWithinProject(visiblePath),
+          })
+        }
+
+        publish("auto_recommend_profile", "auto_recommend_profile", autoResult.profilePath)
+        publish("auto_recommend_recommendation", "auto_recommend_recommendation", autoResult.recommendationPath)
+        publish("auto_recommend_summary", "auto_recommend_summary", autoResult.narrativePath)
+        publish("auto_recommend_results", "auto_recommend_results", autoResult.outputPath)
+      }
+
+      let output = `## Econometrics result - ${params.methodName}\n\n`
+      output += `Data file: ${relativeWithinProject(dataPath)}\n`
+      output += `Data structure: ${autoResult.profile.dataStructure}\n`
+      output += `Recommended method: ${autoResult.recommendation.recommendedMethod}\n`
+      output += `Suggested covariance: ${autoResult.recommendation.covariance}\n`
+      if (autoResult.recommendation.preferredEntityVar) {
+        output += `Preferred entity variable: ${autoResult.recommendation.preferredEntityVar}\n`
+      }
+      if (autoResult.recommendation.preferredTimeVar) {
+        output += `Preferred time variable: ${autoResult.recommendation.preferredTimeVar}\n`
+      }
+      if (autoResult.recommendation.preferredTreatmentVar) {
+        output += `Preferred treatment variable: ${autoResult.recommendation.preferredTreatmentVar}\n`
+      }
+      if (autoResult.recommendation.preferredClusterVar) {
+        output += `Preferred cluster variable: ${autoResult.recommendation.preferredClusterVar}\n`
+      }
+      output += `Confidence: ${autoResult.recommendation.confidence}\n`
+      if (autoResult.recommendation.reasons.length) {
+        output += `Reasons: ${autoResult.recommendation.reasons.join(" | ")}\n`
+      }
+      if (autoResult.recommendation.warnings.length) {
+        output += `Warnings: ${autoResult.recommendation.warnings.join(" | ")}\n`
+      }
+      output += `- Profile JSON: ${relativeWithinProject(autoResult.profilePath)}\n`
+      output += `- Recommendation JSON: ${relativeWithinProject(autoResult.recommendationPath)}\n`
+      output += `- Narrative summary: ${relativeWithinProject(autoResult.narrativePath)}\n`
+      output += `- Result JSON: ${relativeWithinProject(autoResult.outputPath)}\n`
+      output += `\nResults directory: ${relativeWithinProject(outputDir)}/\n`
+
+      const metadata: EconometricsToolMetadata = {
+        method: params.methodName,
+        profile: autoResult.profile,
+        recommendation: autoResult.recommendation,
+        datasetId: datasetManifest?.datasetId ?? params.datasetId,
+        stageId: params.stageId ?? sourceStage?.stageId,
+        runId,
+        outputDir: relativeWithinProject(outputDir),
+        visibleOutputs,
+      }
+
+      return {
+        title: `Econometrics: ${params.methodName}`,
+        output,
+        metadata,
+      }
+    }
+
+    if (params.methodName === "smart_baseline") {
+      const autoResult = await runAutoRecommend({
+        dataPath,
+        outputDir,
+        pythonCommand,
+        params,
+      })
+
+      const executionPlan = buildSmartBaselinePlan({
+        params,
+        profile: autoResult.profile,
+        recommendation: autoResult.recommendation,
+      })
+
+      const nestedTool = await EconometricsTool.init()
+      const nestedResult = await nestedTool.execute(
+        {
+          methodName: executionPlan.methodName,
+          dataPath,
+          datasetId: params.datasetId,
+          stageId: params.stageId,
+          runId,
+          branch,
+          dependentVar: executionPlan.dependentVar,
+          treatmentVar: executionPlan.treatmentVar,
+          covariates: executionPlan.covariates,
+          entityVar: executionPlan.entityVar,
+          timeVar: executionPlan.timeVar,
+          clusterVar: executionPlan.clusterVar,
+          options: executionPlan.options,
+          outputDir,
+        },
+        {
+          ...ctx,
+          agent: ctx.agent === "analyst" ? "econometrics" : ctx.agent,
+        },
+      )
+
+      const nestedMetadata = nestedResult.metadata as EconometricsToolMetadata
+      const nestedVisibleOutputs = [...(nestedMetadata.visibleOutputs ?? [])]
+
+      if (datasetManifest) {
+        appendArtifact(datasetManifest, {
+          artifactId: `${params.methodName}_${Date.now()}`,
+          runId,
+          stageId: params.stageId ?? sourceStage?.stageId,
+          branch,
+          action: params.methodName,
+          outputPath: (nestedMetadata.result?.output_path ?? autoResult.outputPath) as string,
+          summaryPath: autoResult.recommendationPath,
+          logPath: autoResult.narrativePath,
+          createdAt: new Date().toISOString(),
+          metadata: {
+            executable_method: executionPlan.methodName,
+            data_structure: autoResult.profile.dataStructure,
+            recommended_method: autoResult.recommendation.recommendedMethod,
+            effective_method: nestedMetadata.result?.effective_method ?? nestedMetadata.result?.method,
+            effective_covariance: nestedMetadata.result?.effective_covariance,
+          },
+        })
+
+        const publish = (key: string, label: string, sourcePath?: string) => {
+          if (!sourcePath) return
+          const visiblePath = publishVisibleOutput({
+            manifest: datasetManifest,
+            key,
+            label,
+            sourcePath,
+            runId,
+            branch: path.join("econometrics", params.methodName),
+            stageId: params.stageId ?? sourceStage?.stageId,
+          })
+          nestedVisibleOutputs.push({
+            label,
+            relativePath: relativeWithinProject(visiblePath),
+          })
+        }
+
+        publish("smart_baseline_profile", "smart_baseline_profile", autoResult.profilePath)
+        publish("smart_baseline_recommendation", "smart_baseline_recommendation", autoResult.recommendationPath)
+        publish("smart_baseline_summary", "smart_baseline_summary", autoResult.narrativePath)
+      }
+
+      let output = `## Econometrics result - ${params.methodName}\n\n`
+      output += `Data file: ${relativeWithinProject(dataPath)}\n`
+      output += `Recommended method: ${autoResult.recommendation.recommendedMethod}\n`
+      output += `Executed method: ${executionPlan.methodName}\n`
+      output += `Suggested covariance: ${autoResult.recommendation.covariance}\n`
+      if (nestedMetadata.result?.effective_method) output += `Effective method: ${nestedMetadata.result.effective_method}\n`
+      if (nestedMetadata.result?.effective_covariance) output += `Effective covariance: ${nestedMetadata.result.effective_covariance}\n`
+      if (executionPlan.planningTrace.length) {
+        output += `Planning trace: ${executionPlan.planningTrace.map((item) => item.message).join(" | ")}\n`
+      }
+      output += `- Profile JSON: ${relativeWithinProject(autoResult.profilePath)}\n`
+      output += `- Recommendation JSON: ${relativeWithinProject(autoResult.recommendationPath)}\n`
+      output += `- Recommendation narrative: ${relativeWithinProject(autoResult.narrativePath)}\n`
+      output += `\n### Baseline Execution\n`
+      output += nestedResult.output
+
+      const mergedMetadata: EconometricsToolMetadata = {
+        ...(nestedMetadata ?? {}),
+        method: params.methodName,
+        profile: autoResult.profile,
+        recommendation: autoResult.recommendation,
+        datasetId: nestedMetadata.datasetId ?? datasetManifest?.datasetId ?? params.datasetId,
+        stageId: nestedMetadata.stageId ?? params.stageId ?? sourceStage?.stageId,
+        runId: nestedMetadata.runId ?? runId,
+        outputDir: nestedMetadata.outputDir ?? relativeWithinProject(outputDir),
+        visibleOutputs: nestedVisibleOutputs,
+      }
+      if (mergedMetadata.result) {
+        mergedMetadata.result.decision_trace = [
+          ...executionPlan.planningTrace,
+          ...(mergedMetadata.result.decision_trace ?? []),
+        ]
+      }
+
+      return {
+        title: `Econometrics: ${params.methodName}`,
+        output,
+        metadata: mergedMetadata,
+      }
+    }
+
     const payload = {
       method: params.methodName,
       data_path: dataPath,
@@ -932,9 +1769,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
 
     const payloadB64 = encodePythonPayload(payload)
 
-    const pythonScript = params.methodName === "panel_fe_regression" || params.methodName === "baseline_regression"
-      ? buildPanelFePythonScript(payloadB64)
-      : `
+    const pythonScript = `
 import base64
 import json
 import sys
@@ -943,6 +1778,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 from scipy import stats
 
 RESULT_PREFIX = "${PYTHON_RESULT_PREFIX}"
@@ -987,8 +1823,54 @@ def safe_error_path(method_name):
     stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     return str(error_dir / f"econometrics_{method_name}_{stamp}_error.json")
 
+def read_table(file_path):
+    suffix = Path(file_path).suffix.lower()
+    if suffix == ".csv":
+        return pd.read_csv(file_path)
+    if suffix in [".xlsx", ".xls"]:
+        return pd.read_excel(file_path)
+    if suffix == ".dta":
+        read_error = None
+        for encoding in [None, "gbk", "latin1"]:
+            try:
+                kwargs = {"preserve_dtypes": False}
+                if encoding is not None:
+                    kwargs["encoding"] = encoding
+                df = pd.read_stata(file_path, **kwargs)
+                df.attrs["_source_encoding"] = encoding or "default"
+                return df
+            except Exception as exc:
+                read_error = exc
+                message = str(exc).lower()
+                if encoding is None and not isinstance(exc, UnicodeDecodeError) and "unicode" not in message and "codec" not in message:
+                    raise
+        raise read_error
+    if suffix == ".parquet":
+        return pd.read_parquet(file_path)
+    raise ValueError(f"Unsupported econometrics input format: {suffix}")
+
 def q(name):
     return 'Q("' + str(name).replace('"', '\\"') + '")'
+
+def nested_pvalue(block, key):
+    if not isinstance(block, dict):
+        return None
+    value = block.get(key)
+    if isinstance(value, dict):
+        for candidate in ["p_value", "pvalue", "breusch_pagan_pvalue", "white_pvalue"]:
+            if candidate in value and value[candidate] is not None:
+                try:
+                    return float(value[candidate])
+                except Exception:
+                    return None
+    return None
+
+def has_severe_heteroskedasticity(core):
+    for key in ["breusch_pagan", "white"]:
+        pvalue = nested_pvalue(core, key)
+        if pvalue is not None and pvalue < 0.05:
+            return True
+    return False
 
 def build_model_qa(df, entity_var=None, time_var=None, cluster_var=None):
     warnings = []
@@ -1075,6 +1957,15 @@ def cluster_covariance(design_matrix, residuals, groups):
         correction = (g / (g - 1)) * ((n - 1) / (n - k))
     return correction * (xtx_inv @ meat @ xtx_inv)
 
+def hc1_covariance(design_matrix, residuals):
+    xtx_inv = np.linalg.pinv(design_matrix.T @ design_matrix)
+    xru = design_matrix * residuals[:, None]
+    meat = xru.T @ xru
+    n = design_matrix.shape[0]
+    k = design_matrix.shape[1]
+    correction = 1.0 if n <= k else n / max(n - k, 1)
+    return correction * (xtx_inv @ meat @ xtx_inv)
+
 def build_coefficient_table(term_names, beta, std_error, p_value, dof):
     critical = float(stats.t.ppf(0.975, dof)) if dof > 0 else 1.96
     rows = []
@@ -1092,15 +1983,16 @@ def build_coefficient_table(term_names, beta, std_error, p_value, dof):
     return pd.DataFrame(rows)
 
 def design_matrix_with_fixed_effects(model_df, treatment_var, covariates, entity_var, time_var):
-    main = model_df[[treatment_var, *covariates]].to_numpy(dtype=float)
-    entity_dummies = pd.get_dummies(model_df[entity_var], prefix=entity_var, drop_first=True, dtype=float)
+    transformed = model_df[[entity_var, treatment_var, *covariates]].copy()
+    for column in [treatment_var, *covariates]:
+        transformed[column] = transformed[column] - transformed.groupby(entity_var)[column].transform("mean")
+
     time_dummies = pd.get_dummies(model_df[time_var], prefix=time_var, drop_first=True, dtype=float)
-    intercept = np.ones((len(model_df), 1))
-    matrix_parts = [intercept, main]
-    term_names = ["const", treatment_var, *covariates]
-    if not entity_dummies.empty:
-        matrix_parts.append(entity_dummies.to_numpy(dtype=float))
-        term_names.extend(entity_dummies.columns.tolist())
+    if not time_dummies.empty:
+        time_dummies = time_dummies - time_dummies.groupby(model_df[entity_var]).transform("mean")
+
+    matrix_parts = [transformed[[treatment_var, *covariates]].to_numpy(dtype=float)]
+    term_names = [treatment_var, *covariates]
     if not time_dummies.empty:
         matrix_parts.append(time_dummies.to_numpy(dtype=float))
         term_names.extend(time_dummies.columns.tolist())
@@ -1120,6 +2012,9 @@ def run_panel_fe(df, payload):
     entity_var = payload["entity_var"]
     time_var = payload["time_var"]
     cluster_var = payload.get("cluster_var") or entity_var
+    options = payload.get("options", {})
+    auto_policy = options.get("auto_downgrade", True)
+    decision_trace = []
 
     required_columns = [dependent_var, treatment_var, entity_var, time_var] + covariates
     missing_columns = sorted(set([col for col in required_columns if col not in df.columns]))
@@ -1151,14 +2046,44 @@ def run_panel_fe(df, payload):
         raise ValueError("No usable rows remain after dropping missing model variables")
 
     outcome = model_df[dependent_var].to_numpy(dtype=float)
-    design_matrix, term_names = design_matrix_with_fixed_effects(model_df, treatment_var, covariates, entity_var, time_var)
+    effective_method = "panel_fe"
+    degraded_from = None
+    effective_covariance = "cluster"
+    if auto_policy and qa["duplicate_entity_time_rows"] > 0:
+        effective_method = "pooled_ols"
+        degraded_from = "panel_fe_regression"
+        effective_covariance = "HC1"
+        decision_trace.append({
+            "kind": "downgrade",
+            "message": f"Detected duplicate entity-time rows ({qa['duplicate_entity_time_rows']}), so downgraded from panel FE to pooled OLS with HC1 robust SE.",
+        })
+    elif qa["cluster_count"] is not None and qa["cluster_count"] < 10:
+        effective_covariance = "HC1"
+        decision_trace.append({
+            "kind": "covariance_switch",
+            "message": f"Cluster count is low ({qa['cluster_count']}), so switched clustered SE to HC1 robust SE.",
+        })
+
+    if effective_method == "panel_fe":
+        outcome = (model_df[dependent_var] - model_df.groupby(entity_var)[dependent_var].transform("mean")).to_numpy(dtype=float)
+        design_matrix, term_names = design_matrix_with_fixed_effects(model_df, treatment_var, covariates, entity_var, time_var)
+    else:
+        design_matrix = np.column_stack([
+            np.ones((len(model_df), 1)),
+            model_df[[treatment_var, *covariates]].to_numpy(dtype=float),
+        ])
+        term_names = ["const", treatment_var, *covariates]
+
     beta = np.linalg.pinv(design_matrix.T @ design_matrix) @ (design_matrix.T @ outcome)
     fitted = design_matrix @ beta
     residuals = outcome - fitted
-    groups = pd.factorize(model_df[cluster_var])[0]
-    covariance = cluster_covariance(design_matrix, residuals, groups)
+    groups = pd.factorize(model_df[cluster_var])[0] if cluster_var in model_df.columns else None
+    if effective_covariance == "cluster" and groups is not None:
+        covariance = cluster_covariance(design_matrix, residuals, groups)
+    else:
+        covariance = hc1_covariance(design_matrix, residuals)
     std_error = np.sqrt(np.clip(np.diag(covariance), a_min=0, a_max=None))
-    dof = max(len(outcome) - design_matrix.shape[1], 1)
+    dof = max(len(np.unique(groups)) - 1, 1) if effective_covariance == "cluster" and groups is not None else max(len(outcome) - design_matrix.shape[1], 1)
     t_stats = np.divide(beta, std_error, out=np.zeros_like(beta), where=std_error > 0)
     p_value = 2 * stats.t.sf(np.abs(t_stats), dof)
 
@@ -1186,8 +2111,8 @@ def run_panel_fe(df, payload):
             "duplicate_entity_time_rows": qa["duplicate_entity_time_rows"],
             "dropped_rows": dropped_rows,
         },
-        "heteroskedasticity": breusch_pagan(residuals, design_matrix),
-        "multicollinearity": vif_report(model_df[[treatment_var, *covariates]]),
+        "heteroskedasticity": {"status": "skipped", "reason": "lightweight panel_fe diagnostics path"},
+        "multicollinearity": {"status": "skipped", "reason": "lightweight panel_fe diagnostics path"},
         "residuals": {
             "mean": float(residuals.mean()),
             "std": float(residuals.std()),
@@ -1199,11 +2124,12 @@ def run_panel_fe(df, payload):
             "blocking_errors": qa["blocking_errors"],
             "suggested_repairs": qa["suggested_repairs"],
         },
+        "decision_trace": decision_trace,
     }
     metadata = {
         "method": method,
         "backend": "numpy_fe_cluster",
-        "covariance": "cluster",
+        "covariance": effective_covariance,
         "dependent_var": dependent_var,
         "treatment_var": treatment_var,
         "covariates": covariates,
@@ -1213,11 +2139,14 @@ def run_panel_fe(df, payload):
         "rows_used": int(len(model_df)),
         "rows_dropped": dropped_rows,
         "term_names": term_names,
+        "effective_method": effective_method,
+        "degraded_from": degraded_from,
+        "decision_trace": decision_trace,
     }
     treatment_idx = term_names.index(treatment_var)
     result = {
         "success": True,
-        "method": "Panel FE",
+        "method": "Panel FE" if effective_method == "panel_fe" else "Pooled OLS (auto downgrade from Panel FE)",
         "coefficient": float(beta[treatment_idx]),
         "std_error": float(std_error[treatment_idx]),
         "p_value": float(p_value[treatment_idx]),
@@ -1235,8 +2164,13 @@ def run_panel_fe(df, payload):
         "suggested_repairs": qa["suggested_repairs"],
         "backend": "numpy_fe_cluster",
         "dropped_rows": dropped_rows,
+        "rows_used": int(len(model_df)),
         "cluster_var": cluster_var,
         "table_variables": [treatment_var, *covariates],
+        "effective_method": effective_method,
+        "effective_covariance": effective_covariance,
+        "degraded_from": degraded_from,
+        "decision_trace": decision_trace,
     }
 
     save_json(output_path, result)
@@ -1246,15 +2180,21 @@ def run_panel_fe(df, payload):
         f.write(coefficients.to_string(index=False))
     with open(narrative_path, "w", encoding="utf-8") as f:
         f.write("# Panel FE Regression Summary\\n\\n")
+        f.write(f"- Effective method: {effective_method}\\n")
         f.write(f"- Dependent variable: {dependent_var}\\n")
         f.write(f"- Key regressor: {treatment_var}\\n")
         f.write(f"- Controls: {covariates}\\n")
-        f.write(f"- Fixed effects: {entity_var}, {time_var}\\n")
-        f.write(f"- Clustered SE: {cluster_var}\\n")
+        if effective_method == "panel_fe":
+            f.write(f"- Fixed effects: {entity_var}, {time_var}\\n")
+        else:
+            f.write("- Fixed effects: downgraded to pooled OLS\\n")
+        f.write(f"- Covariance: {effective_covariance}\\n")
         f.write(f"- Coefficient: {result['coefficient']:.6f}\\n")
         f.write(f"- Std. error: {result['std_error']:.6f}\\n")
         f.write(f"- P-value: {result['p_value']:.6f}\\n")
         f.write(f"- Adjusted R-squared: {result['r_squared']:.6f}\\n")
+        if decision_trace:
+            f.write(f"- Decision trace: {decision_trace}\\n")
     return result
 
 try:
@@ -1325,8 +2265,16 @@ try:
     output_kind = "analysis"
     primary_term = treatment_name
     qa = build_model_qa(df, payload.get("entity_var"), payload.get("time_var"), payload.get("cluster_var"))
+    auto_policy = options.get("auto_downgrade", True)
+    decision_trace = []
+    effective_covariance = options.get("cov_type")
+    effective_method = method
+    degraded_from = None
+    iv_diagnostic = None
+    parallel_trends_report = None
 
     if method == "ols_regression":
+        effective_covariance = options.get("cov_type", "nonrobust")
         model = ordinary_least_square_regression(
             dependent_var,
             treatment_var,
@@ -1347,6 +2295,7 @@ try:
         output_kind = "regression"
 
     elif method == "did_static":
+        effective_covariance = options.get("cov_type", "unadjusted")
         model = Static_Diff_in_Diff_regression(
             dependent_var,
             panel_df[options["treatment_entity_dummy"]],
@@ -1412,6 +2361,7 @@ try:
         primary_term = "ATE"
 
     elif method == "psm_double_robust":
+        effective_covariance = options.get("cov_type", None)
         ps = propensity_score_construction(treatment_var, covariates)
         propensity_score_series = ps
         ate = propensity_score_double_robust_estimator_augmented_IPW(
@@ -1432,7 +2382,9 @@ try:
         primary_term = "ATE"
 
     elif method == "iv_2sls":
+        effective_covariance = options.get("cov_type", "nonrobust")
         iv_var = df[options["iv_variable"]]
+        iv_diagnostic = iv_strength_diagnostic(treatment_var, iv_var, covariates)
         model = IV_2SLS_regression(
             dependent_var,
             treatment_var,
@@ -1470,6 +2422,7 @@ try:
         output_kind = "test"
 
     elif method == "did_staggered":
+        effective_covariance = options.get("cov_type", "unadjusted")
         model = Staggered_Diff_in_Diff_regression(
             dependent_var,
             covariate_variables=covariates,
@@ -1493,6 +2446,7 @@ try:
         primary_term = "treatment_entity_treated"
 
     elif method == "did_event_study":
+        effective_covariance = options.get("cov_type", "unadjusted")
         model = Staggered_Diff_in_Diff_Event_Study_regression(
             dependent_var,
             covariate_variables=covariates,
@@ -1516,10 +2470,12 @@ try:
             "method": "Event-study DID",
         }
         coefficients = model_coefficient_table(model)
+        parallel_trends_report = parallel_trends_diagnostic(coefficients)
         output_kind = "regression"
         primary_term = "D0"
 
     elif method == "rdd_sharp":
+        effective_covariance = options.get("cov_type", "nonrobust")
         running_var = df[options["running_variable"]]
         cutoff = options.get("cutoff", 0)
         model = Sharp_Regression_Discontinuity_Design_regression(
@@ -1582,6 +2538,7 @@ try:
         output_kind = "analysis"
 
     elif method == "psm_regression":
+        effective_covariance = options.get("cov_type", None)
         ps = propensity_score_construction(treatment_var, covariates)
         propensity_score_series = ps
         model = propensity_score_regression(
@@ -1603,6 +2560,7 @@ try:
         output_kind = "regression"
 
     elif method == "psm_dr_ipw_ra":
+        effective_covariance = options.get("cov_type", None)
         ps = propensity_score_construction(treatment_var, covariates)
         propensity_score_series = ps
         model = propensity_score_double_robust_estimator_IPW_regression_adjustment(
@@ -1625,7 +2583,7 @@ try:
         output_kind = "regression"
 
     elif method == "psm_visualize":
-        from matplotlib import pyplot as plt
+        plt = load_matplotlib_pyplot()
         ps = propensity_score_construction(treatment_var, covariates)
         propensity_score_series = ps
         output_path = Path(payload["output_dir"]) / "ps_distribution.png"
@@ -1641,6 +2599,7 @@ try:
         output_kind = "visualization"
 
     elif method == "did_event_study_viz":
+        effective_covariance = options.get("cov_type", "unadjusted")
         model = Staggered_Diff_in_Diff_Event_Study_regression(
             dependent_var,
             covariate_variables=covariates,
@@ -1653,7 +2612,8 @@ try:
             target_type="final_model",
             output_tables=True,
         )
-        from matplotlib import pyplot as plt
+        parallel_trends_report = parallel_trends_diagnostic(model_coefficient_table(model))
+        plt = load_matplotlib_pyplot()
         output_path = Path(payload["output_dir"]) / "event_study.png"
         Staggered_Diff_in_Diff_Event_Study_visualization(
             model,
@@ -1671,6 +2631,7 @@ try:
         output_kind = "visualization"
 
     elif method == "rdd_fuzzy_global":
+        effective_covariance = options.get("cov_type", "nonrobust")
         running_var = df[options["running_variable"]]
         cutoff = options.get("cutoff", 0)
         polynomial_degree = options.get("polynomial_degree", 3)
@@ -1727,24 +2688,36 @@ try:
                 "cluster_count": qa["cluster_count"],
                 "duplicate_entity_time_rows": qa["duplicate_entity_time_rows"],
             }
-        diagnostics["core"] = run_core_diagnostics(
-            model,
-            regressors=regressors_for_diagnostics,
-            treatment_variable=treatment_var,
-            propensity_score=propensity_score_series,
-            panel_info=panel_info,
-        )
-        diagnostics["robustness"] = run_robustness_checks(
-            model,
-            frame=df,
-            outcome_var=payload["dependent_var"],
-            treatment_var=treatment_name,
-            covariates=covariate_names,
-            cluster_var=payload.get("cluster_var"),
-            placebo_var=options.get("placebo_var"),
-            alternative_sets=options.get("alternative_specifications"),
-            groups=df[payload.get("cluster_var")] if payload.get("cluster_var") in df.columns else None,
-        )
+        diagnostic_errors = []
+        try:
+            diagnostics["core"] = run_core_diagnostics(
+                model,
+                regressors=regressors_for_diagnostics,
+                treatment_variable=treatment_var,
+                propensity_score=propensity_score_series,
+                panel_info=panel_info,
+            )
+        except Exception as exc:
+            diagnostic_errors.append(f"core diagnostics failed: {exc}")
+            diagnostics["core"] = {"status": "skipped", "reason": str(exc)}
+        try:
+            diagnostics["robustness"] = run_robustness_checks(
+                model,
+                frame=df,
+                outcome_var=payload["dependent_var"],
+                treatment_var=treatment_name,
+                covariates=covariate_names,
+                cluster_var=payload.get("cluster_var"),
+                placebo_var=options.get("placebo_var"),
+                alternative_sets=options.get("alternative_specifications"),
+                groups=df[payload.get("cluster_var")] if payload.get("cluster_var") in df.columns else None,
+            )
+        except Exception as exc:
+            diagnostic_errors.append(f"robustness checks failed: {exc}")
+            diagnostics["robustness"] = {"status": "skipped", "reason": str(exc)}
+        if diagnostic_errors:
+            diagnostics["diagnostic_errors"] = diagnostic_errors
+            qa["warnings"] = list(dict.fromkeys([*qa["warnings"], *diagnostic_errors]))
     elif result.get("success") and propensity_score_series is not None and treatment_var is not None and covariates is not None:
         diagnostics["core"] = {
             "balance": balance_test(treatment_var, covariates),
@@ -1756,6 +2729,33 @@ try:
             "placebo": {"status": "skipped", "reason": "no fitted model available"},
             "alternative_specification": {"status": "skipped", "reason": "no fitted model available"},
         }
+
+    if iv_diagnostic is not None:
+        diagnostics["identification"] = {"weak_iv": iv_diagnostic}
+    if parallel_trends_report is not None:
+        diagnostics["parallel_trends"] = parallel_trends_report
+
+    if (
+        result.get("success")
+        and model is not None
+        and auto_policy
+        and options.get("cov_type") is None
+        and output_kind == "regression"
+        and has_severe_heteroskedasticity(diagnostics.get("core"))
+        and hasattr(model, "get_robustcov_results")
+    ):
+        try:
+            model = model.get_robustcov_results(cov_type="HC1")
+            coefficients = model_coefficient_table(model)
+            effective_covariance = "HC1"
+            decision_trace.append({
+                "kind": "covariance_switch",
+                "message": "Detected heteroskedasticity in diagnostics, so switched inference to HC1 robust standard errors.",
+            })
+        except Exception:
+            pass
+
+    diagnostics["decision_trace"] = decision_trace
 
     if isinstance(result, dict):
         coefficients = coefficients if coefficients is not None else empty_coefficient_table()
@@ -1773,6 +2773,10 @@ try:
         result["dataset_id"] = payload.get("dataset_id")
         result["stage_id"] = payload.get("stage_id")
         result["branch"] = payload.get("branch")
+        result["effective_method"] = effective_method
+        result["effective_covariance"] = effective_covariance
+        result["degraded_from"] = degraded_from
+        result["decision_trace"] = decision_trace
     metadata = {
         "method": method,
         "backend": "econometric_algorithm",
@@ -1787,6 +2791,10 @@ try:
         "input_encoding": df.attrs.get("_source_encoding", "default"),
         "output_kind": output_kind,
         "table_variables": result.get("table_variables"),
+        "effective_method": effective_method,
+        "effective_covariance": effective_covariance,
+        "degraded_from": degraded_from,
+        "decision_trace": decision_trace,
     }
     summary_text = coefficients.to_string(index=False) if not coefficients.empty else json.dumps(result, ensure_ascii=False, indent=2)
     narrative_lines = [
@@ -1810,6 +2818,12 @@ try:
         narrative_lines.append(f"- ATT: {result['att']}")
     if result.get("late") is not None:
         narrative_lines.append(f"- LATE: {result['late']}")
+    if effective_covariance:
+        narrative_lines.append(f"- Effective covariance: {effective_covariance}")
+    if degraded_from:
+        narrative_lines.append(f"- Degraded from: {degraded_from}")
+    if decision_trace:
+        narrative_lines.append(f"- Decision trace: {decision_trace}")
     narrative_lines.append(f"- QA status: {'fail' if qa['blocking_errors'] else 'warn' if qa['warnings'] else 'pass'}")
     if qa["warnings"]:
         narrative_lines.append(f"- QA warnings: {qa['warnings']}")
@@ -1845,23 +2859,69 @@ except Exception as e:
       outputDir,
     })
 
-    const { code, stdout, stderr } = await runInlinePython({
+    const execution = await runInlinePython({
       command: pythonCommand,
       script: pythonScript,
       cwd: Instance.directory,
     })
+    const { code, stdout, stderr } = execution
 
     if (code !== 0) {
       log.error("python failed", { code, stderr })
-      throw new Error(`Econometrics failed (exit code ${code})\n${stderr}\n${stdout}`)
+      const failureArtifacts = persistPythonFailureArtifacts({
+        label: `${params.methodName}_nonzero_exit`,
+        command: pythonCommand,
+        cwd: Instance.directory,
+        execution,
+        context: {
+          methodName: params.methodName,
+          dataPath,
+          datasetId: datasetManifest?.datasetId ?? params.datasetId,
+          stageId: params.stageId ?? sourceStage?.stageId,
+          runId,
+          branch,
+          outputDir,
+        },
+      })
+      throw new Error(
+        `Econometrics failed with Python ${pythonCommand} (exit code ${code})` +
+          `\nCrash script: ${relativeWithinProject(failureArtifacts.scriptCopyPath)}` +
+          `\nStdout log: ${relativeWithinProject(failureArtifacts.stdoutPath)}` +
+          `\nStderr log: ${relativeWithinProject(failureArtifacts.stderrPath)}` +
+          `\nContext: ${relativeWithinProject(failureArtifacts.contextPath)}`,
+      )
     }
 
     let result: PythonResult
     try {
       result = parsePythonResult<PythonResult>(stdout)
     } catch (error) {
-      throw new Error(`Failed to parse python result: ${error}\nRaw output:\n${stdout}\nStderr:\n${stderr}`)
+      const failureArtifacts = persistPythonFailureArtifacts({
+        label: `${params.methodName}_parse_failure`,
+        command: pythonCommand,
+        cwd: Instance.directory,
+        execution,
+        context: {
+          methodName: params.methodName,
+          dataPath,
+          datasetId: datasetManifest?.datasetId ?? params.datasetId,
+          stageId: params.stageId ?? sourceStage?.stageId,
+          runId,
+          branch,
+          outputDir,
+          parseError: error instanceof Error ? error.message : String(error),
+        },
+      })
+      throw new Error(
+        `Failed to parse python result from ${pythonCommand}: ${error}` +
+          `\nCrash script: ${relativeWithinProject(failureArtifacts.scriptCopyPath)}` +
+          `\nStdout log: ${relativeWithinProject(failureArtifacts.stdoutPath)}` +
+          `\nStderr log: ${relativeWithinProject(failureArtifacts.stderrPath)}` +
+          `\nContext: ${relativeWithinProject(failureArtifacts.contextPath)}`,
+      )
     }
+    execution.cleanup()
+    result.resolved_python_executable = pythonCommand
     const effectiveRunId = inferRunId({
       requestedRunId: result.run_id ?? runId,
       stage: sourceStage,
@@ -1880,6 +2940,7 @@ except Exception as e:
           dependentVar: params.dependentVar,
           treatmentVar: params.treatmentVar,
         },
+        sessionId: ctx.sessionID,
       })
       const reflectionPath = persistToolReflection(reflection)
       await ctx.metadata({
@@ -1891,10 +2952,36 @@ except Exception as e:
         },
       })
       let message = `Econometrics analysis failed: ${result.error ?? "unknown error"}`
+      message += `\nPython interpreter: ${pythonCommand}`
       if (result.error_log_path) message += `\nError log: ${relativeWithinProject(result.error_log_path)}`
       message += `\nReflection log: ${relativeWithinProject(reflectionPath)}`
       if (result.traceback) message += `\n${result.traceback}`
       throw new Error(message)
+    }
+
+    const diagnosticsPayload = loadJsonFile<Record<string, unknown>>(result.diagnostics_path) ?? {}
+    const postEstimationGates = runPostEstimationGates(diagnosticsPayload, params.methodName)
+    const gateWarnings = postEstimationGates
+      .filter((gate) => !gate.passed && gate.severity === "warning")
+      .map((gate) => gate.userMessage)
+    const gateBlockingErrors = postEstimationGates
+      .filter((gate) => !gate.passed && gate.severity === "blocking")
+      .map((gate) => gate.userMessage)
+
+    result.warnings = [...new Set([...(result.warnings ?? []), ...gateWarnings])]
+    result.blocking_errors = [...new Set([...(result.blocking_errors ?? []), ...gateBlockingErrors])]
+    result.qa_status = result.blocking_errors.length > 0 ? "fail" : result.warnings.length > 0 ? "warn" : "pass"
+    result.post_estimation_gates = postEstimationGates
+
+    if (result.diagnostics_path) {
+      fs.writeFileSync(
+        result.diagnostics_path,
+        JSON.stringify({ ...diagnosticsPayload, post_estimation_gates: postEstimationGates }, null, 2),
+        "utf-8",
+      )
+    }
+    if (result.output_path) {
+      fs.writeFileSync(result.output_path, JSON.stringify(result, null, 2), "utf-8")
     }
 
     const qaGate = evaluateQaGate({
@@ -1909,7 +2996,9 @@ except Exception as e:
         stageId: params.stageId,
         dependentVar: params.dependentVar,
         treatmentVar: params.treatmentVar,
+        diagnosticsPath: result.diagnostics_path,
       },
+      sessionId: ctx.sessionID,
     })
 
     if (qaGate.reflection) {
@@ -1927,9 +3016,9 @@ except Exception as e:
       )
     }
 
-    const visibleOutputs: Array<{ label: string; relativePath: string }> = []
+    const visibleOutputs: EconometricsVisibleOutput[] = []
 
-    if (REGRESSION_TABLE_METHODS.has(params.methodName) && hasNonEmptyCoefficientTable(result.coefficients_path)) {
+    if (hasNonEmptyCoefficientTable(result.coefficients_path)) {
       try {
         const tableResult = await generateRegressionTable({
           title: regressionTableTitle(params.methodName),
@@ -2040,6 +3129,9 @@ except Exception as e:
     if (params.entityVar) output += `Entity FE: ${params.entityVar}\n`
     if (params.timeVar) output += `Time FE: ${params.timeVar}\n`
     if (params.clusterVar ?? result.cluster_var) output += `Clustered SE: ${params.clusterVar ?? result.cluster_var}\n`
+    if (result.effective_method) output += `Effective method: ${result.effective_method}\n`
+    if (result.effective_covariance) output += `Effective covariance: ${result.effective_covariance}\n`
+    if (result.degraded_from) output += `Degraded from: ${result.degraded_from}\n`
 
     output += `\n### Estimates\n`
 
@@ -2059,11 +3151,17 @@ except Exception as e:
     if (result.att !== undefined) output += `- ATT: ${result.att.toFixed(4)}\n`
     if (result.late !== undefined) output += `- LATE: ${result.late.toFixed(4)}\n`
     if (result.backend) output += `- Backend: ${result.backend}\n`
+    if (result.rows_used !== undefined) output += `- Sample size: ${result.rows_used}\n`
     if (result.dropped_rows !== undefined) output += `- Rows dropped before estimation: ${result.dropped_rows}\n`
     if (result.qa_status) output += `- QA status: ${result.qa_status}\n`
     if (qaGate.qaGateStatus === "warn") output += `- QA gate: warn\n`
     if (qaGate.qaGateStatus === "warn" && qaGate.qaGateReason) output += `- QA gate reason: ${qaGate.qaGateReason}\n`
     if (result.warnings?.length) output += `- Warnings: ${result.warnings.join(" | ")}\n`
+    const triggeredPostEstimationGates = result.post_estimation_gates?.filter((gate) => !gate.passed) ?? []
+    if (triggeredPostEstimationGates.length) {
+      output += `- Post-estimation gates: ${triggeredPostEstimationGates.map((gate) => `${gate.gate}=${gate.severity}`).join(" | ")}\n`
+    }
+    if (result.decision_trace?.length) output += `- Decision trace: ${result.decision_trace.map((item) => item.message).join(" | ")}\n`
     if (result.plot_path) output += `- Plot: ${relativeWithinProject(result.plot_path)}\n`
     if (result.coefficients_path) output += `- Coefficients CSV: ${relativeWithinProject(result.coefficients_path)}\n`
     if (result.workbook_path) output += `- Coefficients workbook: ${relativeWithinProject(result.workbook_path)}\n`
@@ -2076,29 +3174,32 @@ except Exception as e:
     if (result.academic_table_latex_path) output += `- Three-line table LaTeX: ${relativeWithinProject(result.academic_table_latex_path)}\n`
     if (result.academic_table_workbook_path) output += `- Three-line table Excel: ${relativeWithinProject(result.academic_table_workbook_path)}\n`
     if (result.output_path) output += `- Result JSON: ${relativeWithinProject(result.output_path)}\n`
+    if (result.resolved_python_executable) output += `- Python interpreter: ${result.resolved_python_executable}\n`
     if (visibleManifestPath) output += `Final outputs manifest: ${relativeWithinProject(visibleManifestPath)}\n`
 
     output += `\nResults directory: ${relativeWithinProject(outputDir)}/\n`
 
+    const metadata: EconometricsToolMetadata = {
+      method: params.methodName,
+      result,
+      datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
+      stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
+      runId: effectiveRunId,
+      numericSnapshotPath: result.numeric_snapshot_path ? relativeWithinProject(result.numeric_snapshot_path) : undefined,
+      numericSnapshotPreview: numericSnapshotPreview(numericSnapshot),
+      groundingScope: "regression",
+      qaGateStatus: qaGate.qaGateStatus,
+      qaGateReason: qaGate.qaGateReason,
+      qaSource: qaGate.qaSource,
+      outputDir: relativeWithinProject(outputDir),
+      visibleOutputs,
+      finalOutputsPath: visibleManifestPath ? relativeWithinProject(visibleManifestPath) : undefined,
+    }
+
     return {
       title: `Econometrics: ${params.methodName}`,
       output,
-      metadata: {
-        method: params.methodName,
-        result,
-        datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
-        stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
-        runId: effectiveRunId,
-        numericSnapshotPath: result.numeric_snapshot_path ? relativeWithinProject(result.numeric_snapshot_path) : undefined,
-        numericSnapshotPreview: numericSnapshotPreview(numericSnapshot),
-        groundingScope: "regression",
-        qaGateStatus: qaGate.qaGateStatus,
-        qaGateReason: qaGate.qaGateReason,
-        qaSource: qaGate.qaSource,
-        outputDir: relativeWithinProject(outputDir),
-        visibleOutputs,
-        finalOutputsPath: visibleManifestPath ? relativeWithinProject(visibleManifestPath) : undefined,
-      },
+      metadata,
     }
   },
 }))
