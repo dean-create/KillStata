@@ -738,7 +738,7 @@ export namespace ProviderTransform {
       lowered.includes("alibabacloud.com") ||
       lowered.includes("invalid_api_key")
     ) {
-      return "API key 无效或未生效。请重新连接该 provider，并确认粘贴的是完整、可用的 API key。"
+      return "API key is invalid or not active. Reconnect this provider and make sure you pasted the full API key."
     }
 
     return message
