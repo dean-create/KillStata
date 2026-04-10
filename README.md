@@ -226,6 +226,27 @@ Windows-priority build:
 bun run --cwd packages/killstata build:windows-priority
 ```
 
+Windows-priority npm release dry run:
+
+```bash
+bun run --cwd packages/killstata release:windows:latest --dry-run
+```
+
+Windows-priority npm release:
+
+```bash
+$env:NPM_TOKEN="your_npm_token"
+bun run --cwd packages/killstata release:windows:latest
+```
+
+What the release script does:
+
+- checks that you are on `main` or `master`
+- checks that the branch is in sync with `origin`
+- runs workspace typecheck before publish
+- publishes the Windows-first npm packages
+- verifies the published version and dist-tag on npm
+
 ## FAQ
 
 ### Do I need Stata installed?

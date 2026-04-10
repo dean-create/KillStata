@@ -61,6 +61,19 @@ Windows-priority build:
 bun run --cwd packages/killstata build:windows-priority
 ```
 
+Dry-run the automated Windows npm release:
+
+```bash
+bun run --cwd packages/killstata release:windows:latest --dry-run
+```
+
+Run the automated Windows npm release:
+
+```bash
+$env:NPM_TOKEN="your_npm_token"
+bun run --cwd packages/killstata release:windows:latest
+```
+
 Run the CLI from source:
 
 ```bash
