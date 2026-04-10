@@ -275,7 +275,10 @@ export const AuthLoginCommand = cmd({
           openai: 3,
           google: 4,
           openrouter: 5,
-          vercel: 6,
+          xai: 6,
+          groq: 7,
+          mistral: 8,
+          vercel: 9,
         }
         let provider = await prompts.autocomplete({
           message: "Select provider",
@@ -295,6 +298,10 @@ export const AuthLoginCommand = cmd({
                   killstata: "recommended",
                   anthropic: "Claude Max or API key",
                   openai: "ChatGPT Plus/Pro or API key",
+                  openrouter: "aggregated models via API key",
+                  xai: "Grok via API key",
+                  groq: "fast inference via API key",
+                  mistral: "Mistral API key",
                 }[x.id],
               })),
             ),

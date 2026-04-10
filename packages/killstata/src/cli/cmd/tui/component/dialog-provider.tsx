@@ -19,6 +19,10 @@ const PROVIDER_PRIORITY: Record<string, number> = {
   "github-copilot": 2,
   openai: 3,
   google: 4,
+  openrouter: 5,
+  xai: 6,
+  groq: 7,
+  mistral: 8,
 }
 
 export function createDialogProviderOptions() {
@@ -39,6 +43,10 @@ export function createDialogProviderOptions() {
           description: {
             anthropic: "(Claude Max or API key)",
             openai: "(ChatGPT Plus/Pro or API key)",
+            openrouter: "(aggregated models via API key)",
+            xai: "(Grok via API key)",
+            groq: "(fast inference via API key)",
+            mistral: "(Mistral API key)",
           }[provider.id],
           category: provider.id in PROVIDER_PRIORITY ? "Popular" : "Other",
           footer: isConnected ? "Connected" : undefined,
