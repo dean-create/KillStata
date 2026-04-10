@@ -4,12 +4,23 @@ import fs from "fs"
 import pkg from "../package.json"
 import { Script } from "@killstata/script"
 import { fileURLToPath } from "url"
+import { execSync } from "child_process"
 
 const dir = fileURLToPath(new URL("..", import.meta.url))
 process.chdir(dir)
 const cliBinaryName = "killstata"
 const packOnly = process.argv.includes("--pack-only")
 const windowsPriorityFlag = process.argv.includes("--windows-priority")
+
+function commandExists(cmd: string) {
+  try {
+    const check = process.platform === "win32" ? "where" : "which"
+    execSync(`${check} ${cmd}`, { stdio: "ignore" })
+    return true
+  } catch {
+    return false
+  }
+}
 
 function currentBinaryPackageName() {
   const platform = process.platform === "win32" ? "windows" : process.platform
@@ -50,6 +61,10 @@ await Bun.file(`./dist/${pkg.name}/package.json`).write(
       name: pkg.name,
       description: pkg.description,
       license: pkg.license,
+      author: pkg.author,
+      homepage: pkg.homepage,
+      repository: pkg.repository,
+      keywords: pkg.keywords,
       bin: {
         [pkg.name]: `./bin/${pkg.name}`,
       },
@@ -94,8 +109,10 @@ if (!Script.preview && !packOnly) {
   for (const key of Object.keys(binaries)) {
     if (key.includes("linux")) {
       await $`tar -czf ../../${key}.tar.gz *`.cwd(`dist/${key}/bin`)
-    } else {
+    } else if (commandExists("zip")) {
       await $`zip -r ../../${key}.zip *`.cwd(`dist/${key}/bin`)
+    } else {
+      console.warn(`zip command not found; skipping GitHub release archive for ${key}`)
     }
   }
 
