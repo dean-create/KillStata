@@ -1,59 +1,170 @@
-# killstata
-## Workflow Map
+# KILLSTATA
 
-- Current implemented workflow guide: [CURRENT_IMPLEMENTED_WORKFLOW.md](./CURRENT_IMPLEMENTED_WORKFLOW.md)
-- Final output chain audit report: [FINAL_OUTPUT_CHAIN_AUDIT.md](./FINAL_OUTPUT_CHAIN_AUDIT.md)
-- Desktop GUI 已迁移到 [../other/killstata_desktop](../other/killstata_desktop)，此仓当前只维护 CLI 核心。
+KILLSTATA is an AI-native CLI for econometric research workflows.
 
-**killstata** - 基于CLI的计量经济学智能助理
+It is built for people who work with panel data, policy evaluation, causal inference, and paper-ready outputs, but do not want to manually stitch together Stata, Python, spreadsheets, and reporting scripts every time.
 
-## 简介
+This repository is the open-source CLI core. It focuses on reproducible data import, staged data processing, econometric estimation, and deliverable generation.
 
-killstata不是聊天机器人，也不是代码补全工具，而是一个能理解"论文语境"的计量经济学家，工作在当前目录，用代码帮用户完成完整的计量分析流程。
+## What KILLSTATA Does
 
-### 核心特征
+KILLSTATA is not just a chat interface and not just a regression wrapper.
 
-- 工作在 CLI + 当前工作目录
-- 面向论文/实证研究/计量用户  
-- 不要求用户会写 Stata/Python 代码
-- 所有操作可复现、可追溯、可导出
+It treats empirical analysis as a workflow:
 
-## 安装
+1. Import raw data into a tracked dataset artifact.
+2. Run QA and preprocessing as explicit stages.
+3. Execute econometric methods against the current stage.
+4. Save structured outputs that can be verified, exported, and reused.
+
+In practice, that means KILLSTATA is designed to answer questions like:
+
+- "Import this Excel file and check whether the panel keys are duplicated."
+- "Run a panel fixed-effects regression on the cleaned stage."
+- "Generate a three-line table and a short interpretation."
+- "Do not read the raw file again; continue from the current analysis artifact."
+
+## Core Features
+
+### Data Workflow
+
+- Import `CSV`, `XLSX`, and `DTA` files
+- Convert raw input into a canonical internal working layer
+- Preserve `datasetId` and `stageId` so processing steps stay traceable
+- Run QA, filtering, preprocessing, and rollback as explicit stages
+
+### Econometric Analysis
+
+- OLS regression
+- Panel fixed-effects regression
+- DID-style workflows
+- IV / 2SLS workflows
+- PSM-related workflows
+- Diagnostics, schema checks, and recommendation helpers
+
+### Deliverables
+
+- Regression outputs in structured JSON form
+- Human-readable summaries
+- Three-line tables for papers
+- Export-friendly files such as Markdown, LaTeX, CSV, XLSX, and DOCX
+- Analysis artifacts that can be reused in later steps instead of rerunning from raw files
+
+## Why The Architecture Matters
+
+KILLSTATA follows three product principles:
+
+- `Artifact-first`: continue from saved analysis artifacts, not from raw files every time
+- `Stage-based`: every important data transformation creates a new stage instead of silently overwriting the old one
+- `Grounded reporting`: narrative outputs should come from structured result files, not from model memory alone
+
+This is the reason the CLI can stay usable even when tasks become long, multi-step, and data-heavy.
+
+## Installation
+
+### For Users
+
+If you are installing the CLI from npm:
+
+```bash
+npm install -g killstata
+```
+
+Current packaging is optimized for Windows-first CLI distribution.
+
+### For Source Development
+
+If you are working on the repository itself:
 
 ```bash
 bun install
 ```
 
-## 运行
+## Quick Start
+
+Start the CLI:
 
 ```bash
 killstata
 ```
 
-## 功能特点
+Typical workflow:
 
-### 数据处理
-- Excel / Stata DTA / CSV 格式互转
-- 智能数据预处理和清洗
-- 变量类型自动识别
+1. Open a project folder with your data files.
+2. Import a dataset.
+3. Let KILLSTATA run QA and build the working dataset stage.
+4. Ask for estimation, diagnostics, tables, or report outputs.
 
-### 计量方法
-- OLS 回归(支持聚类标准误/异方差稳健标准误)
-- 倾向得分方法(PSM, IPW, 双重稳健估计)
-- 工具变量法(IV-2SLS)
-- 双重差分法(静态DID, 交错DID, 事件研究法)
+Example prompts:
 
-### 输出
-- 论文级回归表(LaTeX/CSV格式)
-- 自动生成分析报告  
-- 完整的处理日志
+- `Import this Excel file and show me the schema.`
+- `Use the current panel stage and run a fixed-effects regression with clustered SE.`
+- `Export a three-line table and a short result summary.`
 
-## 技术栈
+## Repository Structure
 
-- TypeScript + Bun 运行时
-- Python 计量经济学工具库
-- AI 驱动的自然语言理解
+This repository is a CLI-focused monorepo.
 
----
+```text
+packages/
+  killstata/   main CLI package
+  plugin/      plugin-related code
+  script/      shared build and automation scripts
+  sdk/js/      JavaScript SDK pieces
+  util/        shared utilities
+```
 
-基于 [Killstata](https://github.com/anomalyco/killstata) 构建
+The main package is here:
+
+- [packages/killstata](./packages/killstata)
+
+## Development
+
+Install dependencies:
+
+```bash
+bun install
+```
+
+Run typecheck:
+
+```bash
+bun run typecheck
+```
+
+Run CLI package tests:
+
+```bash
+bun run --cwd packages/killstata test
+```
+
+Build the CLI package:
+
+```bash
+bun run --cwd packages/killstata build
+```
+
+Windows-priority build:
+
+```bash
+bun run --cwd packages/killstata build:windows-priority
+```
+
+## Workflow Docs
+
+If you want the lower-level architecture and runtime workflow details, start here:
+
+- [CURRENT_IMPLEMENTED_WORKFLOW.md](./CURRENT_IMPLEMENTED_WORKFLOW.md)
+- [FINAL_OUTPUT_CHAIN_AUDIT.md](./FINAL_OUTPUT_CHAIN_AUDIT.md)
+
+These documents explain how `datasetId`, `stageId`, runtime workflow state, and output artifacts fit together.
+
+## Project Status
+
+- This repository currently focuses on the CLI core
+- Desktop / GUI code is not the main target of this repository anymore
+- The codebase is actively being shaped around reproducible econometric workflows rather than generic chat UX
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

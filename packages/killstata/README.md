@@ -1,54 +1,49 @@
 # killstata
 
-killstata 是一个基于 killstata 的 CLI 计量经济学智能助理。
+killstata is an AI-powered CLI for econometric analysis workflows.
 
-## 简介
+It is designed for users who need reproducible data import, staged preprocessing, econometric estimation, and paper-ready outputs from the command line.
 
-killstata 不是聊天机器人，也不是代码补全工具，而是一个能理解"论文语境"的计量经济学家，工作在当前目录，用代码帮用户完成完整的计量分析流程。
+## Install
 
-### 核心特征
+```bash
+npm install -g killstata
+```
 
-- 工作在 CLI + 当前工作目录
-- 面向论文 / 实证研究 / 计量用户
-- 不要求用户会写 Stata / Python 代码
-- 所有操作可复现、可追溯、可导出
-
-## 安装
+For source development:
 
 ```bash
 bun install
 ```
 
-## 运行
+## Run
 
 ```bash
 killstata
 ```
 
-## 功能特点
+## What It Supports
 
-### 数据处理
-- Excel / Stata DTA / CSV 格式互转
-- 智能数据预处理和清洗
-- 变量类型自动识别
+- Data import from `CSV`, `XLSX`, and `DTA`
+- Structured working datasets with tracked stages
+- QA, filtering, preprocessing, and rollback workflows
+- Econometric methods such as OLS, panel fixed effects, DID-style flows, IV, and PSM-related flows
+- Output generation for summaries, regression tables, and deliverables
 
-### 计量方法
-- OLS 回归(支持聚类标准误/异方差稳健标准误)
-- 倾向得分方法(PSM, IPW, 双重稳健估计)
-- 工具变量法(IV-2SLS)
-- 双重差分法(静态DID, 交错DID, 事件研究法)
+## Key Design
 
-### 输出
-- 论文级回归表(LaTeX/CSV格式)
-- 自动生成分析报告
-- 完整的处理日志
+- Continue from saved artifacts instead of rereading raw files
+- Treat preprocessing as tracked stages, not silent overwrites
+- Generate outputs from structured result files for better traceability
 
-## 技术栈
+## Main Package Path
 
-- TypeScript + Bun 运行时
-- Python 计量经济学工具库
-- AI 驱动的自然语言理解
+- [packages/killstata](.)
 
----
+## Repository
 
-基于 [Killstata](https://github.com/anomalyco/killstata) 构建
+- GitHub: `https://github.com/dean-create/KILLSTATA`
+
+## License
+
+MIT
