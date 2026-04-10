@@ -1,13 +1,6 @@
 import type { LanguageModelUsage, ProviderMetadata } from "ai"
 
-export type QueuedSessionActionType =
-  | "prompt"
-  | "command"
-  | "shell"
-  | "continue"
-  | "retry"
-  | "repair"
-  | "compaction"
+export type QueuedSessionActionType = "prompt" | "command" | "shell" | "continue" | "retry" | "repair" | "compaction"
 
 export interface QueuedSessionAction {
   id: string
@@ -129,6 +122,14 @@ export interface StageEdge {
   to: WorkflowStageKind
 }
 
+export interface AnalysisChecklistItem {
+  id: "data_readiness" | "identification" | "baseline_model" | "diagnostics" | "reporting"
+  label: string
+  status: "pending" | "in_progress" | "completed" | "blocked"
+  linkedStageId?: string
+  summary?: string
+}
+
 export interface StageNode {
   nodeId: string
   stageId: string
@@ -147,6 +148,7 @@ export interface StageNode {
   toolName?: string
   replayInput?: Record<string, unknown>
   artifactRefs: string[]
+  readableArtifactRefs?: string[]
   trustedArtifacts?: string[]
   reusedArtifacts?: string[]
   reuseSourceStageId?: string
@@ -170,6 +172,9 @@ export interface WorkflowRun {
   edges: StageEdge[]
   stages: StageNode[]
   trustedArtifacts: string[]
+  analysisChecklist: AnalysisChecklistItem[]
+  approvalStatus?: "required" | "approved" | "declined"
+  planGeneratedAt?: string
   repairOnly?: boolean
   blockedStageId?: string
   activeCoordinatorAgent?: "explore" | "general" | "verifier"
@@ -189,6 +194,7 @@ export interface ToolAvailabilityPolicy {
   currentStage?: WorkflowStageKind
   currentStageStatus?: StageStatus
   workflowMode?: "econometrics"
+  approvalStatus?: "required" | "approved" | "declined"
   platformCapabilities?: {
     mcp: boolean
     images: boolean

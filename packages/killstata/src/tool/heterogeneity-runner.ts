@@ -19,6 +19,8 @@ import {
 } from "./analysis-state"
 import { relativeWithinProject, resolveToolPath } from "./analysis-path"
 import { generateRegressionTable } from "./regression-table"
+import { createToolDisplay } from "./analysis-display"
+import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./analysis-user-view"
 
 const log = Log.create({ service: "heterogeneity-runner-tool" })
 const PYTHON_RESULT_PREFIX = "__KILLSTATA_JSON__"
@@ -723,6 +725,7 @@ export const HeterogeneityRunnerTool = Tool.define("heterogeneity_runner", {
           sessionID: ctx.sessionID,
           messageID: ctx.messageID,
           callID: ctx.callID,
+          ask: ctx.ask,
         })
       : generatedArtifactRoot({
           module: "heterogeneity_runner",
@@ -988,6 +991,57 @@ export const HeterogeneityRunnerTool = Tool.define("heterogeneity_runner", {
         },
         visibleOutputs,
         finalOutputsPath: manifestPath ? relativeWithinProject(manifestPath) : undefined,
+        analysisView: createToolAnalysisView({
+          kind: "heterogeneity_runner",
+          step: "heterogeneity_runner",
+          datasetId: manifest?.datasetId ?? baselineBundle.datasetId ?? params.datasetId,
+          stageId: params.stageId ?? baselineBundle.stageId,
+          results: [
+            analysisMetric("successful specs", finalizedSpecs.filter((item) => item.status === "success").length),
+            analysisMetric("failed or skipped specs", finalizedSpecs.filter((item) => item.status !== "success").length),
+            analysisMetric("heterogeneity specs", heterogeneitySpecs.length),
+            analysisMetric("mechanism specs", mechanismSpecs.length),
+          ],
+          artifacts: [
+            analysisArtifact(relativeWithinProject(combinedBundlePath), {
+              label: "combined_publication_bundle.json",
+              visibility: "user_default",
+            }),
+            analysisArtifact(relativeWithinProject(heterogeneityNarrativePath), {
+              label: "heterogeneity_narrative.md",
+              visibility: "user_collapsed",
+            }),
+            analysisArtifact(
+              heterogeneityTablePaths.markdown ? relativeWithinProject(heterogeneityTablePaths.markdown) : undefined,
+              {
+                label: "heterogeneity_table.md",
+                visibility: "user_collapsed",
+              },
+            ),
+            ...visibleOutputs.map((item) =>
+              analysisArtifact(item.relativePath, {
+                label: item.label,
+                visibility: "user_collapsed",
+              }),
+            ),
+          ],
+          warnings: result.warnings ?? [],
+          conclusion: "异质性、机制和稳健性扩展结果已生成，建议先查看 combined_publication_bundle.json 和叙述性摘要。",
+        }),
+        display: createToolDisplay({
+          summary: `heterogeneity_runner completed with ${finalizedSpecs.filter((item) => item.status === "success").length} successful specs`,
+          details: [
+            `Method family: ${params.methodFamily}`,
+            `Baseline result: ${relativeWithinProject(baselineBundle.resultPath)}`,
+            `Successful specs: ${finalizedSpecs.filter((item) => item.status === "success").length}`,
+            `Failed or skipped specs: ${finalizedSpecs.filter((item) => item.status !== "success").length}`,
+          ],
+          artifacts: visibleOutputs.map((item) => ({
+            label: item.label,
+            path: item.relativePath,
+            visibility: "user_collapsed" as const,
+          })),
+        }),
       },
     }
   },

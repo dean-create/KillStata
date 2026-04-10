@@ -13,6 +13,8 @@ import { Env } from "../env"
 import { Instance } from "../project/instance"
 import { Flag } from "../flag/flag"
 import { iife } from "@/util/iife"
+import { Global } from "../global"
+import path from "path"
 
 // Direct imports for bundled providers
 import { createAmazonBedrock, type AmazonBedrockProviderSettings } from "@ai-sdk/amazon-bedrock"
@@ -843,6 +845,38 @@ export namespace Provider {
     return model
   }
 
+  async function persistedLocalModels() {
+    const file = Bun.file(path.join(Global.Path.state, "model.json"))
+    const data = (await file.json().catch(() => undefined)) as
+      | {
+          model?: Record<string, { providerID?: string; modelID?: string }>
+          recent?: { providerID?: string; modelID?: string }[]
+          favorite?: { providerID?: string; modelID?: string }[]
+        }
+      | undefined
+    if (!data) return []
+
+    const result: { providerID: string; modelID: string }[] = []
+    const seen = new Set<string>()
+
+    const push = (item: { providerID?: string; modelID?: string } | undefined) => {
+      if (!item?.providerID || !item?.modelID) return
+      const key = `${item.providerID}/${item.modelID}`
+      if (seen.has(key)) return
+      seen.add(key)
+      result.push({
+        providerID: item.providerID,
+        modelID: item.modelID,
+      })
+    }
+
+    for (const item of Object.values(data.model ?? {})) push(item)
+    for (const item of data.recent ?? []) push(item)
+    for (const item of data.favorite ?? []) push(item)
+
+    return result
+  }
+
   async function discoverProviderModels(provider: Info) {
     if (!isDiscoverableOpenAICompatibleProvider(provider)) return []
 
@@ -1116,6 +1150,14 @@ export namespace Provider {
       if (provider.name) partial.name = provider.name
       if (provider.options) partial.options = provider.options
       mergeProvider(providerID, partial)
+    }
+
+    for (const item of await persistedLocalModels()) {
+      const provider = providers[item.providerID]
+      if (!provider || provider.models[item.modelID]) continue
+      const baseURL = providerBaseURL(provider)
+      if (!baseURL) continue
+      provider.models[item.modelID] = discoveredModel(provider, item.modelID, baseURL)
     }
 
     for (const [providerID, provider] of Object.entries(providers)) {

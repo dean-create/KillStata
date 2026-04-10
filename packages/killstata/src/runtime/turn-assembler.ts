@@ -7,6 +7,7 @@ import { SessionSummary } from "@/session/summary"
 import { Plugin } from "@/plugin"
 import type { Provider } from "@/provider/provider"
 import type { QueryEvent, QueryRuntimeResult } from "./types"
+import { maybeBuildAnalysisUserViewText } from "./analysis-user-view"
 import {
   collectTrustedArtifactPathsFromToolMetadata,
   collectNumericSnapshotsFromToolMetadata,
@@ -14,6 +15,16 @@ import {
   rewriteGroundedText,
   validateNumericGrounding,
 } from "@/tool/analysis-grounding"
+import { sanitizeAnalysisAssistantText, type AnalysisToolPartLike } from "./analysis-text-sanitizer"
+
+const FINAL_ANALYSIS_RESULT_TOOLS = new Set([
+  "econometrics",
+  "regression_table",
+  "heterogeneity_runner",
+  "research_brief",
+  "paper_draft",
+  "slide_generator",
+])
 
 export class TurnAssembler {
   private toolcalls: Record<string, MessageV2.ToolPart> = {}
@@ -289,6 +300,7 @@ export class TurnAssembler {
 
     this.input.assistantMessage.time.completed = Date.now()
     await Session.updateMessage(this.input.assistantMessage)
+    await this.ensureAnalysisFallbackText()
     if (result === "stop" || (typeof result === "object" && result.type === "repair")) {
       return
     }
@@ -322,7 +334,17 @@ export class TurnAssembler {
     )
     this.currentText.text = textOutput.text
 
-    const evidence = await this.collectTurnNumericEvidence()
+    const analysisWindow = await this.collectAnalysisWindow()
+    const currentTurnTools = analysisWindow.tools
+    const latestUserText = analysisWindow.latestUserText
+    const sanitized = sanitizeAnalysisAssistantText({
+      text: this.currentText.text,
+      tools: currentTurnTools,
+      latestUserText,
+    })
+    this.currentText.text = sanitized.text
+
+    const evidence = await this.collectTurnNumericEvidence(analysisWindow.tools)
     const recovery = await recoverNumericSnapshots({
       snapshots: evidence.snapshots,
       trustedArtifactPaths: evidence.trustedArtifactPaths,
@@ -342,6 +364,12 @@ export class TurnAssembler {
         text: this.currentText.text,
         grounding,
       })
+      const postGroundingSanitized = sanitizeAnalysisAssistantText({
+        text: this.currentText.text,
+        tools: currentTurnTools,
+        latestUserText,
+      })
+      this.currentText.text = postGroundingSanitized.text
     }
     this.currentText.time = {
       start: this.currentText.time?.start ?? Date.now(),
@@ -366,36 +394,145 @@ export class TurnAssembler {
     this.currentText = undefined
   }
 
-  private async collectTurnNumericEvidence() {
+  private async ensureAnalysisFallbackText() {
+    const parts = await MessageV2.parts(this.input.assistantMessage.id)
+    const finalToolIndex = this.latestFinalAnalysisToolIndex(parts)
+    if (finalToolIndex < 0) return
+
+    const analysisWindow = await this.collectAnalysisWindow()
+    const fallback = maybeBuildAnalysisUserViewText({
+      tools: analysisWindow.tools,
+      latestUserText: analysisWindow.latestUserText,
+    })
+    if (!fallback) return
+    const fallbackText = fallback.text.trim()
+    if (!fallbackText) return
+
+    const visibleAfterFinalTool = this.visibleAnalysisTextAfterIndex({
+      parts,
+      afterIndex: finalToolIndex,
+      tools: analysisWindow.tools,
+      latestUserText: analysisWindow.latestUserText,
+    })
+    if (visibleAfterFinalTool.length > 0) return
+
+    const now = Date.now()
+    await Session.updatePart({
+      id: Identifier.ascending("part"),
+      messageID: this.input.assistantMessage.id,
+      sessionID: this.input.assistantMessage.sessionID,
+      type: "text",
+      text: fallbackText,
+      time: {
+        start: now,
+        end: now,
+      },
+      metadata: {
+        analysisUserView: fallback.view,
+        fallbackReason: "missing_visible_analysis_result_text",
+      },
+    })
+  }
+
+  private latestFinalAnalysisToolIndex(parts: MessageV2.Part[]) {
+    for (let index = parts.length - 1; index >= 0; index -= 1) {
+      const part = parts[index]
+      if (part.type !== "tool") continue
+      if (part.state.status !== "completed") continue
+      if (FINAL_ANALYSIS_RESULT_TOOLS.has(part.tool)) return index
+    }
+    return -1
+  }
+
+  private visibleAnalysisTextAfterIndex(input: {
+    parts: MessageV2.Part[]
+    afterIndex: number
+    tools: AnalysisToolPartLike[]
+    latestUserText?: string
+  }) {
+    return input.parts.slice(input.afterIndex + 1).flatMap((part) => {
+      if (part.type !== "text" || part.synthetic) return []
+      const text = sanitizeAnalysisAssistantText({
+        text: part.text,
+        tools: input.tools,
+        latestUserText: input.latestUserText,
+      }).text.trim()
+      return text ? [text] : []
+    })
+  }
+
+  private async collectAnalysisWindow() {
+    const tools: AnalysisToolPartLike[] = []
+    const visited = new Set<string>()
+    let latestUserText: string | undefined
+    let cursorID: string | undefined = this.input.assistantMessage.id
+
+    while (cursorID && !visited.has(cursorID)) {
+      visited.add(cursorID)
+      const loadedMessage = await MessageV2.get({
+        sessionID: this.input.sessionID,
+        messageID: cursorID,
+      }).catch((): unknown => undefined)
+      const message = loadedMessage as MessageV2.WithParts | undefined
+      if (!message) break
+
+      if (message.info.role === "assistant") {
+        for (const part of message.parts) {
+          if (part.type !== "tool" || part.state.status !== "completed") continue
+          tools.unshift({
+            tool: part.tool,
+            state: part.state,
+          })
+        }
+      }
+
+      const parentID: string | undefined = message.info.role === "assistant" ? message.info.parentID : undefined
+      if (!parentID) break
+      const loadedParent = await MessageV2.get({
+        sessionID: this.input.sessionID,
+        messageID: parentID,
+      }).catch((): unknown => undefined)
+      const parent = loadedParent as MessageV2.WithParts | undefined
+      if (!parent) break
+      if (parent.info.role === "user") {
+        latestUserText =
+          parent.parts
+            .filter(
+              (part: MessageV2.Part): part is MessageV2.TextPart =>
+                part.type === "text" && !part.synthetic && !part.ignored,
+            )
+            .map((part: MessageV2.TextPart) => part.text.trim())
+            .filter(Boolean)
+            .join("\n") || undefined
+        break
+      }
+      cursorID = parent.info.id
+    }
+
+    return {
+      tools,
+      latestUserText,
+    }
+  }
+
+  private async collectTurnNumericEvidence(tools: AnalysisToolPartLike[]) {
     const snapshots = []
     const trustedArtifactPaths = new Set<string>()
     const explicitReadPaths = new Set<string>()
     const seenSnapshotPaths = new Set<string>()
-    let withinCurrentTurn = false
 
-    for await (const message of MessageV2.stream(this.input.sessionID)) {
-      if (!withinCurrentTurn) {
-        if (message.info.id !== this.input.assistantMessage.id) continue
-        withinCurrentTurn = true
+    for (const part of tools) {
+      for (const snapshot of await collectNumericSnapshotsFromToolMetadata(part.state.metadata)) {
+        const snapshotPath = snapshot.snapshotPath ?? JSON.stringify(snapshot)
+        if (seenSnapshotPaths.has(snapshotPath)) continue
+        seenSnapshotPaths.add(snapshotPath)
+        snapshots.push(snapshot)
       }
-
-      if (message.info.role === "user") break
-      if (message.info.role !== "assistant") continue
-
-      for (const part of message.parts) {
-        if (part.type !== "tool" || part.state.status !== "completed") continue
-        for (const snapshot of await collectNumericSnapshotsFromToolMetadata(part.state.metadata)) {
-          const snapshotPath = snapshot.snapshotPath ?? JSON.stringify(snapshot)
-          if (seenSnapshotPaths.has(snapshotPath)) continue
-          seenSnapshotPaths.add(snapshotPath)
-          snapshots.push(snapshot)
-        }
-        for (const artifactPath of await collectTrustedArtifactPathsFromToolMetadata(part.state.metadata)) {
-          trustedArtifactPaths.add(artifactPath)
-        }
-        if (part.tool === "read" && typeof part.state.input["filePath"] === "string") {
-          explicitReadPaths.add(part.state.input["filePath"])
-        }
+      for (const artifactPath of await collectTrustedArtifactPathsFromToolMetadata(part.state.metadata)) {
+        trustedArtifactPaths.add(artifactPath)
+      }
+      if (part.tool === "read" && typeof part.state.input?.filePath === "string") {
+        explicitReadPaths.add(part.state.input.filePath)
       }
     }
 

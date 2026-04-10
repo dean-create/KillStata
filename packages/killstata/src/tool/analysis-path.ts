@@ -1,6 +1,7 @@
 import path from "path"
+import fs from "fs"
 import { Instance } from "../project/instance"
-import { Question } from "../question"
+import type { Tool } from "./tool"
 
 type AccessMode = "read" | "write"
 
@@ -18,6 +19,13 @@ function workspaceRoot() {
 
 export function resolveWorkspacePath(filePath: string, root = workspaceRoot()) {
   return normalizeAbsolute(path.isAbsolute(filePath) ? filePath : path.join(root, filePath))
+}
+
+function projectRoot() {
+  if (Instance.worktree && Instance.worktree !== "/") {
+    return normalizeAbsolute(Instance.worktree)
+  }
+  return workspaceRoot()
 }
 
 function isWithinRoot(targetPath: string, rootPath: string) {
@@ -44,6 +52,29 @@ export function analysisWorkspaceRoot() {
   return workspaceRoot()
 }
 
+export function isAnalysisPathAutoAllowed(input: {
+  absolutePath: string
+  workspaceRoot: string
+  projectRoot: string
+}) {
+  const target = normalizeAbsolute(input.absolutePath)
+  const workspace = normalizeAbsolute(input.workspaceRoot)
+  const project = normalizeAbsolute(input.projectRoot)
+
+  if (isWithinRoot(target, workspace)) {
+    return true
+  }
+
+  const whitelistRoots = [
+    path.join(project, "test"),
+    path.join(project, "modelpctest"),
+    path.join(project, "killstata_outputs"),
+    path.join(workspace, ".killstata"),
+  ].map(normalizeAbsolute)
+
+  return whitelistRoots.some((root) => isWithinRoot(target, root))
+}
+
 export function relativeWithinProject(filePath: string) {
   const relative = path.relative(Instance.directory, filePath)
   if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
@@ -59,11 +90,21 @@ export async function resolveToolPath(input: {
   sessionID: string
   callID?: string
   messageID: string
+  ask: Tool.Context["ask"]
 }) {
   const root = workspaceRoot()
+  const project = projectRoot()
   const absolutePath = resolveWorkspacePath(input.filePath, root)
 
-  if (Instance.containsPath(absolutePath) || isWithinRoot(absolutePath, root)) {
+  if (
+    Instance.containsPath(absolutePath) ||
+    isWithinRoot(absolutePath, root) ||
+    isAnalysisPathAutoAllowed({
+      absolutePath,
+      workspaceRoot: root,
+      projectRoot: project,
+    })
+  ) {
     return absolutePath
   }
 
@@ -73,31 +114,23 @@ export async function resolveToolPath(input: {
     return absolutePath
   }
 
-  const answers = await Question.ask({
-    sessionID: input.sessionID,
-    questions: [
-      {
-        header: "Path Access",
-        question: `${input.toolName} wants ${input.mode} access to project-external path:\n${absolutePath}\nAllow this access for the current session?`,
-        custom: false,
-        options: [
-          {
-            label: "Yes",
-            description: "Allow this external path access for the current session",
-          },
-          {
-            label: "No",
-            description: "Reject this external path access",
-          },
-        ],
-      },
-    ],
-    tool: input.callID ? { messageID: input.messageID, callID: input.callID } : undefined,
-  })
+  const parentDir =
+    input.mode === "write"
+      ? absolutePath
+      : fs.existsSync(absolutePath) && fs.statSync(absolutePath).isDirectory()
+        ? absolutePath
+        : path.dirname(absolutePath)
+  const glob = path.join(parentDir, "*")
 
-  if (answers[0]?.[0] !== "Yes") {
-    throw new Question.RejectedError()
-  }
+  await input.ask({
+    permission: "external_directory",
+    patterns: [glob],
+    always: [glob],
+    metadata: {
+      filepath: absolutePath,
+      parentDir,
+    },
+  })
 
   current.confirmed[key] = true
   return absolutePath

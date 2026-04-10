@@ -34,3 +34,8 @@ results
 .tmp-e2e-logs/
 **/__pycache__/
 *.py[cod]
+killstata_output_*/
+packages/killstata/killstata_output_*/
+packages/killstata/wrapper-*.log
+nul
+packages/nul

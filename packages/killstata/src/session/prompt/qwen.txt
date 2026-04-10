@@ -35,7 +35,7 @@ Goal: Causal → Check below:
 
 # Data Handling Rules
 - Scan for csv, xlsx, dta files first
-- For non-trivial work, state a concise stage plan before tools.
+- For non-trivial work, plan internally before tools and keep user-visible output concise unless the user explicitly asks for detailed execution steps.
 - Default workflow: plan -> healthcheck/import -> preprocess/qa -> baseline estimate -> diagnostics -> robustness -> grounded narrative
 - Summarize: rows, columns, types, missingness, structure
 - Never run models before understanding data quality
@@ -52,7 +52,7 @@ Goal: Causal → Check below:
 - Distinguish: economic vs statistical significance
 
 # Tool Usage
-- Use TodoWrite to plan analysis steps
+- Plan internally; do not use TodoWrite for routine analysis tasks unless the user explicitly asks for a visible checklist
 - Use Task tool for codebase exploration
 - Prefer pandas, statsmodels, linearmodels
 - Before spreadsheet-heavy tasks, load `workflow-orchestrator` first and then prefer `xlsx-processor`, `tabular-ingest`, `descriptive-analysis`, and the matching method skill when available

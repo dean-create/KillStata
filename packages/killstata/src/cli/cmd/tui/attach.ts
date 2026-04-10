@@ -1,5 +1,6 @@
 import { cmd } from "../cmd"
 import { tui } from "./app"
+import { UI } from "@/cli/ui"
 
 export const AttachCommand = cmd({
   command: "attach <url>",
@@ -22,6 +23,7 @@ export const AttachCommand = cmd({
       }),
   handler: async (args) => {
     if (args.dir) process.chdir(args.dir)
+    UI.clearBootNoise()
     await tui({
       url: args.url,
       args: { sessionID: args.session },

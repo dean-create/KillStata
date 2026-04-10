@@ -10,10 +10,12 @@ import { Question } from "../question"
 import {
   buildFileStamp,
   appendArtifact,
+  deliveryBundleDir,
   finalOutputsPath,
   inferRunId,
   projectErrorsRoot,
   projectTempRoot,
+  publishDeliveryOutput,
   publishVisibleOutput,
   reportOutputPath,
   resolveArtifactInput,
@@ -32,8 +34,19 @@ import {
 } from "./analysis-grounding"
 import { generateRegressionTable } from "./regression-table"
 import { relativeWithinProject, resolveToolPath } from "./analysis-path"
+import {
+  artifactGroup,
+  createPresentation,
+  derivePresentationStatus,
+  presentationArtifact,
+  presentationMetric,
+  type ToolPresentation,
+} from "./analysis-presentation"
 import { numericSnapshotPreview } from "./analysis-tool-metadata"
+import { createToolDisplay } from "./analysis-display"
+import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./analysis-user-view"
 import { formatRuntimePythonSetupError, getRuntimePythonStatus } from "@/killstata/runtime-config"
+import { ensureAnalysisPlan, formatAnalysisChecklist, setAnalysisPlanApproval } from "@/runtime/workflow"
 import {
   buildSmartDatasetProfile,
   recommendEconometricsPlan,
@@ -276,6 +289,8 @@ type PythonResult = {
   academic_table_markdown_path?: string
   academic_table_latex_path?: string
   academic_table_workbook_path?: string
+  academic_table_docx_path?: string
+  delivery_report_docx_path?: string
   profile_path?: string
   recommendation_path?: string
   effective_method?: string
@@ -291,9 +306,10 @@ type PythonResult = {
     diagnosticValue?: number
     threshold?: number
   }>
+  principle_checks?: PrincipleChecks
 }
 
-type EconometricsVisibleOutput = {
+type EconometricsPublishedFile = {
   label: string
   relativePath: string
 }
@@ -301,6 +317,7 @@ type EconometricsVisibleOutput = {
 type EconometricsToolMetadata = {
   method: MethodName
   result?: PythonResult
+  principleChecks?: PrincipleChecks
   profile?: SmartDatasetProfile
   recommendation?: SmartRecommendation
   datasetId?: string
@@ -313,8 +330,24 @@ type EconometricsToolMetadata = {
   qaGateReason?: string
   qaSource?: string
   outputDir?: string
-  visibleOutputs?: EconometricsVisibleOutput[]
+  deliveryBundleDir?: string
+  publishedFiles?: EconometricsPublishedFile[]
   finalOutputsPath?: string
+  internalFinalOutputsPath?: string
+  presentation?: ToolPresentation
+  display?: ReturnType<typeof createToolDisplay>
+  analysisView?: ReturnType<typeof createToolAnalysisView>
+}
+
+export type PrincipleCheckStatus = "pass" | "warn" | "block"
+export type ClaimCeiling = "full" | "restricted" | "blocked"
+
+export type PrincipleChecks = {
+  method: MethodName
+  prereq_status: PrincipleCheckStatus
+  diagnostics_status: PrincipleCheckStatus
+  claim_ceiling: ClaimCeiling
+  findings: string[]
 }
 
 function validateMethodOptions(params: {
@@ -350,6 +383,839 @@ function significanceStars(pValue: number | undefined) {
   if (pValue < 0.05) return "**"
   if (pValue < 0.1) return "*"
   return ""
+}
+
+function groupCount(result: PythonResult) {
+  return result.post_estimation_gates?.find((gate) => gate.gate === "cluster_count" && gate.diagnosticValue !== undefined)
+    ?.diagnosticValue
+}
+
+function safeNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function normalizeRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  return value as Record<string, unknown>
+}
+
+function walkRecord(value: unknown, visitor: (node: Record<string, unknown>) => void) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => walkRecord(item, visitor))
+    return
+  }
+  if (!value || typeof value !== "object") return
+  const record = value as Record<string, unknown>
+  visitor(record)
+  Object.values(record).forEach((item) => walkRecord(item, visitor))
+}
+
+function findNestedBlock(value: unknown, keys: string[]) {
+  const candidates = new Set(keys)
+  let found: Record<string, unknown> | undefined
+  walkRecord(value, (node) => {
+    if (found) return
+    for (const [key, raw] of Object.entries(node)) {
+      if (!candidates.has(key)) continue
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        found = raw as Record<string, unknown>
+        return
+      }
+    }
+  })
+  return found
+}
+
+function findNestedNumber(value: unknown, keys: string[]) {
+  const candidates = new Set(keys)
+  let found: number | undefined
+  walkRecord(value, (node) => {
+    if (found !== undefined) return
+    for (const [key, raw] of Object.entries(node)) {
+      if (!candidates.has(key)) continue
+      const numeric = safeNumber(raw)
+      if (numeric !== undefined) {
+        found = numeric
+        return
+      }
+    }
+  })
+  return found
+}
+
+function extractParallelTrendsStatus(diagnostics: Record<string, unknown>) {
+  const block = findNestedBlock(diagnostics, ["parallel_trends", "parallel_trend", "pretrend_test", "pre_trends"])
+  if (!block) return undefined
+  if (typeof block.passed === "boolean") return block.passed
+  if (typeof block.parallel_trends_passed === "boolean") return block.parallel_trends_passed
+  const significantLeadCount = findNestedNumber(block, ["significant_lead_count"])
+  if (significantLeadCount !== undefined) return significantLeadCount <= 0
+  const minLeadPValue = findNestedNumber(block, ["min_lead_p_value", "p_value", "pvalue"])
+  if (minLeadPValue !== undefined) return minLeadPValue >= 0.05
+  return undefined
+}
+
+function extractWeakIvFStat(diagnostics: Record<string, unknown>) {
+  const identification = findNestedBlock(diagnostics, ["identification"])
+  const weakIv = identification
+    ? findNestedBlock(identification, ["weak_iv", "weak_instrument"])
+    : findNestedBlock(diagnostics, ["weak_iv", "weak_instrument"])
+  if (!weakIv) return undefined
+  return findNestedNumber(weakIv, ["f_stat", "first_stage_f_stat", "first_stage_f", "kp_f_stat"])
+}
+
+function extractCommonSupportStatus(diagnostics: Record<string, unknown>) {
+  const scope = findNestedBlock(diagnostics, ["matching", "psm"]) ?? diagnostics
+  const commonSupport = findNestedBlock(scope, ["common_support"])
+  if (!commonSupport) return undefined
+  if (typeof commonSupport.passed === "boolean") return commonSupport.passed
+  if (typeof commonSupport.support_ok === "boolean") return commonSupport.support_ok
+  const overlapShare = findNestedNumber(commonSupport, ["overlap_share", "matched_share", "support_share"])
+  if (overlapShare !== undefined) return overlapShare > 0
+  return undefined
+}
+
+function extractPanelDuplicateStatus(diagnostics: Record<string, unknown>) {
+  const panel = findNestedBlock(diagnostics, ["panel"])
+  if (!panel) return undefined
+  const duplicateCount = findNestedNumber(panel, ["duplicate_entity_time", "duplicate_panel_keys", "duplicate_count"])
+  if (duplicateCount !== undefined) return duplicateCount === 0
+  return undefined
+}
+
+function mergePrincipleStatus(current: PrincipleCheckStatus, next: PrincipleCheckStatus): PrincipleCheckStatus {
+  if (current === "block" || next === "block") return "block"
+  if (current === "warn" || next === "warn") return "warn"
+  return "pass"
+}
+
+function principleClaimCeiling(prereqStatus: PrincipleCheckStatus, diagnosticsStatus: PrincipleCheckStatus): ClaimCeiling {
+  if (prereqStatus === "block" || diagnosticsStatus === "block") return "blocked"
+  if (prereqStatus === "warn" || diagnosticsStatus === "warn") return "restricted"
+  return "full"
+}
+
+export function evaluatePrincipleChecks(input: {
+  methodName: MethodName
+  entityVar?: string
+  timeVar?: string
+  options?: Record<string, unknown>
+  result: PythonResult
+  diagnosticsPayload?: Record<string, unknown>
+  hasNumericSnapshot: boolean
+}): PrincipleChecks {
+  let prereqStatus: PrincipleCheckStatus = "pass"
+  let diagnosticsStatus: PrincipleCheckStatus = "pass"
+  const findings: string[] = []
+  const diagnostics = input.diagnosticsPayload ?? {}
+  const addFinding = (status: PrincipleCheckStatus, message: string, scope: "prereq" | "diagnostics") => {
+    if (!findings.includes(message)) findings.push(message)
+    if (scope === "prereq") prereqStatus = mergePrincipleStatus(prereqStatus, status)
+    else diagnosticsStatus = mergePrincipleStatus(diagnosticsStatus, status)
+  }
+
+  if (!input.hasNumericSnapshot) {
+    addFinding("block", "缺少 numeric_snapshot，当前结果不能输出系数、p 值或显著性结论。", "prereq")
+  }
+
+  if ((input.result.blocking_errors?.length ?? 0) > 0 || input.result.qa_status === "fail") {
+    addFinding("block", "当前估计存在 blocking_errors，不能据此给出经验结论。", "diagnostics")
+  }
+
+  if (input.methodName === "panel_fe_regression") {
+    if (!input.entityVar || !input.timeVar) {
+      addFinding("block", "panel_fe_regression 缺少 entityVar 或 timeVar，不满足面板固定效应前提。", "prereq")
+    }
+    const panelDuplicateStatus = extractPanelDuplicateStatus(diagnostics)
+    const duplicateText = [...(input.result.blocking_errors ?? []), ...(input.result.warnings ?? [])].join(" ")
+    if (panelDuplicateStatus === false || /duplicate.*panel|duplicate.*entity|panel key/i.test(duplicateText)) {
+      addFinding("block", "面板主键存在重复或未修复痕迹，固定效应结果应阻断。", "diagnostics")
+    }
+  }
+
+  if (input.methodName.startsWith("did_")) {
+    if (!input.entityVar || !input.timeVar) {
+      addFinding("block", "DID 缺少 entityVar 或 timeVar，不满足基础识别结构。", "prereq")
+    }
+    if (!input.options?.treatment_entity_dummy || !input.options?.treatment_finished_dummy) {
+      addFinding("block", "DID 缺少处理组或处理后时点定义，不能建立 DID 识别。", "prereq")
+    }
+    const parallelTrendsStatus = extractParallelTrendsStatus(diagnostics)
+    if (parallelTrendsStatus === undefined) {
+      addFinding("warn", "DID 没有可核验的 parallel trends / lead-lag 诊断，结论只能降级为受限证据。", "diagnostics")
+    } else if (parallelTrendsStatus === false) {
+      addFinding("block", "Parallel trends 诊断未通过，DID 因果结论应阻断。", "diagnostics")
+    }
+  }
+
+  if (input.methodName === "iv_2sls") {
+    if (!input.options?.iv_variable) {
+      addFinding("block", "IV-2SLS 缺少 instrument 变量，不能输出 IV 结论。", "prereq")
+    }
+    const weakIvFStat = extractWeakIvFStat(diagnostics)
+    if (weakIvFStat === undefined) {
+      addFinding("warn", "IV 结果缺少弱工具变量诊断，结论只能降级为受限证据。", "diagnostics")
+    } else if (weakIvFStat < 10) {
+      addFinding("block", `弱工具变量诊断未通过，first-stage F=${weakIvFStat.toFixed(2)}。`, "diagnostics")
+    }
+  }
+
+  if (input.methodName.startsWith("rdd_")) {
+    if (!input.options?.running_variable) {
+      addFinding("block", "RDD 缺少 running variable，不能建立断点设计。", "prereq")
+    }
+    if (safeNumber(input.options?.cutoff) === undefined) {
+      addFinding("block", "RDD 缺少明确 cutoff，当前实现不会默认替你猜断点。", "prereq")
+    }
+    if (typeof input.result.rows_used === "number" && input.result.rows_used < 30) {
+      addFinding("block", "RDD 有效样本过少，当前结果不支持因果解释。", "diagnostics")
+    }
+  }
+
+  if (input.methodName.startsWith("psm_")) {
+    const commonSupportStatus = extractCommonSupportStatus(diagnostics)
+    if (commonSupportStatus === undefined) {
+      addFinding("warn", "PSM 缺少共同支撑/匹配质量诊断，结论只能降级为受限证据。", "diagnostics")
+    } else if (commonSupportStatus === false) {
+      addFinding("block", "PSM 共同支撑诊断未通过，当前结果不能作为可靠因果证据。", "diagnostics")
+    }
+  }
+
+  return {
+    method: input.methodName,
+    prereq_status: prereqStatus,
+    diagnostics_status: diagnosticsStatus,
+    claim_ceiling: principleClaimCeiling(prereqStatus, diagnosticsStatus),
+    findings,
+  }
+}
+
+function buildEconometricsConclusion(input: {
+  treatmentVar?: string
+  coefficient?: number
+  pValue?: number
+  principleChecks?: PrincipleChecks
+}) {
+  const treatment = input.treatmentVar ?? "核心解释变量"
+  if (input.principleChecks?.claim_ceiling === "blocked") {
+    return input.principleChecks.findings[0] ?? "当前结果不支持得出因果判断。"
+  }
+  if (input.principleChecks?.claim_ceiling === "restricted") {
+    if (input.coefficient === undefined || input.pValue === undefined) {
+      return `${treatment} 的经验结果仍需补充诊断，目前只能做受限解释。`
+    }
+    const direction = input.coefficient > 0 ? "为正" : input.coefficient < 0 ? "为负" : "接近于零"
+    return `${treatment} 系数${direction}，但识别前提或诊断不完整，只能作为受限证据。`
+  }
+  if (input.coefficient === undefined || input.pValue === undefined) {
+    return "模型已完成，但核心统计结果还不完整。"
+  }
+  const direction = input.coefficient > 0 ? "为正" : input.coefficient < 0 ? "为负" : "接近于零"
+  if (input.pValue < 0.05) return `${treatment} 系数${direction}，且统计上显著。`
+  if (input.pValue < 0.1) return `${treatment} 系数${direction}，但统计证据偏弱。`
+  return `${treatment} 系数${direction}，但统计上不显著。`
+}
+
+function buildEconometricsWarnings(input: {
+  result: PythonResult
+  qaGate: {
+    qaGateStatus?: string
+    qaGateReason?: string
+  }
+  principleChecks?: PrincipleChecks
+}) {
+  return [
+    ...(input.result.warnings ?? []),
+    ...(input.result.blocking_errors ?? []),
+    ...(input.result.post_estimation_gates ?? [])
+      .filter((gate) => !gate.passed)
+      .map((gate) => `${gate.gate}: ${gate.userMessage}`),
+    input.qaGate.qaGateStatus === "warn" || input.qaGate.qaGateStatus === "block"
+      ? input.qaGate.qaGateReason
+      : undefined,
+    input.result.degraded_from ? `模型已从 ${input.result.degraded_from} 调整为 ${input.result.effective_method ?? "当前方法"}` : undefined,
+    ...(input.principleChecks?.findings ?? []),
+  ].filter((item): item is string => Boolean(item))
+}
+
+function buildEconometricsHeadline(input: {
+  treatmentVar?: string
+  dependentVar?: string
+  coefficient?: number
+  pValue?: number
+  principleChecks?: PrincipleChecks
+}) {
+  const treatment = input.treatmentVar ?? "核心解释变量"
+  const dependent = input.dependentVar ?? "结果变量"
+  if (input.principleChecks?.claim_ceiling === "blocked") {
+    return "识别前提未通过，当前结果不支持直接报告为实证结论。"
+  }
+  if (input.principleChecks?.claim_ceiling === "restricted") {
+    return `当前模型给出了 ${treatment} 对 ${dependent} 的方向性线索，但结论只能受限表述。`
+  }
+  if (input.coefficient === undefined || input.pValue === undefined) {
+    return "模型已经完成，但还没有足够的结果可直接转述。"
+  }
+  const direction = input.coefficient > 0 ? "正向" : input.coefficient < 0 ? "负向" : "接近于零"
+  if (input.pValue < 0.05) {
+    return `在当前模型下，${treatment} 对 ${dependent} 呈${direction}影响，而且统计上较稳。`
+  }
+  if (input.pValue < 0.1) {
+    return `在当前模型下，${treatment} 对 ${dependent} 呈${direction}影响，但统计证据还不够强。`
+  }
+  return `在当前模型下，${treatment} 对 ${dependent} 的方向是${direction}，但目前统计显著性不足，不能下强结论。`
+}
+
+export function buildEconometricsConclusionLegacy(input: {
+  treatmentVar?: string
+  coefficient?: number
+  pValue?: number
+}) {
+  const treatment = input.treatmentVar ?? "核心解释变量"
+  if (input.coefficient === undefined || input.pValue === undefined) {
+    return "模型已完成，但核心统计结果还不完整。"
+  }
+  const direction = input.coefficient > 0 ? "为正" : input.coefficient < 0 ? "为负" : "接近于零"
+  if (input.pValue < 0.05) return `${treatment} 系数${direction}，且统计上显著。`
+  if (input.pValue < 0.1) return `${treatment} 系数${direction}，但统计证据较弱。`
+  return `${treatment} 系数${direction}，但统计上不显著。`
+}
+
+export function buildEconometricsWarningsLegacy(input: {
+  result: PythonResult
+  qaGate: {
+    qaGateStatus?: string
+    qaGateReason?: string
+  }
+}) {
+  return [
+    ...(input.result.warnings ?? []),
+    ...(input.result.blocking_errors ?? []),
+    ...(input.result.post_estimation_gates ?? [])
+      .filter((gate) => !gate.passed)
+      .map((gate) => `${gate.gate}: ${gate.userMessage}`),
+    input.qaGate.qaGateStatus === "warn" || input.qaGate.qaGateStatus === "block"
+      ? input.qaGate.qaGateReason
+      : undefined,
+    input.result.degraded_from
+      ? `模型已从 ${input.result.degraded_from} 调整为 ${input.result.effective_method ?? "当前方法"}`
+      : undefined,
+  ].filter((item): item is string => Boolean(item))
+}
+
+export function buildEconometricsHeadlineLegacy(input: {
+  treatmentVar?: string
+  dependentVar?: string
+  coefficient?: number
+  pValue?: number
+}) {
+  const treatment = input.treatmentVar ?? "核心解释变量"
+  const dependent = input.dependentVar ?? "结果变量"
+  if (input.coefficient === undefined || input.pValue === undefined) {
+    return "模型已经完成，但还没有足够的结果可直接转述。"
+  }
+  const direction = input.coefficient > 0 ? "正向" : input.coefficient < 0 ? "负向" : "接近于零"
+  if (input.pValue < 0.05) {
+    return `在当前模型下，${treatment}对${dependent}呈${direction}影响，而且统计上较稳。`
+  }
+  if (input.pValue < 0.1) {
+    return `在当前模型下，${treatment}对${dependent}呈${direction}影响，但统计证据还不算强。`
+  }
+  return `在当前模型下，${treatment}对${dependent}的方向是${direction}，但目前统计显著性不足，不能下强结论。`
+}
+
+function buildEconometricsPresentation(input: {
+  params: {
+    methodName: MethodName
+    dependentVar?: string
+    treatmentVar?: string
+    entityVar?: string
+    timeVar?: string
+    clusterVar?: string
+    covariates?: string[]
+  }
+  result: PythonResult
+  qaGate: {
+    qaGateStatus?: string
+    qaGateReason?: string
+  }
+  principleChecks?: PrincipleChecks
+  conciseResultPath: string
+  deliveryBundlePath?: string
+  publishedFiles: EconometricsPublishedFile[]
+}): ToolPresentation {
+  const { params, result, qaGate, principleChecks, conciseResultPath, deliveryBundlePath, publishedFiles } = input
+  const warnings = [
+    ...(result.warnings ?? []),
+    ...(result.blocking_errors ?? []),
+    ...(result.post_estimation_gates ?? [])
+      .filter((gate) => !gate.passed)
+      .map((gate) => `${gate.gate}: ${gate.userMessage}`),
+    qaGate.qaGateStatus === "warn" ? qaGate.qaGateReason : undefined,
+    qaGate.qaGateStatus === "block" ? qaGate.qaGateReason : undefined,
+    ...(principleChecks?.findings ?? []),
+    result.degraded_from ? `模型已从 ${result.degraded_from} 调整为 ${result.effective_method ?? params.methodName}` : undefined,
+  ].filter((item): item is string => Boolean(item))
+  const status = derivePresentationStatus({
+    success: result.success,
+    qaGateStatus: qaGate.qaGateStatus,
+    warnings,
+    blockingErrors: result.blocking_errors,
+  })
+
+  return createPresentation({
+    kind: "econometrics",
+    title: "实证分析结果",
+    headline: buildEconometricsHeadline({
+      treatmentVar: params.treatmentVar,
+      dependentVar: params.dependentVar,
+      coefficient: result.coefficient,
+      pValue: result.p_value,
+      principleChecks,
+    }),
+    status,
+    summary: [
+      `本次采用 ${result.effective_method ?? params.methodName} 进行估计。`,
+      params.entityVar && params.timeVar ? `模型包含 ${params.entityVar} 和 ${params.timeVar} 固定效应。` : undefined,
+      result.rows_used !== undefined ? `本次实际用于估计的样本量为 ${result.rows_used}。` : undefined,
+    ],
+    keyMetrics: [
+      presentationMetric(
+        "系数",
+        result.coefficient !== undefined ? result.coefficient.toFixed(4) : undefined,
+        result.coefficient !== undefined
+          ? { tone: result.coefficient >= 0 ? "positive" : "caution", explain: params.treatmentVar }
+          : undefined,
+      ),
+      presentationMetric("标准误", result.std_error !== undefined ? result.std_error.toFixed(4) : undefined),
+      presentationMetric(
+        "P 值",
+        result.p_value !== undefined ? result.p_value.toFixed(4) : undefined,
+        result.p_value !== undefined
+          ? { tone: result.p_value < 0.05 ? "positive" : result.p_value < 0.1 ? "caution" : "critical" }
+          : undefined,
+      ),
+      presentationMetric("调整后 R²", result.r_squared !== undefined ? result.r_squared.toFixed(4) : undefined),
+      presentationMetric("样本量", result.rows_used),
+    ],
+    highlights: [
+      params.dependentVar ? `被解释变量：${params.dependentVar}` : undefined,
+      params.treatmentVar ? `核心解释变量：${params.treatmentVar}` : undefined,
+      params.clusterVar ?? result.cluster_var ? `标准误聚类：${params.clusterVar ?? result.cluster_var}` : undefined,
+      params.covariates?.length ? `控制变量：${params.covariates.join("、")}` : "当前未加入控制变量。",
+    ],
+    risks: warnings,
+    nextActions:
+      result.p_value !== undefined && result.p_value < 0.05
+        ? ["可以继续做稳健性检验，确认这个结果是否稳定。", "如果要写报告，优先查看结果摘要和三线表。"]
+        : ["建议先查看诊断文件，确认模型设定和数据质量是否可靠。", "如果要增强说服力，可加入控制变量或继续做稳健性检验。"],
+    artifactGroups: [
+      artifactGroup("核心结论", [
+        presentationArtifact("结果摘要", conciseResultPath),
+        presentationArtifact("结果汇报 Word", result.delivery_report_docx_path),
+        presentationArtifact("结果 JSON", result.output_path),
+        presentationArtifact("叙述总结", result.narrative_path),
+      ]),
+      artifactGroup("可引用表格", [
+        presentationArtifact("系数表 CSV", result.coefficients_path),
+        presentationArtifact("系数表工作簿", result.workbook_path),
+        presentationArtifact("三线表 Markdown", result.academic_table_markdown_path),
+        presentationArtifact("三线表 LaTeX", result.academic_table_latex_path),
+        presentationArtifact("三线表 Excel", result.academic_table_workbook_path),
+        presentationArtifact("三线表 Word", result.academic_table_docx_path),
+      ]),
+      artifactGroup("诊断与风险", [
+        presentationArtifact("诊断文件", result.diagnostics_path),
+        presentationArtifact("模型元数据", result.metadata_path),
+        presentationArtifact("模型摘要", result.summary_path),
+        presentationArtifact("数值快照", result.numeric_snapshot_path),
+      ]),
+      artifactGroup("交付文件", [
+        ...publishedFiles.map((item) => presentationArtifact(item.label, item.relativePath)),
+        presentationArtifact("交付包目录", deliveryBundlePath),
+      ]),
+    ],
+  })
+}
+
+function sanitizeDeliveryFilePart(value: string) {
+  return value
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/g, "")
+}
+
+function readPanelClusterCount(diagnosticsPath?: string) {
+  if (!diagnosticsPath || !fs.existsSync(diagnosticsPath)) return undefined
+  try {
+    const parsed = JSON.parse(fs.readFileSync(diagnosticsPath, "utf-8")) as {
+      panel?: { cluster_count?: number }
+    }
+    return typeof parsed.panel?.cluster_count === "number" ? parsed.panel.cluster_count : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function buildConciseResultMarkdown(params: {
+  methodName: MethodName
+  result: PythonResult
+  treatmentLabel?: string
+  principleChecks?: PrincipleChecks
+}) {
+  const lines = ["回归结果"]
+  if (params.principleChecks?.claim_ceiling === "blocked") {
+    lines.push("- 经验结论状态：blocked")
+    lines.push(`- 原因：${params.principleChecks.findings[0] ?? "识别前提未通过"}`)
+    return lines.join("\n") + "\n"
+  }
+
+  if (!params.result.numeric_snapshot_path) {
+    lines.push("- 数值状态：missing numeric_snapshot")
+    lines.push("- 当前不展示系数、标准误、p 值或显著性判断。")
+    if (params.principleChecks?.findings.length) {
+      lines.push(`- 说明：${params.principleChecks.findings[0]}`)
+    }
+    return lines.join("\n") + "\n"
+  }
+
+  if (params.principleChecks?.claim_ceiling === "restricted") {
+    lines.push("- 经验结论状态：restricted")
+  }
+
+  const coefficientLabel = params.treatmentLabel ? `${params.treatmentLabel} 系数` : "核心系数"
+  if (params.result.coefficient !== undefined) lines.push(`- ${coefficientLabel}：${params.result.coefficient.toFixed(4)}`)
+  if (params.result.std_error !== undefined) lines.push(`- 标准误：${params.result.std_error.toFixed(4)}`)
+  if (params.result.p_value !== undefined) lines.push(`- p 值：${params.result.p_value.toFixed(4)}`)
+  if (params.result.rows_used !== undefined) lines.push(`- N：${params.result.rows_used}`)
+  const clusterCount = params.methodName === "panel_fe_regression" ? readPanelClusterCount(params.result.diagnostics_path) : undefined
+  if (clusterCount !== undefined) lines.push(`- 组数：${clusterCount}`)
+  if (params.result.r_squared !== undefined) {
+    const r2Label = params.methodName === "panel_fe_regression" ? "within R²" : "Adj. R²"
+    lines.push(`- ${r2Label}：${params.result.r_squared.toFixed(4)}`)
+  }
+  if (params.principleChecks?.findings.length) {
+    lines.push(`- 说明：${params.principleChecks.findings[0]}`)
+  }
+  return lines.join("\n") + "\n"
+}
+
+export function buildConciseResultMarkdownLegacy(params: {
+  methodName: MethodName
+  result: PythonResult
+  treatmentLabel?: string
+}) {
+  const lines = ["回归结果"]
+  const coefficientLabel = params.treatmentLabel ? `${params.treatmentLabel} 系数` : "核心系数"
+  if (params.result.coefficient !== undefined) lines.push(`- ${coefficientLabel}：${params.result.coefficient.toFixed(4)}`)
+  if (params.result.std_error !== undefined) lines.push(`- 标准误：${params.result.std_error.toFixed(4)}`)
+  if (params.result.p_value !== undefined) lines.push(`- p 值：${params.result.p_value.toFixed(4)}`)
+  if (params.result.rows_used !== undefined) lines.push(`- N：${params.result.rows_used}`)
+  const clusterCount = params.methodName === "panel_fe_regression" ? readPanelClusterCount(params.result.diagnostics_path) : undefined
+  if (clusterCount !== undefined) lines.push(`- 组数：${clusterCount}`)
+  if (params.result.r_squared !== undefined) {
+    const r2Label = params.methodName === "panel_fe_regression" ? "within R²" : "Adj. R²"
+    lines.push(`- ${r2Label}：${params.result.r_squared.toFixed(4)}`)
+  }
+  return lines.join("\n") + "\n"
+}
+
+type BaselineReportSection = {
+  heading: string
+  body: string
+}
+
+type BaselineReportDocxPayload = {
+  title: string
+  output_path: string
+  sections: BaselineReportSection[]
+  closing_note: string
+}
+
+type BaselineReportDocxResult = {
+  success: boolean
+  output_path?: string
+  error?: string
+  traceback?: string
+  error_log_path?: string
+}
+
+function readClusterCountFromResult(result: PythonResult) {
+  const gateCount = result.post_estimation_gates?.find(
+    (gate) => gate.gate === "cluster_count" && typeof gate.diagnosticValue === "number",
+  )?.diagnosticValue
+  if (typeof gateCount === "number") return gateCount
+  return readPanelClusterCount(result.diagnostics_path)
+}
+
+function significanceDescription(pValue?: number) {
+  if (pValue === undefined) return "统计显著性暂不可判定"
+  if (pValue < 0.01) return "1% 水平上显著"
+  if (pValue < 0.05) return "5% 水平上显著"
+  if (pValue < 0.1) return "10% 水平上显著"
+  return "常用统计水平上不显著"
+}
+
+function coefficientDirection(coefficient?: number) {
+  if (coefficient === undefined) return "接近于零"
+  if (coefficient > 0) return "正向"
+  if (coefficient < 0) return "负向"
+  return "接近于零"
+}
+
+function buildBaselineReportDocxPayload(input: {
+  methodName: MethodName
+  outputPath: string
+  result: PythonResult
+  dependentVar?: string
+  treatmentVar?: string
+  covariates?: string[]
+  entityVar?: string
+  timeVar?: string
+  clusterVar?: string
+  tableDocxFileName?: string
+  qaGateReason?: string
+}) {
+  if (input.methodName !== "panel_fe_regression") return undefined
+  if (
+    input.result.coefficient === undefined ||
+    input.result.std_error === undefined ||
+    input.result.p_value === undefined ||
+    input.result.r_squared === undefined ||
+    input.result.rows_used === undefined
+  ) {
+    return undefined
+  }
+
+  const dependentVar = input.dependentVar ?? "被解释变量"
+  const treatmentVar = input.treatmentVar ?? "核心解释变量"
+  const entityVar = input.entityVar ?? "个体"
+  const timeVar = input.timeVar ?? "时间"
+  const clusterVar = input.clusterVar ?? input.result.cluster_var ?? entityVar
+  const controlText =
+    input.covariates?.length && input.covariates.length > 0
+      ? `并控制${input.covariates.join("、")}等变量`
+      : "不额外加入控制变量"
+  const groupCount = readClusterCountFromResult(input.result)
+  const groupText = groupCount !== undefined ? `，覆盖 ${groupCount} 个${entityVar}组别` : ""
+  const significanceText = significanceDescription(input.result.p_value)
+  const direction = coefficientDirection(input.result.coefficient)
+  const directionMeaning =
+    direction === "正向"
+      ? `呈现正向联动`
+      : direction === "负向"
+        ? `呈现负向联动`
+        : "影响方向接近于零"
+
+  const setupSection: BaselineReportSection = {
+    heading: "模型设定",
+    body:
+      `本文采用双向固定效应模型对基准关系进行估计，以${dependentVar}为被解释变量，以${treatmentVar}为核心解释变量，` +
+      `${controlText}，同时控制${entityVar}固定效应和${timeVar}固定效应，并按${clusterVar}聚类计算稳健标准误。` +
+      `本次基准回归共使用 ${input.result.rows_used} 个观测值${groupText}。`,
+  }
+
+  const resultsSection: BaselineReportSection = {
+    heading: "结果汇报",
+    body:
+      `基准回归结果显示，${treatmentVar}的估计系数为 ${input.result.coefficient.toFixed(4)}，标准误为 ${input.result.std_error.toFixed(4)}，` +
+      `p 值为 ${input.result.p_value.toFixed(4)}，在${significanceText}。从符号和数量级看，${treatmentVar}与${dependentVar}${directionMeaning}。` +
+      `模型的 within R² 为 ${input.result.r_squared.toFixed(4)}，说明在当前设定下模型对样本内变异具有较好的解释力。`,
+  }
+
+  const implicationSection: BaselineReportSection = {
+    heading: "经济含义",
+    body:
+      `就经济含义而言，在控制地区异质性、年份共同冲击及一系列可观测特征后，核心解释变量的边际变化与${dependentVar}之间表现出${direction}关系。` +
+      (input.result.p_value < 0.1
+        ? `这一结果为研究假说提供了初步支持，但其解释仍应结合后续稳健性检验与替代设定进一步确认。`
+        : `这一结果提示基准关系的方向已经显现，但统计证据仍然偏弱，因此更适合作为论文中的基准证据而非单独支撑强因果结论。`),
+  }
+
+  const warnings = [...(input.result.warnings ?? [])]
+  if (input.qaGateReason && !warnings.includes(input.qaGateReason)) warnings.push(input.qaGateReason)
+  const sections = [setupSection, resultsSection, implicationSection]
+  if (warnings.length) {
+    sections.push({
+      heading: "稳健提示",
+      body:
+        `需要说明的是，本次估计存在以下非阻塞提示：${warnings.join("；")}。` +
+        `上述问题不改变基准回归结果的可报告性，但在正式写作中宜如实披露，并在后续稳健性检验中进一步核验。`,
+    })
+  }
+
+  return {
+    title: "基准回归结果汇报",
+    output_path: input.outputPath,
+    sections,
+    closing_note: `详见随附三线表《${input.tableDocxFileName ?? "三线表_panel_fe_regression.docx"}》。`,
+  } satisfies BaselineReportDocxPayload
+}
+
+function buildBaselineReportDocxPythonScript(payloadB64: string) {
+  return `
+import base64
+import json
+import traceback
+from pathlib import Path
+
+from docx import Document
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.oxml.ns import qn
+from docx.shared import Inches, Pt
+
+RESULT_PREFIX = "${PYTHON_RESULT_PREFIX}"
+ERRORS_DIR = r"${projectErrorsRoot().replace(/\\/g, "\\\\")}"
+
+def emit(result):
+    print(f"{RESULT_PREFIX}{json.dumps(result, ensure_ascii=False)}")
+
+def save_json(file_path, payload):
+    Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+def safe_error_path():
+    error_dir = Path(ERRORS_DIR)
+    error_dir.mkdir(parents=True, exist_ok=True)
+    from datetime import datetime
+    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    return str(error_dir / f"econometrics_report_docx_{stamp}_error.json")
+
+def apply_font(run, size=12, bold=False):
+    run.font.name = "Times New Roman"
+    run._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+    run.font.size = Pt(size)
+    run.bold = bold
+
+payload = json.loads(base64.b64decode("${payloadB64}").decode("utf-8"))
+
+try:
+    output_path = Path(payload["output_path"])
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    document = Document()
+    section = document.sections[0]
+    section.top_margin = Inches(1)
+    section.bottom_margin = Inches(1)
+    section.left_margin = Inches(1)
+    section.right_margin = Inches(1)
+
+    normal_style = document.styles["Normal"]
+    normal_style.font.name = "Times New Roman"
+    normal_style.font.size = Pt(12)
+
+    title = document.add_paragraph()
+    title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    title_run = title.add_run(payload["title"])
+    apply_font(title_run, size=16, bold=True)
+    title.paragraph_format.space_after = Pt(18)
+
+    for section_payload in payload.get("sections", []):
+        heading = document.add_paragraph()
+        heading_run = heading.add_run(section_payload["heading"])
+        apply_font(heading_run, size=13, bold=True)
+        heading.paragraph_format.space_before = Pt(6)
+        heading.paragraph_format.space_after = Pt(6)
+
+        body = document.add_paragraph()
+        body_run = body.add_run(section_payload["body"])
+        apply_font(body_run, size=12)
+        body.paragraph_format.first_line_indent = Inches(0.28)
+        body.paragraph_format.line_spacing = 1.5
+        body.paragraph_format.space_after = Pt(10)
+
+    closing = document.add_paragraph()
+    closing_run = closing.add_run(payload["closing_note"])
+    apply_font(closing_run, size=12)
+    closing.paragraph_format.space_before = Pt(6)
+    closing.paragraph_format.line_spacing = 1.5
+
+    document.save(output_path)
+    emit({
+        "success": True,
+        "output_path": str(output_path),
+    })
+except Exception as exc:
+    result = {
+        "success": False,
+        "error": str(exc),
+        "traceback": traceback.format_exc(),
+    }
+    error_path = safe_error_path()
+    result["error_log_path"] = error_path
+    save_json(error_path, result)
+    emit(result)
+`
+}
+
+async function generateBaselineReportDocx(input: {
+  methodName: MethodName
+  outputDir: string
+  pythonCommand: string
+  result: PythonResult
+  dependentVar?: string
+  treatmentVar?: string
+  covariates?: string[]
+  entityVar?: string
+  timeVar?: string
+  clusterVar?: string
+  qaGateReason?: string
+}) {
+  const outputPath = path.join(input.outputDir, "result_report.docx")
+  const payload = buildBaselineReportDocxPayload({
+    methodName: input.methodName,
+    outputPath,
+    result: input.result,
+    dependentVar: input.dependentVar,
+    treatmentVar: input.treatmentVar,
+    covariates: input.covariates,
+    entityVar: input.entityVar,
+    timeVar: input.timeVar,
+    clusterVar: input.clusterVar,
+    tableDocxFileName: "三线表_panel_fe_regression.docx",
+    qaGateReason: input.qaGateReason,
+  })
+  if (!payload) return undefined
+
+  const execution = await runInlinePython({
+    command: input.pythonCommand,
+    script: buildBaselineReportDocxPythonScript(encodePythonPayload(payload)),
+    cwd: Instance.directory,
+  })
+  const { code, stdout, stderr } = execution
+  if (code !== 0) {
+    const failureArtifacts = persistPythonFailureArtifacts({
+      label: `${input.methodName}_report_docx_nonzero_exit`,
+      command: input.pythonCommand,
+      cwd: Instance.directory,
+      execution,
+      context: {
+        methodName: input.methodName,
+        outputDir: input.outputDir,
+      },
+    })
+    throw new Error(
+      `Failed to build report docx with Python ${input.pythonCommand} (exit code ${code})` +
+        `\nCrash script: ${relativeWithinProject(failureArtifacts.scriptCopyPath)}` +
+        `\nStdout log: ${relativeWithinProject(failureArtifacts.stdoutPath)}` +
+        `\nStderr log: ${relativeWithinProject(failureArtifacts.stderrPath)}` +
+        `\nContext: ${relativeWithinProject(failureArtifacts.contextPath)}`,
+    )
+  }
+
+  const result = parsePythonResult<BaselineReportDocxResult>(stdout)
+  execution.cleanup()
+  if (!result.success || !result.output_path) {
+    throw new Error(`Failed to build report docx: ${result.error ?? "unknown error"}\n${result.traceback ?? ""}`)
+  }
+  return result.output_path
 }
 
 function hasNonEmptyCoefficientTable(filePath?: string) {
@@ -1417,44 +2283,54 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
     const installCommand = pythonStatus.installCommand
     if (ctx.agent === "analyst" && params.methodName !== "auto_recommend") {
       const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
-      if (!analystState.asked) {
-        let preference: "plan_first" | "direct" = "direct"
-        try {
-          const answers = await Question.ask({
+      if (!analystState.planApproved) {
+        const plannedRun = ensureAnalysisPlan({
+          sessionID: ctx.sessionID,
+          datasetId: params.datasetId,
+          runId: params.runId,
+          branch: params.branch ?? "main",
+        })
+        AnalysisIntent.markAnalystPlanGenerated(ctx.sessionID)
+        const answers = await Question.ask({
+          sessionID: ctx.sessionID,
+          questions: [
+            {
+              header: "Analysis Plan",
+              question: [
+                "Analyst prepared this empirical execution checklist:",
+                ...formatAnalysisChecklist(plannedRun),
+                "",
+                "Approve it to start the econometric workflow.",
+              ].join("\n"),
+              custom: false,
+              options: [
+                { label: "Yes", description: "Approve the plan and start econometric execution" },
+                { label: "No", description: "Stay in planning mode and do not run the model yet" },
+              ],
+            },
+          ],
+          tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+        })
+
+        if (answers[0]?.[0] !== "Yes") {
+          setAnalysisPlanApproval({
             sessionID: ctx.sessionID,
-            questions: [
-              {
-                header: "Analysis Plan",
-                question: "Before I run the econometric analysis, do you want me to list a plan first and then execute it?",
-                custom: false,
-                options: [
-                  { label: "Yes", description: "List a concise econometric plan first, then execute" },
-                  { label: "No", description: "Skip the plan and run the analysis directly" },
-                ],
-              },
-            ],
-            tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+            approvalStatus: "declined",
+            datasetId: params.datasetId,
+            runId: params.runId,
+            branch: params.branch ?? "main",
           })
-
-          preference = answers[0]?.[0] === "Yes" ? "plan_first" : "direct"
-        } catch (error) {
-          if (!(error instanceof Question.RejectedError)) throw error
+          AnalysisIntent.markAnalystPlanApproval(ctx.sessionID, false)
+          throw new Question.RejectedError()
         }
-
-        AnalysisIntent.setAnalyst(ctx.sessionID, {
-          asked: true,
-          preference,
-          blockedOnce: preference === "plan_first" ? false : true,
+        setAnalysisPlanApproval({
+          sessionID: ctx.sessionID,
+          approvalStatus: "approved",
+          datasetId: params.datasetId,
+          runId: params.runId,
+          branch: params.branch ?? "main",
         })
-      }
-
-      const refreshed = AnalysisIntent.getAnalyst(ctx.sessionID)
-      if (refreshed.preference === "plan_first" && refreshed.blockedOnce === false) {
-        AnalysisIntent.setAnalyst(ctx.sessionID, {
-          ...refreshed,
-          blockedOnce: true,
-        })
-        throw new Error("User requested a plan first. Present a concise econometric plan, then retry the econometrics step.")
+        AnalysisIntent.markAnalystPlanApproval(ctx.sessionID, true)
       }
     }
 
@@ -1478,6 +2354,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
             sessionID: ctx.sessionID,
             messageID: ctx.messageID,
             callID: ctx.callID,
+            ask: ctx.ask,
           })
         : undefined,
     })
@@ -1505,6 +2382,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
           sessionID: ctx.sessionID,
           messageID: ctx.messageID,
           callID: ctx.callID,
+          ask: ctx.ask,
         })
       : datasetManifest
         ? reportOutputPath({
@@ -1535,7 +2413,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
         params,
       })
 
-      const visibleOutputs: EconometricsVisibleOutput[] = []
+      const publishedFiles: EconometricsPublishedFile[] = []
       if (datasetManifest) {
         appendArtifact(datasetManifest, {
           artifactId: `${params.methodName}_${Date.now()}`,
@@ -1565,7 +2443,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
             branch: path.join("econometrics", params.methodName),
             stageId: params.stageId ?? sourceStage?.stageId,
           })
-          visibleOutputs.push({
+          publishedFiles.push({
             label,
             relativePath: relativeWithinProject(visiblePath),
           })
@@ -1615,7 +2493,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
         stageId: params.stageId ?? sourceStage?.stageId,
         runId,
         outputDir: relativeWithinProject(outputDir),
-        visibleOutputs,
+        publishedFiles,
       }
 
       return {
@@ -1664,7 +2542,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
       )
 
       const nestedMetadata = nestedResult.metadata as EconometricsToolMetadata
-      const nestedVisibleOutputs = [...(nestedMetadata.visibleOutputs ?? [])]
+      const nestedPublishedFiles = [...(nestedMetadata.publishedFiles ?? [])]
 
       if (datasetManifest) {
         appendArtifact(datasetManifest, {
@@ -1697,7 +2575,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
             branch: path.join("econometrics", params.methodName),
             stageId: params.stageId ?? sourceStage?.stageId,
           })
-          nestedVisibleOutputs.push({
+          nestedPublishedFiles.push({
             label,
             relativePath: relativeWithinProject(visiblePath),
           })
@@ -1733,7 +2611,10 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
         stageId: nestedMetadata.stageId ?? params.stageId ?? sourceStage?.stageId,
         runId: nestedMetadata.runId ?? runId,
         outputDir: nestedMetadata.outputDir ?? relativeWithinProject(outputDir),
-        visibleOutputs: nestedVisibleOutputs,
+        deliveryBundleDir: nestedMetadata.deliveryBundleDir,
+        publishedFiles: nestedPublishedFiles,
+        finalOutputsPath: nestedMetadata.finalOutputsPath ?? nestedMetadata.internalFinalOutputsPath,
+        internalFinalOutputsPath: nestedMetadata.internalFinalOutputsPath,
       }
       if (mergedMetadata.result) {
         mergedMetadata.result.decision_trace = [
@@ -3016,7 +3897,8 @@ except Exception as e:
       )
     }
 
-    const visibleOutputs: EconometricsVisibleOutput[] = []
+    const publishedFiles: EconometricsPublishedFile[] = []
+    const deliveryBundlePath = datasetManifest ? deliveryBundleDir(effectiveRunId) : undefined
 
     if (hasNonEmptyCoefficientTable(result.coefficients_path)) {
       try {
@@ -3027,15 +3909,14 @@ except Exception as e:
           columnSubtitles: [regressionTableSubtitle(params.methodName)],
           variables: result.table_variables,
           notes: undefined,
-          formats: ["markdown", "latex", "xlsx"],
+          formats: ["latex", "docx"],
           outputDir,
           branch,
           runId: effectiveRunId,
         }, ctx)
         if (tableResult.success) {
-          result.academic_table_markdown_path = tableResult.markdown_path
           result.academic_table_latex_path = tableResult.latex_path
-          result.academic_table_workbook_path = tableResult.workbook_path
+          result.academic_table_docx_path = tableResult.docx_path
         }
       } catch (error) {
         log.warn("failed to generate academic table", {
@@ -3064,6 +3945,63 @@ except Exception as e:
       result.numeric_snapshot_path = numericSnapshot.snapshotPath
     }
 
+    const principleChecks = evaluatePrincipleChecks({
+      methodName: params.methodName,
+      entityVar: params.entityVar,
+      timeVar: params.timeVar,
+      options: params.options,
+      result,
+      diagnosticsPayload,
+      hasNumericSnapshot: Boolean(result.numeric_snapshot_path),
+    })
+    result.principle_checks = principleChecks
+
+    if (result.diagnostics_path) {
+      fs.writeFileSync(
+        result.diagnostics_path,
+        JSON.stringify({ ...diagnosticsPayload, post_estimation_gates: postEstimationGates, principle_checks: principleChecks }, null, 2),
+        "utf-8",
+      )
+    }
+    if (result.output_path) {
+      fs.writeFileSync(result.output_path, JSON.stringify(result, null, 2), "utf-8")
+    }
+
+    const conciseResultPath = path.join(outputDir, "delivery_result_summary.md")
+    fs.writeFileSync(
+      conciseResultPath,
+      buildConciseResultMarkdown({
+        methodName: params.methodName,
+        result,
+        treatmentLabel: params.treatmentVar,
+        principleChecks,
+      }),
+      "utf-8",
+    )
+
+    if (params.methodName === "panel_fe_regression") {
+      try {
+        result.delivery_report_docx_path = await generateBaselineReportDocx({
+          methodName: params.methodName,
+          outputDir,
+          pythonCommand,
+          result,
+          dependentVar: params.dependentVar,
+          treatmentVar: params.treatmentVar,
+          covariates: params.covariates,
+          entityVar: params.entityVar,
+          timeVar: params.timeVar,
+          clusterVar: params.clusterVar,
+          qaGateReason: qaGate.qaGateReason,
+        })
+      } catch (error) {
+        log.warn("failed to generate baseline report docx", {
+          method: params.methodName,
+          error: String(error),
+        })
+      }
+    }
+
     if (datasetManifest) {
       appendArtifact(datasetManifest, {
         artifactId: `${params.methodName}_${Date.now()}`,
@@ -3080,42 +4018,65 @@ except Exception as e:
           runId: effectiveRunId,
           numeric_snapshot_path: result.numeric_snapshot_path,
           qa_status: result.qa_status,
+          principle_checks: principleChecks,
           warnings: result.warnings,
           blocking_errors: result.blocking_errors,
           suggested_repairs: result.suggested_repairs,
         },
       })
 
-      const publish = (key: string, label: string, sourcePath?: string, metadata?: Record<string, unknown>) => {
+      const stageKey = params.stageId ?? sourceStage?.stageId ?? result.stage_id ?? "stage"
+      const publish = (key: string, label: string, sourcePath: string | undefined, fileName: string) => {
         if (!sourcePath) return
-        const visiblePath = publishVisibleOutput({
+        const visiblePath = publishDeliveryOutput({
           manifest: datasetManifest,
-          key,
+          key: `${key}_${stageKey}`,
           label,
           sourcePath,
           runId: effectiveRunId,
-          branch: path.join("econometrics", params.methodName),
+          branch: "delivery",
           stageId: params.stageId ?? sourceStage?.stageId,
-          metadata,
+          fileName,
+          metadata: {
+            method: params.methodName,
+            deliveryKind: label,
+          },
         })
-        visibleOutputs.push({
+        publishedFiles.push({
           label,
           relativePath: relativeWithinProject(visiblePath),
         })
       }
 
-      publish(`${params.methodName}_results`, `${params.methodName}_results`, result.output_path, { method: params.methodName })
-      publish(`${params.methodName}_coefficients_csv`, `${params.methodName}_coefficients`, result.coefficients_path, { method: params.methodName })
-      publish(`${params.methodName}_coefficients_xlsx`, `${params.methodName}_workbook`, result.workbook_path, { method: params.methodName })
-      publish(`${params.methodName}_diagnostics`, `${params.methodName}_diagnostics`, result.diagnostics_path, { method: params.methodName })
-      publish(`${params.methodName}_summary_txt`, `${params.methodName}_model_summary`, result.summary_path, { method: params.methodName })
-      publish(`${params.methodName}_narrative`, `${params.methodName}_summary`, result.narrative_path, { method: params.methodName })
-      publish(`${params.methodName}_academic_markdown`, `${params.methodName}_table_markdown`, result.academic_table_markdown_path, { method: params.methodName })
-      publish(`${params.methodName}_academic_latex`, `${params.methodName}_table_latex`, result.academic_table_latex_path, { method: params.methodName })
-      publish(`${params.methodName}_academic_xlsx`, `${params.methodName}_table_workbook`, result.academic_table_workbook_path, { method: params.methodName })
+      publish(
+        `${params.methodName}_delivery_summary`,
+        `${params.methodName}_delivery_summary`,
+        conciseResultPath,
+        `回归结果_${sanitizeDeliveryFilePart(params.methodName)}.md`,
+      )
+      publish(
+        `${params.methodName}_academic_latex`,
+        `${params.methodName}_table_latex`,
+        result.academic_table_latex_path,
+        `三线表_${sanitizeDeliveryFilePart(params.methodName)}.tex`,
+      )
+      publish(
+        `${params.methodName}_academic_docx`,
+        `${params.methodName}_table_docx`,
+        result.academic_table_docx_path,
+        `三线表_${sanitizeDeliveryFilePart(params.methodName)}.docx`,
+      )
+      publish(
+        `${params.methodName}_report_docx`,
+        `${params.methodName}_report_docx`,
+        result.delivery_report_docx_path,
+        "结果汇报.docx",
+      )
     }
 
-    const visibleManifestPath = datasetManifest ? finalOutputsPath(datasetManifest.sourcePath, effectiveRunId) : undefined
+    if (result.output_path) {
+      fs.writeFileSync(result.output_path, JSON.stringify(result, null, 2), "utf-8")
+    }
 
     let output = `## Econometrics result - ${params.methodName}\n\n`
     if (datasetManifest?.datasetId ?? result.dataset_id) output += `Dataset: ${datasetManifest?.datasetId ?? result.dataset_id}\n`
@@ -3132,10 +4093,14 @@ except Exception as e:
     if (result.effective_method) output += `Effective method: ${result.effective_method}\n`
     if (result.effective_covariance) output += `Effective covariance: ${result.effective_covariance}\n`
     if (result.degraded_from) output += `Degraded from: ${result.degraded_from}\n`
+    output += `Claim ceiling: ${principleChecks.claim_ceiling}\n`
+    if (principleChecks.findings.length) output += `Principle checks: ${principleChecks.findings.join(" | ")}\n`
 
     output += `\n### Estimates\n`
 
-    if (result.coefficient !== undefined) {
+    if (!result.numeric_snapshot_path) {
+      output += `- Numeric snapshot missing: coefficient-level reporting is suppressed.\n`
+    } else if (result.coefficient !== undefined) {
       output += `- Coefficient: ${result.coefficient.toFixed(4)}\n`
       if (result.std_error !== undefined) output += `- Std. error: ${result.std_error.toFixed(4)}\n`
       if (result.p_value !== undefined) {
@@ -3162,26 +4127,24 @@ except Exception as e:
       output += `- Post-estimation gates: ${triggeredPostEstimationGates.map((gate) => `${gate.gate}=${gate.severity}`).join(" | ")}\n`
     }
     if (result.decision_trace?.length) output += `- Decision trace: ${result.decision_trace.map((item) => item.message).join(" | ")}\n`
-    if (result.plot_path) output += `- Plot: ${relativeWithinProject(result.plot_path)}\n`
-    if (result.coefficients_path) output += `- Coefficients CSV: ${relativeWithinProject(result.coefficients_path)}\n`
-    if (result.workbook_path) output += `- Coefficients workbook: ${relativeWithinProject(result.workbook_path)}\n`
-      if (result.diagnostics_path) output += `- Diagnostics JSON: ${relativeWithinProject(result.diagnostics_path)}\n`
-      if (result.metadata_path) output += `- Model metadata: ${relativeWithinProject(result.metadata_path)}\n`
-      if (result.summary_path) output += `- Model summary: ${relativeWithinProject(result.summary_path)}\n`
-      if (result.narrative_path) output += `- Narrative summary: ${relativeWithinProject(result.narrative_path)}\n`
     if (result.numeric_snapshot_path) output += `- Numeric snapshot: ${relativeWithinProject(result.numeric_snapshot_path)}\n`
-    if (result.academic_table_markdown_path) output += `- Three-line table Markdown: ${relativeWithinProject(result.academic_table_markdown_path)}\n`
     if (result.academic_table_latex_path) output += `- Three-line table LaTeX: ${relativeWithinProject(result.academic_table_latex_path)}\n`
-    if (result.academic_table_workbook_path) output += `- Three-line table Excel: ${relativeWithinProject(result.academic_table_workbook_path)}\n`
-    if (result.output_path) output += `- Result JSON: ${relativeWithinProject(result.output_path)}\n`
+    if (result.academic_table_docx_path) output += `- Three-line table Word: ${relativeWithinProject(result.academic_table_docx_path)}\n`
+    if (result.delivery_report_docx_path) output += `- Result report Word: ${relativeWithinProject(result.delivery_report_docx_path)}\n`
+    output += `- Concise result summary: ${relativeWithinProject(conciseResultPath)}\n`
     if (result.resolved_python_executable) output += `- Python interpreter: ${result.resolved_python_executable}\n`
-    if (visibleManifestPath) output += `Final outputs manifest: ${relativeWithinProject(visibleManifestPath)}\n`
+    if (deliveryBundlePath && publishedFiles.length) output += `Delivery bundle: ${relativeWithinProject(deliveryBundlePath)}\n`
+    if (publishedFiles.length) {
+      output += `Published files:\n`
+      for (const item of publishedFiles) output += `- ${item.relativePath}\n`
+    }
 
     output += `\nResults directory: ${relativeWithinProject(outputDir)}/\n`
 
     const metadata: EconometricsToolMetadata = {
       method: params.methodName,
       result,
+      principleChecks,
       datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
       stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
       runId: effectiveRunId,
@@ -3192,8 +4155,109 @@ except Exception as e:
       qaGateReason: qaGate.qaGateReason,
       qaSource: qaGate.qaSource,
       outputDir: relativeWithinProject(outputDir),
-      visibleOutputs,
-      finalOutputsPath: visibleManifestPath ? relativeWithinProject(visibleManifestPath) : undefined,
+      deliveryBundleDir: deliveryBundlePath ? relativeWithinProject(deliveryBundlePath) : undefined,
+      publishedFiles,
+      finalOutputsPath:
+        datasetManifest && publishedFiles.length ? relativeWithinProject(finalOutputsPath(datasetManifest.sourcePath, effectiveRunId)) : undefined,
+      internalFinalOutputsPath:
+        datasetManifest && publishedFiles.length ? relativeWithinProject(finalOutputsPath(datasetManifest.sourcePath, effectiveRunId)) : undefined,
+      presentation: buildEconometricsPresentation({
+        params,
+        result,
+        qaGate,
+        principleChecks,
+        conciseResultPath,
+        deliveryBundlePath,
+        publishedFiles,
+      }),
+      analysisView: createToolAnalysisView({
+        kind: "econometrics",
+        step: `econometrics(${params.methodName})`,
+        datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
+        stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
+        results: [
+          analysisMetric(
+            params.treatmentVar ? `${params.treatmentVar} 系数` : "系数",
+            result.numeric_snapshot_path && result.coefficient !== undefined ? result.coefficient.toFixed(4) : undefined,
+          ),
+          analysisMetric("标准误", result.std_error !== undefined ? result.std_error.toFixed(4) : undefined),
+          analysisMetric("p 值", result.p_value !== undefined ? result.p_value.toFixed(4) : undefined),
+          analysisMetric("N", result.rows_used),
+          analysisMetric("组数", groupCount(result)),
+          analysisMetric(
+            params.methodName === "panel_fe_regression" ? "within R²" : "R²",
+            result.numeric_snapshot_path && result.r_squared !== undefined ? result.r_squared.toFixed(4) : undefined,
+          ),
+        ],
+        artifacts: [
+          analysisArtifact(result.output_path ? relativeWithinProject(result.output_path) : undefined, {
+            visibility: "user_default",
+          }),
+          analysisArtifact(result.diagnostics_path ? relativeWithinProject(result.diagnostics_path) : undefined, {
+            visibility: "user_default",
+          }),
+          analysisArtifact(result.numeric_snapshot_path ? relativeWithinProject(result.numeric_snapshot_path) : undefined, {
+            visibility: "user_default",
+          }),
+          analysisArtifact(result.metadata_path ? relativeWithinProject(result.metadata_path) : undefined, {
+            visibility: "user_collapsed",
+          }),
+          ...publishedFiles.map((item) =>
+            analysisArtifact(item.relativePath, {
+              label: item.label,
+              visibility: "user_collapsed",
+            }),
+          ),
+        ],
+        warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
+        conclusion: buildEconometricsConclusion({
+          treatmentVar: params.treatmentVar,
+          coefficient: result.coefficient,
+          pValue: result.p_value,
+          principleChecks,
+        }),
+      }),
+      display: createToolDisplay({
+        summary:
+          result.numeric_snapshot_path && result.coefficient !== undefined && result.p_value !== undefined
+            ? `econometrics(${params.methodName}) completed: ${params.treatmentVar ?? "treatment"} coefficient ${result.coefficient.toFixed(4)}, p-value ${result.p_value.toFixed(4)}`
+            : `econometrics(${params.methodName}) completed`,
+        details: [
+          `Dependent variable: ${params.dependentVar}`,
+          params.treatmentVar ? `Treatment variable: ${params.treatmentVar}` : undefined,
+          params.entityVar ? `Entity FE: ${params.entityVar}` : undefined,
+          params.timeVar ? `Time FE: ${params.timeVar}` : undefined,
+          params.clusterVar ?? result.cluster_var ? `Clustered SE: ${params.clusterVar ?? result.cluster_var}` : undefined,
+          result.numeric_snapshot_path && result.coefficient !== undefined ? `Coefficient: ${result.coefficient.toFixed(4)}` : undefined,
+          result.numeric_snapshot_path && result.std_error !== undefined ? `Std. error: ${result.std_error.toFixed(4)}` : undefined,
+          result.numeric_snapshot_path && result.p_value !== undefined ? `P-value: ${result.p_value.toFixed(4)}` : undefined,
+          result.rows_used !== undefined ? `N: ${result.rows_used}` : undefined,
+          result.post_estimation_gates?.find((gate) => gate.gate === "cluster_count" && gate.diagnosticValue !== undefined)
+            ?.diagnosticValue !== undefined
+            ? `Groups: ${result.post_estimation_gates.find((gate) => gate.gate === "cluster_count" && gate.diagnosticValue !== undefined)?.diagnosticValue}`
+            : undefined,
+          result.numeric_snapshot_path && result.r_squared !== undefined ? `R-squared: ${result.r_squared.toFixed(4)}` : undefined,
+          qaGate.qaGateStatus ? `QA gate: ${qaGate.qaGateStatus}` : undefined,
+          result.warnings?.length ? `Warnings: ${result.warnings.join(" | ")}` : undefined,
+          principleChecks.findings.length ? `Principle checks: ${principleChecks.findings.join(" | ")}` : undefined,
+        ],
+        artifacts: [
+          ...publishedFiles.map((item) => ({
+            label: item.label,
+            path: item.relativePath,
+            visibility: "user_collapsed" as const,
+          })),
+          ...(result.numeric_snapshot_path
+            ? [
+                {
+                  label: "numeric_snapshot",
+                  path: relativeWithinProject(result.numeric_snapshot_path),
+                  visibility: "user_collapsed" as const,
+                },
+              ]
+            : []),
+        ],
+      }),
     }
 
     return {

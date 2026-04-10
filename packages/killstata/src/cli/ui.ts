@@ -4,10 +4,10 @@ import { NamedError } from "@killstata/util/error"
 
 export namespace UI {
   const LOGO = [
-    [`                    `, `             ▄     `],
-    [`█▀▀█ █▀▀█ █▀▀█ █▀▀▄ `, `█▀▀▀ █▀▀█ █▀▀█ █▀▀█`],
-    [`█░░█ █░░█ █▀▀▀ █░░█ `, `█░░░ █░░█ █░░█ █▀▀▀`],
-    [`▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ `, `▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀`],
+    [` _  ___ _ _ _     `, `      _        _        `],
+    [`| |/ (_) | | |___ `, `| |_ __| |_ __ _| |_ __ _ `],
+    [`| ' /| | | | (_-< `, `|  _/ _\` | __/ _\` | __/ _\` |`],
+    [`|_|\\_\\_|_|_|_/__/ `, ` \\__\\__,_|\\__\\__,_|\\__\\__,_|`],
   ]
 
   export const CancelledError = NamedError.create("UICancelledError", z.void())
@@ -80,5 +80,14 @@ export namespace UI {
 
   export function markdown(text: string): string {
     return text
+  }
+
+  export function bootNoiseResetSequence() {
+    return "\x1b[3J\x1b[2J\x1b[H"
+  }
+
+  export function clearBootNoise() {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) return
+    process.stdout.write(bootNoiseResetSequence())
   }
 }

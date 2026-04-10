@@ -3,7 +3,8 @@ The DataImport tool handles tabular data ingestion, stage-based cleaning, QA, an
 Use it to build a reproducible Excel/CSV/Stata preprocessing pipeline before any econometric model.
 
 Execution policy:
-- For non-trivial data cleaning, first state a concise stage plan before calling tools.
+- For non-trivial data cleaning, plan internally before calling tools.
+- Keep user-facing text concise and report-like; do not narrate every intermediate read, retry, or background check unless the user explicitly asks for details.
 - Prefer the canonical artifact workflow: import -> preprocess/filter -> qa -> describe/correlation when needed.
 - After a failure, repair and rerun only the failed stage. Do not restart the whole workflow unless the source file changed.
 - If a QA gate produces blocking_errors, stop and repair the clean/qa stage before estimation.

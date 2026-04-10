@@ -65,6 +65,7 @@ export const REQUIRED_PYTHON_PACKAGES = [
   "matplotlib",
   "openpyxl",
   "pyarrow",
+  "docx",
 ] as const
 
 export function defaultPythonCommand() {
@@ -161,11 +162,11 @@ export function userWorkspaceAgentsPath() {
 }
 
 export function userWorkspaceMemoryPath() {
-  return path.join(userWorkspaceRoot(), "memory.md")
+  return path.join(userWorkspaceRoot(), "MEMORY.md")
 }
 
 export function userWorkspaceUserPath() {
-  return path.join(userWorkspaceRoot(), "user.md")
+  return path.join(userWorkspaceRoot(), "USER.md")
 }
 
 export function userAgentsRoot() {

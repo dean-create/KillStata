@@ -8,6 +8,7 @@ export type NumericMetric =
   | "p_value"
   | "r_squared"
   | "n_obs"
+  | "group_count"
   | "mean"
   | "std"
   | "min"
@@ -105,7 +106,7 @@ function parseNumeric(value: unknown) {
 }
 
 function formatValue(metric: NumericMetric, value: number) {
-  if (metric === "n_obs" || metric === "missing_count") return `${Math.round(value)}`
+  if (metric === "n_obs" || metric === "group_count" || metric === "missing_count") return `${Math.round(value)}`
   return value.toFixed(6)
 }
 
@@ -301,6 +302,7 @@ function metricAliases(key: string): NumericMetric | undefined {
   if (normalized === "r_squared" || normalized === "r2") return "r_squared"
   if (normalized === "n_obs" || normalized === "rows_used" || normalized === "row_count" || normalized === "rows_after")
     return "n_obs"
+  if (normalized === "group_count" || normalized === "cluster_count" || normalized === "groups") return "group_count"
   if (normalized === "mean") return "mean"
   if (normalized === "std") return "std"
   if (normalized === "min") return "min"
@@ -317,7 +319,15 @@ function metricAliases(key: string): NumericMetric | undefined {
 }
 
 function scopeForMetric(metric: NumericMetric): GroundingScope {
-  if (metric === "coefficient" || metric === "std_error" || metric === "r_squared" || metric === "n_obs" || metric === "ci_lower" || metric === "ci_upper") {
+  if (
+    metric === "coefficient" ||
+    metric === "std_error" ||
+    metric === "r_squared" ||
+    metric === "n_obs" ||
+    metric === "group_count" ||
+    metric === "ci_lower" ||
+    metric === "ci_upper"
+  ) {
     return "regression"
   }
   if (metric === "correlation") return "correlation"
@@ -660,6 +670,21 @@ export function createEconometricsNumericSnapshot(input: SnapshotMeta & {
         }),
       )
     }
+    const groupCount = parseNumeric(metadata.cluster_count)
+    if (groupCount !== undefined) {
+      entries.push(
+        createEntry({
+          metric: "group_count",
+          scope: "regression",
+          term: "group_count",
+          value: groupCount,
+          sourcePath: input.metadataPath,
+          datasetId: input.datasetId,
+          stageId: input.stageId,
+          runId: input.runId,
+        }),
+      )
+    }
   }
 
   if (input.diagnosticsPath && fs.existsSync(input.diagnosticsPath)) {
@@ -846,9 +871,34 @@ export function createCorrelationNumericSnapshot(input: SnapshotMeta & {
   })
 }
 
+type NumericCandidate = {
+  raw: string
+  value: number
+  decimals: number
+}
+
 function numericCandidates(line: string) {
-  const matches = line.match(/-?\d+(?:\.\d+)?/g) ?? []
-  return matches.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+  const matches = line.match(/(?<![A-Za-z])-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?![A-Za-z])/g) ?? []
+  return matches
+    .map((item) => {
+      const normalized = item.replace(/,/g, "")
+      const value = Number(normalized)
+      if (!Number.isFinite(value)) return undefined
+      const decimals = normalized.includes(".") ? normalized.split(".")[1]!.length : 0
+      return {
+        raw: item,
+        value,
+        decimals,
+      } satisfies NumericCandidate
+    })
+    .filter((item): item is NumericCandidate => Boolean(item))
+}
+
+function groundedValueMatches(entryValue: number, candidate: NumericCandidate) {
+  if (nearlyEqual(entryValue, candidate.value)) return true
+  if (candidate.decimals === 0) return Math.round(entryValue) === candidate.value
+  const tolerance = 0.5 / 10 ** candidate.decimals
+  return Math.abs(entryValue - candidate.value) <= tolerance
 }
 
 function isExemptLine(line: string) {
@@ -857,13 +907,14 @@ function isExemptLine(line: string) {
     /stage_\d+/i.test(line) ||
     /[a-z]:\\/i.test(line) ||
     /\/[^ ]+\.(json|csv|xlsx|md|txt)/i.test(line) ||
-    /\\[^ ]+\.(json|csv|xlsx|md|txt)/i.test(line)
+    /\\[^ ]+\.(json|csv|xlsx|md|txt)/i.test(line) ||
+    /\*{1,3}\s*p\s*(?:<|<=|≤)\s*0\.\d+/i.test(line)
   )
 }
 
 function metricFromLine(line: string): NumericMetric | undefined {
   const normalized = line.toLowerCase()
-  if (/p[- ]?value|p值/.test(normalized)) return "p_value"
+  if (/p[- ]?value|p 值|p值/.test(normalized)) return "p_value"
   if (/std\.? error|standard error|标准误/.test(normalized)) return "std_error"
   if (/r-squared|r squared|adj\.? r2|adj\.? r\^2|r2\b|r\^2/.test(normalized)) return "r_squared"
   if (/\bcoefficient\b|系数/.test(normalized)) return "coefficient"
@@ -872,19 +923,44 @@ function metricFromLine(line: string): NumericMetric | undefined {
   if (/\bmin\b|最小值/.test(normalized)) return "min"
   if (/\bmax\b|最大值/.test(normalized)) return "max"
   if (/correlation|相关系数/.test(normalized)) return "correlation"
-  if (/\bobservations\b|\bsample size\b|样本量|\b[nN]\b/.test(line)) return "n_obs"
+  if (/\bobservations\b|\bsample size\b|样本量|\bn\s*=|\bn\b/.test(normalized)) return "n_obs"
   return undefined
 }
 
 function hasStatisticalLanguage(line: string) {
   return (
-    metricFromLine(line) !== undefined ||
+    metricsFromLine(line).length > 0 ||
     /significant|insignificant|not significant|显著|不显著|positive|negative|正向|负向/.test(line.toLowerCase())
   )
 }
 
+function metricsFromLine(line: string): NumericMetric[] {
+  const metrics = new Set<NumericMetric>()
+  const normalized = line.toLowerCase()
+  if (/p[- ]?value|p 值|p值/.test(normalized)) metrics.add("p_value")
+  if (/std\.? error|standard error|标准误/.test(normalized)) metrics.add("std_error")
+  if (/r-squared|r squared|adj\.? r2|adj\.? r\^2|r2\b|r\^2|within r2|within r\^2|within r²|组内r2|组内r²/.test(normalized)) metrics.add("r_squared")
+  if (/组数|cluster count|group count|groups\b/.test(normalized)) metrics.add("group_count")
+  if (/\bcoefficient\b|系数/.test(normalized)) metrics.add("coefficient")
+  if (/\bmean\b|均值/.test(normalized)) metrics.add("mean")
+  if (/\bstd\b|standard deviation|标准差/.test(normalized)) metrics.add("std")
+  if (/\bmin\b|最小值/.test(normalized)) metrics.add("min")
+  if (/\bmax\b|最大值/.test(normalized)) metrics.add("max")
+  if (/correlation|相关系数/.test(normalized)) metrics.add("correlation")
+  if (/\bobservations\b|\bsample size\b|样本量|\bn\s*=|\bn\b/.test(normalized)) metrics.add("n_obs")
+  const primary = metricFromLine(line)
+  if (primary) metrics.add(primary)
+  return [...metrics]
+}
+
 function nearlyEqual(a: number, b: number) {
-  return Math.abs(a - b) <= 1e-9
+  return Math.abs(a - b) <= 5e-5
+}
+
+function uniqueMetricEntries(entries: NumericSnapshotEntry[], metrics: NumericMetric[]) {
+  if (metrics.length === 0) return [] as NumericSnapshotEntry[]
+  const metricSet = new Set(metrics)
+  return uniqueEntries(entries.filter((entry) => metricSet.has(entry.metric)))
 }
 
 function findMatchingEntries(entries: NumericSnapshotEntry[], line: string, metric?: NumericMetric) {
@@ -892,12 +968,17 @@ function findMatchingEntries(entries: NumericSnapshotEntry[], line: string, metr
   const directMatches = entries.filter((entry) => {
     if (metric && entry.metric !== metric) return false
     const term = entry.term.toLowerCase()
-    if (term === "model" || term === "rows_used" || term === "residuals" || term === "breusch_pagan") return false
+    if (term === "residuals" || term === "breusch_pagan") return false
+    if (term === "model" && metric !== "r_squared") return false
+    if (term === "rows_used" && metric !== "n_obs") return false
+    if (term === "group_count" && metric !== "group_count") return false
     return lowered.includes(term)
   })
   if (directMatches.length > 0) return directMatches
   const metricMatches = entries.filter((entry) => (metric ? entry.metric === metric : true))
-  return metricMatches.length === 1 ? metricMatches : []
+  if (metricMatches.length === 1) return metricMatches
+  const uniqueValues = [...new Set(metricMatches.map((entry) => entry.value))]
+  return uniqueValues.length === 1 ? metricMatches : []
 }
 
 export async function collectNumericSnapshotsFromToolMetadata(metadata: unknown) {
@@ -968,107 +1049,155 @@ export function validateNumericGrounding(input: {
 
   const issues: GroundingIssue[] = []
   for (const line of candidateLines) {
-    const metric = metricFromLine(line)
+    const metrics = metricsFromLine(line)
     const values = numericCandidates(line)
-    if (metric && values.length > 0) {
-      const matches = findMatchingEntries(entries, line, metric)
-      if (matches.length === 0) {
+    if (metrics.length > 0 && values.length > 0) {
+      const metricEntries = uniqueMetricEntries(entries, metrics)
+      const broadMatches = findMatchingEntries(entries, line)
+      const matches = uniqueEntries([...broadMatches, ...metrics.flatMap((metric) => findMatchingEntries(entries, line, metric))])
+      const hasMetricValueMatches = values.every((value) => metricEntries.some((entry) => groundedValueMatches(entry.value, value)))
+      if (matches.length === 0 && !hasMetricValueMatches) {
         issues.push({
           type: "ungrounded_value",
           line,
-          detail: `No uniquely matching ${normalizeMetric(metric)} entry was found in numeric snapshots.`,
-          metric,
+          detail: `No uniquely matching numeric entries were found for metrics: ${metrics.map(normalizeMetric).join(", ")}.`,
+          metric: metrics[0],
         })
       }
       for (const value of values) {
-        if (matches.length === 0 || !matches.some((entry) => nearlyEqual(entry.value, value))) {
+        const matchedByLineScopedEntries = matches.some((entry) => groundedValueMatches(entry.value, value))
+        const matchedByMetricScopedEntries = metricEntries.some((entry) => groundedValueMatches(entry.value, value))
+        if (!matchedByLineScopedEntries && !matchedByMetricScopedEntries) {
           issues.push({
             type: "ungrounded_value",
             line,
-            detail: `No ${normalizeMetric(metric)} value in numeric snapshots matches ${value}.`,
-            metric,
+            detail: `No grounded numeric value in the matched snapshot entries equals ${value.raw}.`,
+            metric: metrics[0],
           })
         }
       }
     }
 
-    if (/significant|显著/.test(line.toLowerCase()) && !/not significant|不显著/.test(line.toLowerCase())) {
-      const matches = findMatchingEntries(entries, line, "p_value")
-      if (matches.length === 0) {
-        issues.push({
-          type: "ungrounded_value",
+    // ---- 显著性校验 ----
+    // 要求同一行中同时出现数值或明确统计术语，才视为统计显著性声明
+    // 这样可以避免日常中文如"显著提升"、"显著改善"被误判为统计声明
+    const hasSignificantKeyword =
+      /significant|显著/.test(line.toLowerCase()) && !/not significant|不显著/.test(line.toLowerCase())
+    if (hasSignificantKeyword) {
+      // 判断是否为真正的统计语境：同行需要有数值，或者出现统计特征术语
+      const lineHasNumericValues = numericCandidates(line).length > 0
+      const lineHasStatisticalContext =
+        /p\s*[<<=]\s*0\.\d|p\s*值|p[- ]?value|系数|coefficient|标准误|std\.?\s*error|置信区间|confidence|水平上显著|水平显著|\d+%\s*(?:水平|level|significance)/i.test(
           line,
-          detail: "Significance claim is not tied to a unique p-value in numeric snapshots.",
-          metric: "p_value",
-        })
-      }
-      if (matches.some((entry) => entry.value >= 0.1)) {
-        issues.push({
-          type: "significance_mismatch",
-          line,
-          detail: "Line claims significance but matching p-value is not below 0.1.",
-          metric: "p_value",
-        })
-      }
-    }
-
-    if (/not significant|不显著/.test(line.toLowerCase())) {
-      const matches = findMatchingEntries(entries, line, "p_value")
-      if (matches.length === 0) {
-        issues.push({
-          type: "ungrounded_value",
-          line,
-          detail: "Non-significance claim is not tied to a unique p-value in numeric snapshots.",
-          metric: "p_value",
-        })
-      }
-      if (matches.some((entry) => entry.value < 0.1)) {
-        issues.push({
-          type: "significance_mismatch",
-          line,
-          detail: "Line claims non-significance but matching p-value is below 0.1.",
-          metric: "p_value",
-        })
+        )
+      // 只有在统计语境下才触发显著性校验
+      if (lineHasNumericValues || lineHasStatisticalContext) {
+        const matches = findMatchingEntries(entries, line, "p_value")
+        if (matches.length === 0) {
+          issues.push({
+            type: "ungrounded_value",
+            line,
+            detail: "Significance claim is not tied to a unique p-value in numeric snapshots.",
+            metric: "p_value",
+          })
+        }
+        if (matches.some((entry) => entry.value >= 0.1)) {
+          issues.push({
+            type: "significance_mismatch",
+            line,
+            detail: "Line claims significance but matching p-value is not below 0.1.",
+            metric: "p_value",
+          })
+        }
       }
     }
 
-    if (/positive|正向/.test(line.toLowerCase())) {
-      const matches = findMatchingEntries(entries, line, "coefficient")
-      if (matches.length === 0) {
-        issues.push({
-          type: "ungrounded_value",
+    // ---- 非显著性校验 ----
+    // "不显著" / "not significant" 同样需要统计语境
+    const hasNotSignificantKeyword = /not significant|不显著/.test(line.toLowerCase())
+    if (hasNotSignificantKeyword) {
+      const lineHasNumericValues = numericCandidates(line).length > 0
+      const lineHasStatisticalContext =
+        /p\s*[<<=]\s*0\.\d|p\s*值|p[- ]?value|系数|coefficient|标准误|std\.?\s*error|\d+%\s*(?:水平|level)/i.test(
           line,
-          detail: "Positive-direction claim is not tied to a unique coefficient in numeric snapshots.",
-          metric: "coefficient",
-        })
-      }
-      if (matches.some((entry) => entry.value < 0)) {
-        issues.push({
-          type: "sign_mismatch",
-          line,
-          detail: "Line claims a positive effect but matching coefficient is negative.",
-          metric: "coefficient",
-        })
+        )
+      if (lineHasNumericValues || lineHasStatisticalContext) {
+        const matches = findMatchingEntries(entries, line, "p_value")
+        if (matches.length === 0) {
+          issues.push({
+            type: "ungrounded_value",
+            line,
+            detail: "Non-significance claim is not tied to a unique p-value in numeric snapshots.",
+            metric: "p_value",
+          })
+        }
+        if (matches.some((entry) => entry.value < 0.1)) {
+          issues.push({
+            type: "significance_mismatch",
+            line,
+            detail: "Line claims non-significance but matching p-value is below 0.1.",
+            metric: "p_value",
+          })
+        }
       }
     }
 
-    if (/negative|负向/.test(line.toLowerCase())) {
-      const matches = findMatchingEntries(entries, line, "coefficient")
-      if (matches.length === 0) {
-        issues.push({
-          type: "ungrounded_value",
+    // ---- 正向/正效应方向校验 ----
+    // 要求同行出现数值、或出现明确统计术语（如"系数为正"、"正向效应"、"coefficient"）
+    // 通用的"正向引导"、"正向反馈"不触发
+    if (/\bpositive\b|正向|为正|正效应|正向效应/.test(line.toLowerCase())) {
+      const lineHasNumericValues = numericCandidates(line).length > 0
+      const lineHasDirectionContext =
+        /系数|coefficient|效应|effect|估计值|estimate|回归|regression|coef|beta|处理效应|treatment\s*effect/i.test(
           line,
-          detail: "Negative-direction claim is not tied to a unique coefficient in numeric snapshots.",
-          metric: "coefficient",
-        })
+        )
+      if (lineHasNumericValues || lineHasDirectionContext) {
+        const matches = findMatchingEntries(entries, line, "coefficient")
+        if (matches.length === 0) {
+          issues.push({
+            type: "ungrounded_value",
+            line,
+            detail: "Positive-direction claim is not tied to a unique coefficient in numeric snapshots.",
+            metric: "coefficient",
+          })
+        }
+        if (matches.some((entry) => entry.value < 0)) {
+          issues.push({
+            type: "sign_mismatch",
+            line,
+            detail: "Line claims a positive effect but matching coefficient is negative.",
+            metric: "coefficient",
+          })
+        }
       }
-      if (matches.some((entry) => entry.value > 0)) {
-        issues.push({
-          type: "sign_mismatch",
+    }
+
+    // ---- 负向/负效应方向校验 ----
+    // 同上，要求统计语境
+    if (/\bnegative\b|负向|为负|负效应|负向效应/.test(line.toLowerCase())) {
+      const lineHasNumericValues = numericCandidates(line).length > 0
+      const lineHasDirectionContext =
+        /系数|coefficient|效应|effect|估计值|estimate|回归|regression|coef|beta|处理效应|treatment\s*effect/i.test(
           line,
-          detail: "Line claims a negative effect but matching coefficient is positive.",
-          metric: "coefficient",
-        })
+        )
+      if (lineHasNumericValues || lineHasDirectionContext) {
+        const matches = findMatchingEntries(entries, line, "coefficient")
+        if (matches.length === 0) {
+          issues.push({
+            type: "ungrounded_value",
+            line,
+            detail: "Negative-direction claim is not tied to a unique coefficient in numeric snapshots.",
+            metric: "coefficient",
+          })
+        }
+        if (matches.some((entry) => entry.value > 0)) {
+          issues.push({
+            type: "sign_mismatch",
+            line,
+            detail: "Line claims a negative effect but matching coefficient is positive.",
+            metric: "coefficient",
+          })
+        }
       }
     }
   }
@@ -1152,3 +1281,4 @@ export function buildGroundingFailureText(result: GroundingResult) {
     snapshotLine,
   ].join("\n\n")
 }
+

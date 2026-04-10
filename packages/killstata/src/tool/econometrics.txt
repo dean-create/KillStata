@@ -3,7 +3,8 @@ The Econometrics tool runs econometric estimation and saves reproducible result 
 Use it after the dataset has been imported, cleaned, and QA-checked.
 
 Execution policy:
-- For non-trivial econometric work, first state a concise stage plan before calling tools.
+- For non-trivial econometric work, plan internally before calling tools.
+- Keep user-facing text concise and report-like; do not narrate every intermediate read, verifier step, or retry unless the user explicitly asks for details.
 - The default stage order is: plan -> healthcheck/import -> preprocess/qa -> baseline estimate -> diagnostics -> robustness -> grounded narrative.
 - After a failure, inspect the reflection metadata and rerun only the failed stage.
 - If QA or diagnostics produce blocking_errors, stop and repair the failed stage before continuing.

@@ -82,11 +82,31 @@ export namespace RuntimeEvents {
       branch: z.string().optional(),
       activeStage: z.string().optional(),
       activeStageId: z.string().optional(),
+      activeCoordinatorAgent: z.enum(["explore", "general", "verifier"]).optional(),
       repairOnly: z.boolean().optional(),
       latestFailureCode: z.string().optional(),
       verifierStatus: z.enum(["pass", "warn", "block"]).optional(),
       trustedArtifacts: z.array(z.string()).default([]),
       rerunTargetStageId: z.string().optional(),
+      approvalStatus: z.enum(["required", "approved", "declined"]).optional(),
+      currentChecklistItem: z
+        .object({
+          id: z.string(),
+          label: z.string(),
+          status: z.enum(["pending", "in_progress", "completed", "blocked"]),
+        })
+        .optional(),
+      analysisChecklist: z
+        .array(
+          z.object({
+            id: z.string(),
+            label: z.string(),
+            status: z.enum(["pending", "in_progress", "completed", "blocked"]),
+            linkedStageId: z.string().optional(),
+            summary: z.string().optional(),
+          }),
+        )
+        .default([]),
     }),
   )
 }

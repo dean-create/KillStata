@@ -12,6 +12,19 @@ export type RunPermissionDecision = {
   reason: string
 }
 
+export type RunQuestionRequest = {
+  questions: Array<{
+    header: string
+    question: string
+  }>
+}
+
+export type RunQuestionDecision = {
+  action: "reply" | "reject"
+  answers?: string[][]
+  reason: string
+}
+
 function normalizeAbsolute(target: string, baseDir: string) {
   return path.normalize(path.isAbsolute(target) ? target : path.resolve(baseDir, target))
 }
@@ -57,8 +70,85 @@ export function shouldAutoHandleRunPermissions(input: {
   return input.format === "json" || !input.stdinIsTTY || !input.stdoutIsTTY
 }
 
+function readAccessRoots(workspaceRoot: string, projectRoot?: string) {
+  const roots = [...workspaceCandidates(normalizeAbsolute(workspaceRoot, workspaceRoot))]
+  if (projectRoot) {
+    const normalizedProjectRoot = normalizeAbsolute(projectRoot, workspaceRoot)
+    roots.push(normalizedProjectRoot)
+    roots.push(path.join(normalizedProjectRoot, "test"))
+    roots.push(path.join(normalizedProjectRoot, "modelpctest"))
+  }
+  return [...new Set(roots)]
+}
+
+function parsePathAccessQuestion(question: string) {
+  const match = /wants (read|write) access to project-external path:\s*([\s\S]+?)\s*Allow this access/i.exec(question)
+  if (!match?.[1] || !match[2]) return undefined
+  return {
+    mode: match[1].toLowerCase() as "read" | "write",
+    targetPath: match[2].trim(),
+  }
+}
+
+export function decideNonInteractiveQuestion(input: {
+  workspaceRoot: string
+  projectRoot?: string
+  request: RunQuestionRequest
+}): RunQuestionDecision {
+  const primary = input.request.questions[0]
+  if (!primary) {
+    return {
+      action: "reject",
+      reason: "auto_reject_empty_question",
+    }
+  }
+
+  if (primary.header !== "Path Access") {
+    if (primary.header === "Analysis Plan") {
+      return {
+        action: "reply",
+        answers: [["No"]],
+        reason: "auto_skip_analysis_plan_question",
+      }
+    }
+    return {
+      action: "reject",
+      reason: "auto_reject_noninteractive_question",
+    }
+  }
+
+  const parsed = parsePathAccessQuestion(primary.question)
+  if (!parsed) {
+    return {
+      action: "reject",
+      reason: "auto_reject_unparsed_path_access_question",
+    }
+  }
+
+  const targetPath = normalizeAbsolute(parsed.targetPath, input.workspaceRoot)
+  const allowedRoots =
+    parsed.mode === "read"
+      ? readAccessRoots(input.workspaceRoot, input.projectRoot)
+      : workspaceCandidates(normalizeAbsolute(input.workspaceRoot, input.workspaceRoot))
+  const allowed = allowedRoots.some((root) => isWithinRoot(targetPath, root))
+
+  if (allowed) {
+    return {
+      action: "reply",
+      answers: [["Yes"]],
+      reason: parsed.mode === "read" ? "auto_allow_workspace_or_project_read_question" : "auto_allow_workspace_write_question",
+    }
+  }
+
+  return {
+    action: "reject",
+    reason: parsed.mode === "read" ? "auto_reject_read_question_outside_project" : "auto_reject_write_question_outside_workspace",
+  }
+}
+
 export function decideNonInteractivePermission(input: {
   workspaceRoot: string
+  projectRoot?: string
   request: RunPermissionRequest
 }): RunPermissionDecision {
   if (input.request.permission === "read") {
@@ -77,7 +167,7 @@ export function decideNonInteractivePermission(input: {
     }
   }
 
-  const allowedRoots = workspaceCandidates(normalizeAbsolute(input.workspaceRoot, input.workspaceRoot))
+  const allowedRoots = readAccessRoots(input.workspaceRoot, input.projectRoot)
   const candidates = candidateTargets(input.request, input.workspaceRoot)
   const safe = candidates.length > 0 && candidates.every((candidate) => allowedRoots.some((root) => isWithinRoot(candidate, root)))
 
@@ -85,7 +175,7 @@ export function decideNonInteractivePermission(input: {
     return {
       response: "once",
       auto: true,
-      reason: "auto_allow_workspace_external_directory",
+      reason: "auto_allow_workspace_or_project_external_directory",
     }
   }
 

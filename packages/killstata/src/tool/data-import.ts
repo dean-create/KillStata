@@ -13,6 +13,7 @@ import {
   buildFileStamp,
   createDatasetId,
   createDatasetManifest,
+  deliveryBundleDir,
   finalOutputsPath,
   findDatasetForSource,
   fingerprintSourceFile,
@@ -23,7 +24,7 @@ import {
   projectErrorsRoot,
   projectHealthRoot,
   projectTempRoot,
-  publishVisibleOutput,
+  publishDeliveryOutput,
   readDatasetManifest,
   reportOutputPath,
   resolveArtifactInput,
@@ -40,8 +41,24 @@ import {
   type NumericSnapshotDocument,
 } from "./analysis-grounding"
 import { relativeWithinProject, resolveToolPath } from "./analysis-path"
+import {
+  artifactGroup,
+  createPresentation,
+  derivePresentationStatus,
+  presentationArtifact,
+  presentationMetric,
+  type ToolPresentation,
+} from "./analysis-presentation"
 import { numericSnapshotPreview } from "./analysis-tool-metadata"
+import { createToolDisplay } from "./analysis-display"
+import {
+  analysisArtifact,
+  analysisInputFile,
+  analysisMetric,
+  createToolAnalysisView,
+} from "./analysis-user-view"
 import { formatRuntimePythonSetupError, getRuntimePythonStatus } from "@/killstata/runtime-config"
+import { ensureAnalysisPlan, formatAnalysisChecklist, setAnalysisPlanApproval } from "@/runtime/workflow"
 
 const log = Log.create({ service: "data-import-tool" })
 
@@ -63,7 +80,9 @@ const DATA_ACTIONS = [
 
 type DataAction = (typeof DATA_ACTIONS)[number]
 
-const PreprocessOperation = z.object({
+const ANALYST_PRE_APPROVAL_ACTIONS = new Set<DataAction>(["healthcheck", "describe", "correlation", "qa"])
+
+export const PreprocessOperationSchema = z.object({
   type: z.enum([
     "dropna",
     "drop_missing",
@@ -85,13 +104,29 @@ const PreprocessOperation = z.object({
   params: z.object({}).passthrough().optional(),
 })
 
-const FilterRule = z.object({
+export const FilterRuleSchema = z.object({
   column: z.string(),
   operator: z.enum(["in", "not_in", "eq", "neq", "gt", "gte", "lt", "lte", "contains", "not_contains"]),
   value: z.union([z.string(), z.number(), z.boolean()]).optional(),
   values: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
   caseSensitive: z.boolean().default(false),
 })
+
+export const SheetPolicySchema = z
+  .object({
+    mode: z.enum(["first_sheet", "named_sheet"]).default("first_sheet"),
+    sheetName: z.string().optional(),
+    headerRow: z.number().int().min(0).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.mode === "named_sheet" && !value.sheetName?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sheetName is required when sheetPolicy.mode is named_sheet",
+        path: ["sheetName"],
+      })
+    }
+  })
 
 type PythonResult = {
   success: boolean
@@ -133,6 +168,200 @@ type PythonResult = {
   missing_before?: Record<string, number>
   missing_after?: Record<string, number>
   import_errors?: string[]
+}
+
+const CJK_MOJIBAKE_MARKERS = [
+  "鏁版嵁",
+  "鍥炲綊",
+  "缁撴灉",
+  "褰撳墠",
+  "鎻愮ず",
+  "绛夊緟",
+  "涓嬩竴姝",
+  "鍙橀噺",
+  "妫€鏌",
+  "鍥哄畾",
+  "鏍囬",
+  "璁烘枃",
+  "瀛︽湳",
+  "鏁堝簲",
+  "闃舵",
+  "缁堢",
+  "杈撳嚭",
+] as const
+
+export function looksLikeMojibake(value?: string) {
+  if (!value) return false
+  return (
+    value.includes("�") ||
+    /(?:Ã.|Â.|æ.|ç.|é.|è.)/.test(value) ||
+    CJK_MOJIBAKE_MARKERS.some((marker) => value.includes(marker))
+  )
+}
+
+export function schemaLooksLikeMojibake(schemaPath?: string) {
+  if (!schemaPath || !fs.existsSync(schemaPath)) return false
+  try {
+    const raw = fs.readFileSync(schemaPath, "utf-8")
+    const parsed = JSON.parse(raw) as {
+      columns?: Array<{ name?: string; label?: string }>
+    }
+    const columns = Array.isArray(parsed.columns) ? parsed.columns : []
+    return columns.some((column) => looksLikeMojibake(column.name) || looksLikeMojibake(column.label))
+  } catch {
+    return false
+  }
+}
+
+export function shouldReuseImportStage(input: { sourcePath?: string; schemaPath?: string }) {
+  return !looksLikeMojibake(input.sourcePath) && !schemaLooksLikeMojibake(input.schemaPath)
+}
+
+function buildDataImportWarnings(input: {
+  result: PythonResult
+  qaGate: {
+    qaGateStatus?: string
+    qaGateReason?: string
+  }
+}) {
+  return [
+    ...(input.result.warnings ?? []),
+    ...(input.result.blocking_errors ?? []),
+    input.qaGate.qaGateStatus === "warn" || input.qaGate.qaGateStatus === "block" ? input.qaGate.qaGateReason : undefined,
+  ].filter((item): item is string => Boolean(item))
+}
+
+function buildDataImportPresentation(input: {
+  action: DataAction
+  result: PythonResult
+  qaGate: {
+    qaGateStatus?: string
+    qaGateReason?: string
+  }
+  publishedFiles: Array<{ label: string; relativePath: string }>
+  deliveryBundlePath?: string
+}): ToolPresentation {
+  const { action, result, qaGate, publishedFiles, deliveryBundlePath } = input
+  const rowsAfter = result.rows_after
+  const columnsAfter = result.columns_after
+  const rowsBefore = result.rows_before
+  const rowDelta =
+    rowsBefore !== undefined && rowsAfter !== undefined ? Math.abs(rowsBefore - rowsAfter) : undefined
+  const status = derivePresentationStatus({
+    success: result.success,
+    qaGateStatus: qaGate.qaGateStatus,
+    warnings: result.warnings,
+    blockingErrors: result.blocking_errors,
+  })
+
+  let title = "数据处理结果"
+  let headline = "这一步已经完成。"
+  let summary: string[] = []
+  let highlights: string[] = []
+  let nextActions: string[] = []
+
+  if (action === "import") {
+    title = "数据导入"
+    headline =
+      rowsAfter !== undefined && columnsAfter !== undefined
+        ? `已导入 ${rowsAfter} 行、${columnsAfter} 列数据，并转成可继续处理的工作格式。`
+        : "原始数据已导入，并转成后续可直接处理的工作格式。"
+    summary = [
+      "我已经保留了原始数据的结构信息，并生成了可核对的检查表。",
+      "接下来可以先做质量检查、描述统计或开始清洗。",
+    ]
+    highlights = [result.stage_id ? `当前工作阶段：${result.stage_id}` : undefined].filter(Boolean) as string[]
+    nextActions = ["先查看检查表，确认变量名、缺失值和异常值。", "如果数据无误，再进入筛选、清洗或描述统计。"]
+  } else if (action === "filter") {
+    title = "数据筛选"
+    headline =
+      rowsAfter !== undefined && rowDelta !== undefined
+        ? `筛选已完成，当前保留 ${rowsAfter} 行记录，本次共移除了 ${rowDelta} 行。`
+        : "筛选已完成，数据已经更新到新的阶段。"
+    summary = ["我已经把筛选后的结果单独保存，原阶段仍可回溯。", "建议先看检查表，确认删掉的是你真正想删的样本。"]
+    nextActions = ["先打开筛选检查表确认结果。", "确认无误后再做描述统计或回归。"]
+  } else if (action === "describe") {
+    title = "描述统计"
+    headline = `描述统计已完成，${(result.variables ?? []).length} 个变量的概览已经准备好。`
+    summary = ["这一步更适合先帮助你判断变量分布是否合理。", "如果均值、极值或缺失情况异常，建议先回到清洗阶段。"]
+    nextActions = ["先看描述统计表。", "确认变量分布合理后，再进入回归或因果分析。"]
+  } else if (action === "qa") {
+    title = "数据质量检查"
+    headline =
+      status === "success"
+        ? "数据质量检查已通过，可以进入下一步分析。"
+        : status === "warn"
+          ? "数据质量检查已完成，但有提醒项，建议先确认再建模。"
+          : "数据质量检查发现阻塞问题，建议先修数据再继续。"
+    summary = ["我已经把缺失、异常和结构性问题整理成了检查结果。"]
+    nextActions =
+      status === "blocked"
+        ? ["先修复阻塞问题，再重新运行质量检查。", "不要直接跳过 QA 进入建模。"]
+        : ["查看提醒项，确认是否会影响后续建模。", "确认可接受后再继续分析。"]
+  } else if (action === "healthcheck") {
+    title = "环境检查"
+    headline = result.status === "ready" ? "分析环境已就绪。" : "分析环境还没有完全准备好。"
+    summary = ["我已经检查了当前数据处理所需的 Python 依赖和解释器状态。"]
+    nextActions = result.install_command
+      ? ["先补齐缺失依赖，再重新运行工具。"]
+      : ["环境已就绪，可以继续下一步数据处理。"]
+  } else {
+    title = "数据处理"
+    headline =
+      rowsAfter !== undefined && columnsAfter !== undefined
+        ? `这一步处理后，当前数据为 ${rowsAfter} 行、${columnsAfter} 列。`
+        : "这一步数据处理已经完成。"
+    summary = ["我已经生成了对应阶段的数据与检查文件。"]
+    nextActions = ["先看检查结果，再决定是否进入下一步分析。"]
+  }
+
+  const risks = [
+    ...(result.warnings ?? []),
+    ...(result.blocking_errors ?? []),
+    qaGate.qaGateStatus === "warn" ? qaGate.qaGateReason : undefined,
+    qaGate.qaGateStatus === "block" ? qaGate.qaGateReason : undefined,
+  ]
+
+  return createPresentation({
+    kind: "data_prep",
+    title,
+    headline,
+    status,
+    summary,
+    keyMetrics: [
+      presentationMetric("当前行数", rowsAfter),
+      presentationMetric("当前列数", columnsAfter),
+      presentationMetric(
+        action === "filter" ? "移除行数" : "变动行数",
+        rowDelta,
+        rowDelta && rowDelta > 0 ? { tone: "caution" } : undefined,
+      ),
+      presentationMetric("变量数", result.variables?.length),
+      presentationMetric("QA 状态", result.status ?? qaGate.qaGateStatus),
+    ],
+    highlights,
+    risks,
+    nextActions,
+    artifactGroups: [
+      artifactGroup("核心数据", [
+        presentationArtifact("当前阶段数据", result.output_path),
+        presentationArtifact("工作簿", result.workbook_path),
+      ]),
+      artifactGroup("检查表", [
+        presentationArtifact("检查 CSV", result.inspection_path),
+        presentationArtifact("检查工作簿", result.inspection_workbook_path),
+        presentationArtifact("数值快照", result.numeric_snapshot_path),
+      ]),
+      artifactGroup("审计与日志", [
+        presentationArtifact("摘要 JSON", result.summary_path),
+        presentationArtifact("审计日志", result.log_path),
+      ]),
+      artifactGroup("交付文件", [
+        ...publishedFiles.map((item) => presentationArtifact(item.label, item.relativePath)),
+        presentationArtifact("交付包目录", deliveryBundlePath),
+      ]),
+    ],
+  })
 }
 
 function encodePythonPayload(payload: unknown) {
@@ -258,6 +487,147 @@ function effectiveOutputFormat(params: { action: DataAction; format?: "csv" | "x
   return params.format ?? "csv"
 }
 
+function sanitizeDeliveryFilePart(value: string) {
+  return value
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/g, "")
+}
+
+function filterValueText(value: string | number | boolean | undefined) {
+  if (value === undefined) return "目标值"
+  return String(value).trim() || "目标值"
+}
+
+function summarizeFilterRule(rule: z.infer<typeof FilterRuleSchema>) {
+  const value = filterValueText(rule.value)
+  const values = (rule.values ?? []).map((item) => filterValueText(item))
+  if ((rule.operator === "neq" || rule.operator === "not_in") && (value.includes("黑龙江") || values.some((item) => item.includes("黑龙江")))) {
+    return "删除黑龙江省份"
+  }
+  switch (rule.operator) {
+    case "not_in":
+      return values.length === 1 ? `删除${values[0]}` : `删除指定取值`
+    case "neq":
+      return `删除${value}`
+    case "in":
+      return values.length === 1 ? `保留${values[0]}` : "保留指定取值"
+    case "eq":
+      return `保留${value}`
+    case "contains":
+      return `筛选包含${value}`
+    case "not_contains":
+      return `删除包含${value}`
+    case "gt":
+      return `${rule.column}大于${value}`
+    case "gte":
+      return `${rule.column}大于等于${value}`
+    case "lt":
+      return `${rule.column}小于${value}`
+    case "lte":
+      return `${rule.column}小于等于${value}`
+    default:
+      return `筛选${rule.column}`
+  }
+}
+
+function summarizePreprocessOperation(operation: z.infer<typeof PreprocessOperationSchema>) {
+  const variables = (operation.variables ?? []).join("、")
+  const varSuffix = variables || "变量"
+  switch (operation.type) {
+    case "dropna":
+    case "drop_missing":
+      return "删除缺失值行"
+    case "fillna":
+    case "fill_constant":
+      return `常数填补${varSuffix}`
+    case "fill_mean":
+      return `均值填补${varSuffix}`
+    case "fill_median":
+      return `中位数填补${varSuffix}`
+    case "forward_fill":
+      return `前向填补${varSuffix}`
+    case "backward_fill":
+      return `后向填补${varSuffix}`
+    case "linear_interpolate":
+      return `线性插值${varSuffix}`
+    case "group_linear_interpolate":
+      return `分组线性插值${varSuffix}`
+    case "regression_impute":
+      return `回归插补${varSuffix}`
+    case "log_transform":
+      return `对数化${varSuffix}`
+    case "standardize":
+      return `标准化${varSuffix}`
+    case "winsorize":
+      return `缩尾处理${varSuffix}`
+    case "create_dummies":
+      return `生成虚拟变量${varSuffix}`
+    default:
+      return `处理${varSuffix}`
+  }
+}
+
+function stageDeliveryDescription(params: {
+  action: DataAction
+  stageLabel?: string
+  filters?: Array<z.infer<typeof FilterRuleSchema>>
+  operations?: Array<z.infer<typeof PreprocessOperationSchema>>
+  rollbackStageId?: string
+}) {
+  if (params.stageLabel?.trim()) {
+    return sanitizeDeliveryFilePart(params.stageLabel)
+  }
+  if (params.action === "filter") {
+    const parts = (params.filters ?? []).map(summarizeFilterRule).filter(Boolean)
+    return parts.length ? sanitizeDeliveryFilePart(parts.join("_")) : "筛选结果"
+  }
+  if (params.action === "preprocess") {
+    const parts = (params.operations ?? []).map(summarizePreprocessOperation).filter(Boolean)
+    return parts.length ? sanitizeDeliveryFilePart(parts.join("_")) : "数据预处理"
+  }
+  if (params.action === "rollback") {
+    return sanitizeDeliveryFilePart(`回滚到${params.rollbackStageId ?? "上一版本"}`)
+  }
+  return sanitizeDeliveryFilePart(params.action)
+}
+
+async function writeDeliveryWorkbook(input: {
+  sourcePath: string
+  outputPath: string
+  pythonCommand: string
+}) {
+  const payloadB64 = encodePythonPayload({
+    source_path: input.sourcePath,
+    output_path: input.outputPath,
+  })
+  const script = `
+import base64
+import json
+from pathlib import Path
+
+import pandas as pd
+
+payload = json.loads(base64.b64decode("${payloadB64}").decode("utf-8"))
+source_path = payload["source_path"]
+output_path = payload["output_path"]
+
+df = pd.read_parquet(source_path)
+Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+    df.to_excel(writer, sheet_name="data", index=False)
+`
+  const { code, stdout, stderr } = await runInlinePython({
+    command: input.pythonCommand,
+    script,
+    cwd: Instance.directory,
+  })
+  if (code !== 0) {
+    throw new Error(`Failed to generate delivery workbook: ${stderr || stdout}`)
+  }
+}
+
 export const DataImportTool = Tool.define("data_import", {
   description: DESCRIPTION,
   parameters: z.object({
@@ -272,8 +642,9 @@ export const DataImportTool = Tool.define("data_import", {
     format: z.enum(["csv", "xlsx", "dta", "parquet"]).optional(),
     preserveLabels: z.boolean().default(true),
     createInspectionArtifacts: z.boolean().optional().default(true),
-    operations: z.array(PreprocessOperation).optional(),
-    filters: z.array(FilterRule).optional(),
+    operations: z.array(PreprocessOperationSchema).optional(),
+    filters: z.array(FilterRuleSchema).optional(),
+    sheetPolicy: SheetPolicySchema.optional(),
     variables: z.array(z.string()).optional(),
     groupBy: z.array(z.string()).optional(),
     entityVar: z.string().optional(),
@@ -293,47 +664,57 @@ export const DataImportTool = Tool.define("data_import", {
     }
     const pythonCommand = pythonStatus.executable
     const installCommand = pythonStatus.installCommand
-    if (ctx.agent === "analyst" && params.action !== "healthcheck") {
-      const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
-      if (!analystState.asked) {
-        let preference: "plan_first" | "direct" = "direct"
-        try {
+    if (ctx.agent === "analyst") {
+      const branch = params.branch ?? "main"
+      if (!ANALYST_PRE_APPROVAL_ACTIONS.has(params.action)) {
+        const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
+        if (!analystState.planApproved) {
+          const plannedRun = ensureAnalysisPlan({
+            sessionID: ctx.sessionID,
+            datasetId: params.datasetId,
+            runId: typeof params.options?.["runId"] === "string" ? params.options["runId"] : undefined,
+            branch,
+          })
+          AnalysisIntent.markAnalystPlanGenerated(ctx.sessionID)
           const answers = await Question.ask({
             sessionID: ctx.sessionID,
             questions: [
               {
                 header: "Analysis Plan",
-                question:
-                  "Before I start the econometric workflow, do you want me to list a concise plan first and then execute it?",
+                question: [
+                  "Analyst prepared this execution checklist:",
+                  ...formatAnalysisChecklist(plannedRun),
+                  "",
+                  "Start executing this plan now?",
+                ].join("\n"),
                 custom: false,
                 options: [
-                  { label: "Yes", description: "List a concise plan first, then execute the econometric workflow" },
-                  { label: "No", description: "Skip the plan and proceed directly" },
+                  { label: "Yes", description: "Approve the plan and continue with data and analysis steps" },
+                  { label: "No", description: "Stay in planning mode and stop before execution" },
                 ],
               },
             ],
             tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
           })
 
-          preference = answers[0]?.[0] === "Yes" ? "plan_first" : "direct"
-        } catch (error) {
-          if (!(error instanceof Question.RejectedError)) throw error
+          if (answers[0]?.[0] !== "Yes") {
+            setAnalysisPlanApproval({
+              sessionID: ctx.sessionID,
+              approvalStatus: "declined",
+              datasetId: params.datasetId,
+              branch,
+            })
+            AnalysisIntent.markAnalystPlanApproval(ctx.sessionID, false)
+            throw new Question.RejectedError()
+          }
+          setAnalysisPlanApproval({
+            sessionID: ctx.sessionID,
+            approvalStatus: "approved",
+            datasetId: params.datasetId,
+            branch,
+          })
+          AnalysisIntent.markAnalystPlanApproval(ctx.sessionID, true)
         }
-
-        AnalysisIntent.setAnalyst(ctx.sessionID, {
-          asked: true,
-          preference,
-          blockedOnce: preference === "plan_first" ? false : true,
-        })
-      }
-
-      const refreshed = AnalysisIntent.getAnalyst(ctx.sessionID)
-      if (refreshed.preference === "plan_first" && refreshed.blockedOnce === false) {
-        AnalysisIntent.setAnalyst(ctx.sessionID, {
-          ...refreshed,
-          blockedOnce: true,
-        })
-        throw new Error("User requested a plan first. Present a concise econometric plan, then retry the data step.")
       }
     }
 
@@ -385,6 +766,7 @@ export const DataImportTool = Tool.define("data_import", {
           sessionID: ctx.sessionID,
           messageID: ctx.messageID,
           callID: ctx.callID,
+          ask: ctx.ask,
         })
       : undefined
     const artifactInput = resolveArtifactInput({
@@ -428,18 +810,38 @@ export const DataImportTool = Tool.define("data_import", {
         sourceFormat: path.extname(inputPath!).replace(/^\./, "").toLowerCase() as "csv" | "xlsx" | "xls" | "dta" | "parquet",
         workingFormat: "parquet",
       })
+      datasetManifest.sourcePath = inputPath!
+      datasetManifest.sourceFormat = path
+        .extname(inputPath!)
+        .replace(/^\./, "")
+        .toLowerCase() as "csv" | "xlsx" | "xls" | "dta" | "parquet"
       const matchingImportStage = latestImportStageForFingerprint(datasetManifest, sourceFingerprint.key)
       if (matchingImportStage) {
-        reusedImportStage = true
-        sourceStage = matchingImportStage
-        parentStageId = matchingImportStage.parentStageId
-        stageId = matchingImportStage.stageId
-        inspectionPath = matchingImportStage.inspectionPath
-        inspectionWorkbookPath = matchingImportStage.inspectionWorkbookPath
-        schemaPath = matchingImportStage.schemaPath
-        labelsPath = matchingImportStage.labelsPath
-        summaryPath = matchingImportStage.summaryPath
-        logPath = matchingImportStage.logPath
+        if (
+          shouldReuseImportStage({
+            sourcePath: datasetManifest.sourcePath,
+            schemaPath: matchingImportStage.schemaPath,
+          })
+        ) {
+          reusedImportStage = true
+          sourceStage = matchingImportStage
+          parentStageId = matchingImportStage.parentStageId
+          stageId = matchingImportStage.stageId
+          inspectionPath = matchingImportStage.inspectionPath
+          inspectionWorkbookPath = matchingImportStage.inspectionWorkbookPath
+          schemaPath = matchingImportStage.schemaPath
+          labelsPath = matchingImportStage.labelsPath
+          summaryPath = matchingImportStage.summaryPath
+          logPath = matchingImportStage.logPath
+        } else {
+          log.warn("Skipping import-stage reuse because cached source/schema text looks mojibake", {
+            datasetId: datasetManifest.datasetId,
+            stageId: matchingImportStage.stageId,
+            sourcePath: datasetManifest.sourcePath,
+            schemaPath: matchingImportStage.schemaPath,
+          })
+          stageId = datasetManifest.stages.length === 0 ? "stage_000" : nextStageId(datasetManifest)
+        }
       } else {
         stageId = datasetManifest.stages.length === 0 ? "stage_000" : nextStageId(datasetManifest)
       }
@@ -509,6 +911,7 @@ export const DataImportTool = Tool.define("data_import", {
           sessionID: ctx.sessionID,
           messageID: ctx.messageID,
           callID: ctx.callID,
+          ask: ctx.ask,
         })
       : reusedImportStage && sourceStage?.workingPath
         ? sourceStage.workingPath
@@ -609,6 +1012,7 @@ export const DataImportTool = Tool.define("data_import", {
         group_by: params.groupBy ?? [],
         entity_var: params.entityVar ?? null,
         time_var: params.timeVar ?? null,
+        sheet_policy: params.sheetPolicy ?? null,
         options: params.options ?? {},
         install_command: installCommand,
       }
@@ -733,7 +1137,17 @@ def read_table(file_path):
     if suffix == ".csv":
         return pd.read_csv(file_path)
     if suffix in [".xlsx", ".xls"]:
-        return pd.read_excel(file_path)
+        sheet_policy = payload.get("sheet_policy") or {}
+        mode = sheet_policy.get("mode") or "first_sheet"
+        header_row = sheet_policy.get("headerRow")
+        read_kwargs = {}
+        if isinstance(header_row, int):
+            read_kwargs["header"] = header_row
+        if mode == "named_sheet":
+            read_kwargs["sheet_name"] = sheet_policy.get("sheetName")
+        else:
+            read_kwargs["sheet_name"] = 0
+        return pd.read_excel(file_path, **read_kwargs)
     if suffix == ".dta":
         read_error = None
         for encoding in [None, "gbk", "latin1"]:
@@ -852,7 +1266,7 @@ def summarize_dataframe(df, columns):
 
 try:
     if action == "healthcheck":
-        modules = ["pandas", "statsmodels", "linearmodels", "openpyxl", "scipy", "matplotlib", "pyarrow"]
+        modules = ["pandas", "statsmodels", "linearmodels", "openpyxl", "scipy", "matplotlib", "pyarrow", "docx"]
         status = {}
         import_errors = {}
         for name in modules:
@@ -1405,7 +1819,8 @@ except Exception as exc:
       result.numeric_snapshot_path = numericSnapshot.snapshotPath
     }
 
-    const visibleOutputs: Array<{ label: string; relativePath: string }> = []
+    const publishedFiles: Array<{ label: string; relativePath: string }> = []
+    const deliveryBundlePath = datasetManifest ? deliveryBundleDir(effectiveRunId) : undefined
 
     if (datasetManifest) {
       if (params.action === "import" || params.action === "filter" || params.action === "preprocess" || params.action === "rollback") {
@@ -1460,53 +1875,56 @@ except Exception as exc:
         })
       }
 
-      const publish = (key: string, label: string, sourcePath?: string, metadata?: Record<string, unknown>) => {
-        if (!sourcePath) return
-        const visiblePath = publishVisibleOutput({
-          manifest: datasetManifest,
-          key,
-          label,
-          sourcePath,
-          runId: effectiveRunId,
-          branch: "prep",
-          stageId: result.stage_id ?? params.stageId ?? sourceStage?.stageId,
-          metadata,
-        })
-        visibleOutputs.push({
-          label,
-          relativePath: relativeWithinProject(visiblePath),
-        })
-      }
-
-      if (params.action === "import" || params.action === "filter" || params.action === "preprocess" || params.action === "rollback") {
-        publish(
-          `${params.action}_inspection_csv`,
-          `${params.action}_inspection_csv`,
-          result.inspection_path,
-          { action: params.action, rows_after: result.rows_after, columns_after: result.columns_after },
-        )
-        publish(
-          `${params.action}_inspection_xlsx`,
-          `${params.action}_inspection_workbook`,
-          result.inspection_workbook_path,
-          { action: params.action, rows_after: result.rows_after, columns_after: result.columns_after },
-        )
-      }
-
-      if (params.action === "export") {
-        publish(`${params.action}_output`, `${params.action}_output`, result.output_path, {
+      if (
+        deliveryBundlePath &&
+        (params.action === "filter" || params.action === "preprocess" || params.action === "rollback") &&
+        result.output_path &&
+        fs.existsSync(result.output_path)
+      ) {
+        const sourceName = path.basename(datasetManifest.sourcePath, path.extname(datasetManifest.sourcePath))
+        const description = stageDeliveryDescription({
           action: params.action,
-          format: params.format ?? path.extname(result.output_path ?? "").replace(/^\./, ""),
+          stageLabel: params.stageLabel,
+          filters: params.filters,
+          operations: params.operations,
+          rollbackStageId: params.stageId ?? sourceStage?.stageId,
         })
-      }
-
-      if (params.action === "describe" || params.action === "correlation") {
-        publish(`${params.action}_csv`, `${params.action}_table`, result.output_path, { action: params.action, variables: result.variables })
-        publish(`${params.action}_xlsx`, `${params.action}_workbook`, result.workbook_path, { action: params.action, variables: result.variables })
+        const tempWorkbookPath = path.join(
+          projectTempRoot(),
+          `delivery_${params.action}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.xlsx`,
+        )
+        await writeDeliveryWorkbook({
+          sourcePath: result.output_path,
+          outputPath: tempWorkbookPath,
+          pythonCommand,
+        })
+        try {
+          const deliveryKey = `${params.action}_${result.stage_id ?? params.stageId ?? sourceStage?.stageId ?? Date.now()}_delivery_workbook`
+          const deliveryPath = publishDeliveryOutput({
+            manifest: datasetManifest,
+            key: deliveryKey,
+            label: deliveryKey,
+            sourcePath: tempWorkbookPath,
+            runId: effectiveRunId,
+            branch: "delivery",
+            stageId: result.stage_id ?? params.stageId ?? sourceStage?.stageId,
+            fileName: `${sanitizeDeliveryFilePart(sourceName)}_${description}.xlsx`,
+            metadata: {
+              action: params.action,
+              rows_after: result.rows_after,
+              columns_after: result.columns_after,
+              deliveryKind: "cleaned_workbook",
+            },
+          })
+          publishedFiles.push({
+            label: `${params.action}_delivery_workbook`,
+            relativePath: relativeWithinProject(deliveryPath),
+          })
+        } finally {
+          fs.rmSync(tempWorkbookPath, { force: true })
+        }
       }
     }
-
-    const visibleManifestPath = datasetManifest ? finalOutputsPath(datasetManifest.sourcePath, effectiveRunId) : undefined
 
     let output = `## Data ${params.action} completed\n\n`
     if (result.dataset_id) output += `Dataset: ${result.dataset_id}\n`
@@ -1529,7 +1947,11 @@ except Exception as exc:
     if (result.log_path) output += `Audit log: ${relativeWithinProject(result.log_path)}\n`
     if (result.numeric_snapshot_path) output += `Numeric snapshot: ${relativeWithinProject(result.numeric_snapshot_path)}\n`
     if (formatIgnoredForStage) output += `Format note: ${formatIgnoredForStage}\n`
-    if (visibleManifestPath) output += `Final outputs manifest: ${relativeWithinProject(visibleManifestPath)}\n`
+    if (deliveryBundlePath && publishedFiles.length) output += `Delivery bundle: ${relativeWithinProject(deliveryBundlePath)}\n`
+    if (publishedFiles.length) {
+      output += `Published files:\n`
+      for (const item of publishedFiles) output += `- ${item.relativePath}\n`
+    }
 
     if (params.action === "import" && result.column_info) {
       output += `\nColumn types:\n`
@@ -1575,6 +1997,16 @@ except Exception as exc:
       if (result.install_command) output += `Install command: ${result.install_command}\n`
     }
 
+    if (ctx.agent === "explorer" && result.success) {
+      AnalysisIntent.markExplorerPrepared(ctx.sessionID, {
+        action: params.action,
+        datasetId: result.dataset_id ?? datasetManifest?.datasetId,
+        stageId: result.stage_id ?? params.stageId ?? sourceStage?.stageId,
+        runId: effectiveRunId,
+        branch,
+      })
+    }
+
     return {
       title: `Data ${params.action}`,
       output,
@@ -1591,8 +2023,92 @@ except Exception as exc:
         qaGateStatus: qaGate.qaGateStatus,
         qaGateReason: qaGate.qaGateReason,
         qaSource: qaGate.qaSource,
-        visibleOutputs,
-        finalOutputsPath: visibleManifestPath ? relativeWithinProject(visibleManifestPath) : undefined,
+        deliveryBundleDir: deliveryBundlePath ? relativeWithinProject(deliveryBundlePath) : undefined,
+        publishedFiles,
+        finalOutputsPath:
+          datasetManifest && publishedFiles.length ? relativeWithinProject(finalOutputsPath(datasetManifest.sourcePath, effectiveRunId)) : undefined,
+        internalFinalOutputsPath:
+          datasetManifest && publishedFiles.length ? relativeWithinProject(finalOutputsPath(datasetManifest.sourcePath, effectiveRunId)) : undefined,
+        presentation: buildDataImportPresentation({
+          action: params.action,
+          result,
+          qaGate,
+          publishedFiles,
+          deliveryBundlePath,
+        }),
+        analysisView: createToolAnalysisView({
+          kind: "data_import",
+          foundInputFile: params.action === "import" ? analysisInputFile(result.input_path) : undefined,
+          step: `data_import(${params.action})`,
+          datasetId: result.dataset_id ?? datasetManifest?.datasetId,
+          stageId: result.stage_id ?? params.stageId ?? sourceStage?.stageId,
+          results: [
+            analysisMetric(
+              "行数变化",
+              result.rows_before !== undefined && result.rows_after !== undefined
+                ? `${result.rows_before} -> ${result.rows_after}`
+                : undefined,
+            ),
+            analysisMetric(
+              "列数变化",
+              result.columns_before !== undefined && result.columns_after !== undefined
+                ? `${result.columns_before} -> ${result.columns_after}`
+                : undefined,
+            ),
+            analysisMetric("QA 状态", params.action === "qa" ? qaGate.qaGateStatus ?? result.status : undefined),
+          ],
+          artifacts: [
+            ...publishedFiles.map((item) =>
+              analysisArtifact(item.relativePath, {
+                label: item.label,
+                visibility: "user_collapsed",
+              }),
+            ),
+            analysisArtifact(result.numeric_snapshot_path ? relativeWithinProject(result.numeric_snapshot_path) : undefined, {
+              visibility: "user_default",
+            }),
+          ],
+          warnings: buildDataImportWarnings({ result, qaGate }),
+        }),
+        display: createToolDisplay({
+          summary:
+            params.action === "qa"
+              ? `data_import(qa) completed with status ${result.status ?? qaGate.qaGateStatus ?? "unknown"}`
+              : params.action === "describe" || params.action === "correlation"
+                ? `data_import(${params.action}) completed for ${(result.variables ?? []).length} variables`
+                : result.rows_after !== undefined
+                  ? `data_import(${params.action}) completed: ${result.rows_after} rows after processing`
+                  : `data_import(${params.action}) completed`,
+          details: [
+            result.dataset_id ? `Dataset: ${result.dataset_id}` : undefined,
+            result.stage_id ? `Stage: ${result.stage_id}` : undefined,
+            result.rows_before !== undefined && result.rows_after !== undefined
+              ? `Rows: ${result.rows_before} -> ${result.rows_after}`
+              : undefined,
+            result.columns_before !== undefined && result.columns_after !== undefined
+              ? `Columns: ${result.columns_before} -> ${result.columns_after}`
+              : undefined,
+            params.action === "qa" ? `QA gate: ${qaGate.qaGateStatus}` : undefined,
+            result.warnings?.length ? `Warnings: ${result.warnings.join(" | ")}` : undefined,
+            result.blocking_errors?.length ? `Blocking errors: ${result.blocking_errors.join(" | ")}` : undefined,
+          ],
+          artifacts: [
+            ...publishedFiles.map((item) => ({
+              label: item.label,
+              path: item.relativePath,
+              visibility: "user_collapsed" as const,
+            })),
+            ...(result.numeric_snapshot_path
+              ? [
+                  {
+                    label: "numeric_snapshot",
+                    path: relativeWithinProject(result.numeric_snapshot_path),
+                    visibility: "user_collapsed" as const,
+                  },
+                ]
+              : []),
+          ],
+        }),
       },
     }
   },

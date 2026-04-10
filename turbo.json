@@ -9,10 +9,6 @@
     "killstata#test": {
       "dependsOn": ["^build"],
       "outputs": []
-    },
-    "@killstata/app#test": {
-      "dependsOn": ["^build"],
-      "outputs": []
     }
   }
 }

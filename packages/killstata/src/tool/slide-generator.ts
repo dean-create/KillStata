@@ -6,6 +6,8 @@ import { Tool } from "./tool"
 import { generatedArtifactRoot, loadResultBundle, readJsonFile, resolvePublishedJsonPath } from "./analysis-artifacts"
 import { finalOutputsPath, inferRunId, publishVisibleOutput, readDatasetManifest } from "./analysis-state"
 import { relativeWithinProject, resolveToolPath, resolveWorkspacePath } from "./analysis-path"
+import { createToolDisplay } from "./analysis-display"
+import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./analysis-user-view"
 
 export const SlideGeneratorInputSchema = z.object({
   datasetId: z.string().optional(),
@@ -104,6 +106,7 @@ export const SlideGeneratorTool = Tool.define("slide_generator", {
           sessionID: ctx.sessionID,
           messageID: ctx.messageID,
           callID: ctx.callID,
+          ask: ctx.ask,
         })
       : generatedArtifactRoot({ module: "slide_generator", runId, branch: params.branch })
     fs.mkdirSync(outputDir, { recursive: true })
@@ -122,7 +125,7 @@ export const SlideGeneratorTool = Tool.define("slide_generator", {
       {
         slide_number: 1,
         slide_title: "题目、作者、核心问题",
-        key_claims: [brief.core_question ?? brief.idea ?? "待补充"],
+        key_claims: [brief.core_question ?? brief.idea ?? "待补充核心问题"],
         grounded_numbers: [],
         source_artifacts: [relativeWithinProject(briefPath)],
         recommended_visual: "Title slide",
@@ -137,8 +140,8 @@ export const SlideGeneratorTool = Tool.define("slide_generator", {
       },
       {
         slide_number: 3,
-        slide_title: "文献/制度/政策切入点",
-        key_claims: ["从制度背景或政策冲击切入，建立研究问题与识别可行性。"],
+        slide_title: "文献、制度与政策切入点",
+        key_claims: ["从制度背景或政策冲击切入，建立研究问题与识别策略的现实合理性。"],
         grounded_numbers: [],
         source_artifacts: [relativeWithinProject(briefPath)],
         recommended_visual: "Policy timeline or institutional map",
@@ -146,7 +149,7 @@ export const SlideGeneratorTool = Tool.define("slide_generator", {
       {
         slide_number: 4,
         slide_title: "理论机制与研究假说",
-        key_claims: Array.isArray(brief.testable_hypotheses) ? brief.testable_hypotheses.slice(0, 3) : ["待补充假说"],
+        key_claims: Array.isArray(brief.testable_hypotheses) ? brief.testable_hypotheses.slice(0, 3) : ["待补充研究假说"],
         grounded_numbers: [],
         source_artifacts: [relativeWithinProject(briefPath)],
         recommended_visual: "Mechanism diagram",
@@ -191,9 +194,7 @@ export const SlideGeneratorTool = Tool.define("slide_generator", {
       {
         slide_number: 8,
         slide_title: "稳健性检验",
-        key_claims: [
-          heterogeneityBundle ? "已生成扩展稳健性/替代口径 bundle。" : "待补充稳健性 bundle。",
-        ],
+        key_claims: [heterogeneityBundle ? "已生成扩展稳健性或替代口径 bundle。" : "待补充稳健性 bundle。"],
         grounded_numbers: [],
         source_artifacts: heterogeneityBundlePath ? [relativeWithinProject(heterogeneityBundlePath)] : [],
         recommended_visual: params.tablePaths[1] ?? "Robustness comparison table",
@@ -219,7 +220,7 @@ export const SlideGeneratorTool = Tool.define("slide_generator", {
         slide_title: "结论、贡献、局限与 Q&A",
         key_claims: [
           "总结核心发现、边界条件与后续工作。",
-          paperDraft ? "可与论文初稿叙述保持一致。" : "建议在论文初稿完成后同步更新本页结论口径。",
+          paperDraft ? "可与论文草稿的叙述保持一致。" : "建议在论文草稿完成后同步更新本页结论口径。",
         ],
         grounded_numbers: [],
         source_artifacts: [
@@ -254,7 +255,15 @@ export const SlideGeneratorTool = Tool.define("slide_generator", {
     fs.writeFileSync(slidesJsonPath, JSON.stringify({ audience: params.audience, language: params.outputLanguage, slides }, null, 2), "utf-8")
     fs.writeFileSync(
       notesPath,
-      ["# Speaker Notes", "", ...slides.flatMap((slide) => [`## ${slide.speaker_notes_ref}`, `围绕“${slide.slide_title}”展开，逐条解释当前 grounded claim，并指出待补充部分。`, ""])].join("\n"),
+      [
+        "# Speaker Notes",
+        "",
+        ...slides.flatMap((slide) => [
+          `## ${slide.speaker_notes_ref}`,
+          `围绕“${slide.slide_title}”展开，逐条解释当前 grounded claim，并指出待补充部分。`,
+          "",
+        ]),
+      ].join("\n"),
       "utf-8",
     )
     fs.writeFileSync(
@@ -318,6 +327,51 @@ export const SlideGeneratorTool = Tool.define("slide_generator", {
         assetManifestPath: relativeWithinProject(assetManifestPath),
         visibleOutputs,
         finalOutputsPath: manifestPath ? relativeWithinProject(manifestPath) : undefined,
+        analysisView: createToolAnalysisView({
+          kind: "slide_generator",
+          step: "slide_generator",
+          datasetId,
+          stageId: baseline.stageId,
+          results: [
+            analysisMetric("slides", slides.length),
+            analysisMetric("audience", params.audience),
+            analysisMetric("language", params.outputLanguage),
+          ],
+          artifacts: [
+            analysisArtifact(relativeWithinProject(slidesPath), {
+              label: "slides.md",
+              visibility: "user_default",
+            }),
+            analysisArtifact(relativeWithinProject(slidesJsonPath), {
+              label: "slides.json",
+              visibility: "user_collapsed",
+            }),
+            analysisArtifact(relativeWithinProject(notesPath), {
+              label: "speaker_notes.md",
+              visibility: "user_collapsed",
+            }),
+            ...visibleOutputs.map((item) =>
+              analysisArtifact(item.relativePath, {
+                label: item.label,
+                visibility: "user_collapsed",
+              }),
+            ),
+          ],
+          conclusion: `演示材料已生成，共 ${slides.length} 页，建议先查看 slides.md 和 speaker_notes.md。`,
+        }),
+        display: createToolDisplay({
+          summary: `slide_generator created ${params.slideCount} slides for ${params.audience}`,
+          details: [
+            `Run ID: ${runId}`,
+            `Baseline result: ${relativeWithinProject(baseline.resultPath)}`,
+            paperDraftPath ? `Paper draft: ${relativeWithinProject(paperDraftPath)}` : undefined,
+          ],
+          artifacts: visibleOutputs.map((item) => ({
+            label: item.label,
+            path: item.relativePath,
+            visibility: "user_collapsed" as const,
+          })),
+        }),
       },
     }
   },

@@ -75,8 +75,18 @@ export namespace Command {
     ].filter((item, index, arr): item is string => typeof item === "string" && arr.indexOf(item) === index)
   }
 
+  export function resolveCapability(command: Pick<Info, "availability" | "queueBehavior" | "workflowAware" | "immediate" | "remoteSafe">) {
+    return {
+      availability: command.availability,
+      queueBehavior: command.queueBehavior,
+      workflowAware: command.workflowAware,
+      immediate: command.immediate,
+      remoteSafe: command.remoteSafe,
+    }
+  }
+
   function workflowTemplate(input: {
-    action: "status" | "stage" | "artifacts" | "doctor" | "verify" | "rerun_plan"
+    action: "status" | "stage" | "artifacts" | "doctor" | "verify" | "rerun_plan" | "rerun"
     guidance: string[]
   }) {
     return [
@@ -155,10 +165,10 @@ export namespace Command {
         remoteSafe: true,
         hints: ["$ARGUMENTS"],
         template: workflowTemplate({
-          action: "rerun_plan",
+          action: "rerun",
           guidance: [
-            "If the rerun plan is blocked, explain the exact reason and stop.",
-            "If the rerun plan is runnable, rerun only the target stage with the recorded replay input, then run workflow verification again.",
+            "If rerun is blocked, explain the exact reason and stop.",
+            "If rerun is runnable, rerun only the target stage with the recorded replay input, then run workflow verification again.",
             "Do not rerun already successful upstream stages.",
           ],
         }),

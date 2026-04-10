@@ -51,6 +51,26 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       session_status: {
         [sessionID: string]: SessionStatus
       }
+      workflow: {
+        [sessionID: string]: {
+          workflowRunId?: string
+          activeStage?: string
+          activeStageId?: string
+          approvalStatus?: "required" | "approved" | "declined"
+          currentChecklistItem?: {
+            id: string
+            label: string
+            status: "pending" | "in_progress" | "completed" | "blocked"
+          }
+          analysisChecklist: {
+            id: string
+            label: string
+            status: "pending" | "in_progress" | "completed" | "blocked"
+            linkedStageId?: string
+            summary?: string
+          }[]
+        }
+      }
       session_diff: {
         [sessionID: string]: Snapshot.FileDiff[]
       }
@@ -90,6 +110,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       provider_default: {},
       session: [],
       session_status: {},
+      workflow: {},
       session_diff: {},
       todo: {},
       message: {},
@@ -323,6 +344,17 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           break
         }
       }
+    })
+
+    sdk.event.on("runtime.workflow.state" as any, (event: any) => {
+      setStore("workflow", event.properties.sessionID, {
+        workflowRunId: event.properties.workflowRunId,
+        activeStage: event.properties.activeStage,
+        activeStageId: event.properties.activeStageId,
+        approvalStatus: event.properties.approvalStatus,
+        currentChecklistItem: event.properties.currentChecklistItem,
+        analysisChecklist: event.properties.analysisChecklist ?? [],
+      })
     })
 
     const exit = useExit()

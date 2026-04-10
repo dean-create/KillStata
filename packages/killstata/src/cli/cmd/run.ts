@@ -11,7 +11,8 @@ import { createKillstataClient, type KillstataClient } from "@killstata/sdk/v2"
 import { Server } from "../../server/server"
 import { Provider } from "../../provider/provider"
 import { Agent } from "../../agent/agent"
-import { decideNonInteractivePermission, shouldAutoHandleRunPermissions } from "./run-permission"
+import { decideNonInteractivePermission, decideNonInteractiveQuestion, shouldAutoHandleRunPermissions } from "./run-permission"
+import { readToolDisplay } from "../../tool/analysis-display"
 
 const TOOL: Record<string, [string, string]> = {
   todowrite: ["Todo", UI.Style.TEXT_WARNING_BOLD],
@@ -24,6 +25,27 @@ const TOOL: Record<string, [string, string]> = {
   read: ["Read", UI.Style.TEXT_HIGHLIGHT_BOLD],
   write: ["Write", UI.Style.TEXT_SUCCESS_BOLD],
   websearch: ["Search", UI.Style.TEXT_DIM_BOLD],
+}
+
+const DEFAULT_HIDDEN_TOOLS = new Set(["glob", "read", "workflow", "skill", "invalid", "task", "todowrite", "todoread"])
+
+function inferProjectRoot(workspaceRoot: string, processRoot: string) {
+  const normalizedWorkspace = path.resolve(workspaceRoot)
+  const marker = `${path.sep}modelpctest${path.sep}`
+  const markerIndex = normalizedWorkspace.toLowerCase().indexOf(marker.toLowerCase())
+  if (markerIndex > 0) {
+    return normalizedWorkspace.slice(0, markerIndex)
+  }
+
+  const normalizedProcessRoot = path.resolve(processRoot)
+  if (
+    path.basename(normalizedProcessRoot).toLowerCase() === "killstata" &&
+    path.basename(path.dirname(normalizedProcessRoot)).toLowerCase() === "packages"
+  ) {
+    return path.resolve(normalizedProcessRoot, "../../..")
+  }
+
+  return path.resolve(normalizedProcessRoot, "..")
 }
 
 export const RunCommand = cmd({
@@ -99,6 +121,7 @@ export const RunCommand = cmd({
   },
   handler: async (args) => {
     const effectiveCwd = args.cwd ? path.resolve(process.cwd(), args.cwd) : process.cwd()
+    const projectRootHint = inferProjectRoot(effectiveCwd, process.cwd())
     const autoHandlePermissions = shouldAutoHandleRunPermissions({
       format: args.format as "default" | "json",
       stdinIsTTY: Boolean(process.stdin.isTTY),
@@ -145,6 +168,10 @@ export const RunCommand = cmd({
     }
 
     const execute = async (sdk: KillstataClient, sessionID: string) => {
+      let finalText: string | undefined
+      let lastToolSignature: string | undefined
+      const eventsAbort = new AbortController()
+
       const printEvent = (color: string, type: string, title: string) => {
         UI.println(
           color + `|`,
@@ -162,7 +189,22 @@ export const RunCommand = cmd({
         return false
       }
 
-      const events = await sdk.event.subscribe()
+      const shouldPrintTool = (part: any) => {
+        const display = readToolDisplay(part.state?.metadata)
+        if (display?.visibility === "internal_only" || display?.visibility === "user_collapsed") return false
+        if (DEFAULT_HIDDEN_TOOLS.has(part.tool)) return false
+        return true
+      }
+
+      const toolTitle = (part: any) => {
+        const display = readToolDisplay(part.state?.metadata)
+        if (display?.summary) return display.summary
+        return part.state.title || (Object.keys(part.state.input).length > 0 ? JSON.stringify(part.state.input) : "Unknown")
+      }
+
+      const events = await sdk.event.subscribe(undefined, {
+        signal: eventsAbort.signal,
+      })
       let errorMsg: string | undefined
 
       const eventProcessor = (async () => {
@@ -173,10 +215,12 @@ export const RunCommand = cmd({
 
             if (part.type === "tool" && part.state.status === "completed") {
               if (outputJsonEvent("tool_use", { part })) continue
+              if (!shouldPrintTool(part)) continue
               const [tool, color] = TOOL[part.tool] ?? [part.tool, UI.Style.TEXT_INFO_BOLD]
-              const title =
-                part.state.title ||
-                (Object.keys(part.state.input).length > 0 ? JSON.stringify(part.state.input) : "Unknown")
+              const title = toolTitle(part)
+              const signature = `${part.tool}:${title}`
+              if (signature === lastToolSignature) continue
+              lastToolSignature = signature
               printEvent(color, tool, title)
               if (part.tool === "bash" && part.state.output?.trim()) {
                 UI.println()
@@ -194,10 +238,7 @@ export const RunCommand = cmd({
 
             if (part.type === "text" && part.time?.end) {
               if (outputJsonEvent("text", { part })) continue
-              const isPiped = !process.stdout.isTTY
-              if (!isPiped) UI.println()
-              process.stdout.write((isPiped ? part.text : UI.markdown(part.text)) + EOL)
-              if (!isPiped) UI.println()
+              finalText = part.text
             }
           }
 
@@ -214,6 +255,13 @@ export const RunCommand = cmd({
           }
 
           if (event.type === "session.idle" && event.properties.sessionID === sessionID) {
+            if (args.format === "default" && finalText?.trim()) {
+              const isPiped = !process.stdout.isTTY
+              if (!isPiped) UI.println()
+              process.stdout.write((isPiped ? finalText : UI.markdown(finalText)) + EOL)
+              if (!isPiped) UI.println()
+            }
+            eventsAbort.abort()
             break
           }
 
@@ -223,6 +271,7 @@ export const RunCommand = cmd({
             if (autoHandlePermissions) {
               const decision = decideNonInteractivePermission({
                 workspaceRoot: effectiveCwd,
+                projectRoot: projectRootHint,
                 request: {
                   permission: permission.permission,
                   patterns: permission.patterns,
@@ -242,11 +291,13 @@ export const RunCommand = cmd({
                 })
                 continue
               }
-              UI.println(
-                decision.response === "reject" ? UI.Style.TEXT_WARNING_BOLD + "!" : UI.Style.TEXT_INFO_BOLD + "~",
-                UI.Style.TEXT_NORMAL,
-                `${decision.reason}: ${permission.permission} (${permission.patterns.join(", ")}) -> ${decision.response}`,
-              )
+              if (decision.response === "reject") {
+                UI.println(
+                  UI.Style.TEXT_WARNING_BOLD + "!",
+                  UI.Style.TEXT_NORMAL,
+                  `${decision.reason}: ${permission.permission} (${permission.patterns.join(", ")}) -> ${decision.response}`,
+                )
+              }
               await sdk.permission.respond({
                 sessionID,
                 permissionID: permission.id,
@@ -274,6 +325,47 @@ export const RunCommand = cmd({
           if (event.type === "question.asked") {
             const question = event.properties
             if (question.sessionID !== sessionID) continue
+            if (autoHandlePermissions) {
+              const decision = decideNonInteractiveQuestion({
+                workspaceRoot: effectiveCwd,
+                projectRoot: projectRootHint,
+                request: {
+                  questions: question.questions.map((item) => ({
+                    header: item.header,
+                    question: item.question,
+                  })),
+                },
+              })
+              if (decision.action === "reply" && decision.answers) {
+                if (outputJsonEvent("question_auto_replied", { question, decision })) {
+                  await sdk.question.reply({
+                    requestID: question.id,
+                    answers: decision.answers,
+                  })
+                  continue
+                }
+                await sdk.question.reply({
+                  requestID: question.id,
+                  answers: decision.answers,
+                })
+                continue
+              }
+              if (outputJsonEvent("question_auto_rejected", { question, decision })) {
+                await sdk.question.reject({
+                  requestID: question.id,
+                })
+                continue
+              }
+              UI.println(
+                UI.Style.TEXT_WARNING_BOLD + "!",
+                UI.Style.TEXT_NORMAL,
+                `${decision.reason}: auto-rejecting question request ${question.id}`,
+              )
+              await sdk.question.reject({
+                requestID: question.id,
+              })
+              continue
+            }
             await sdk.question.reject({
               requestID: question.id,
             })
@@ -321,7 +413,7 @@ export const RunCommand = cmd({
         })
       } else {
         const modelParam = args.model ? Provider.parseModel(args.model) : undefined
-        await sdk.session.prompt({
+        await sdk.session.promptAsync({
           sessionID,
           agent: resolvedAgent,
           model: modelParam,
@@ -330,8 +422,10 @@ export const RunCommand = cmd({
         })
       }
 
-      await eventProcessor
-      if (errorMsg) process.exit(1)
+      await eventProcessor.finally(() => {
+        eventsAbort.abort()
+      })
+      return errorMsg ? 1 : 0
     }
 
     if (args.attach) {
@@ -403,7 +497,8 @@ export const RunCommand = cmd({
         }
       }
 
-      return await execute(sdk, sessionID)
+      const exitCode = await execute(sdk, sessionID)
+      process.exit(exitCode)
     }
 
     await bootstrap(effectiveCwd, async () => {
@@ -484,7 +579,8 @@ export const RunCommand = cmd({
         }
       }
 
-      await execute(sdk, sessionID)
+      const exitCode = await execute(sdk, sessionID)
+      process.exit(exitCode)
     })
   },
 })

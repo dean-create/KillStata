@@ -9,6 +9,7 @@ const dir = fileURLToPath(new URL("..", import.meta.url))
 process.chdir(dir)
 const cliBinaryName = "killstata"
 const packOnly = process.argv.includes("--pack-only")
+const windowsPriorityFlag = process.argv.includes("--windows-priority")
 
 function currentBinaryPackageName() {
   const platform = process.platform === "win32" ? "windows" : process.platform
@@ -86,6 +87,8 @@ if (!packOnly) {
   }
 }
 
+const hasLinuxContainers = ["killstata-linux-arm64", "killstata-linux-x64"].every((name) => binaries[name])
+
 if (!Script.preview && !packOnly) {
   // Create archives for GitHub release
   for (const key of Object.keys(binaries)) {
@@ -96,9 +99,11 @@ if (!Script.preview && !packOnly) {
     }
   }
 
-  const image = "ghcr.io/anomalyco/killstata"
-  const platforms = "linux/amd64,linux/arm64"
-  const tags = [`${image}:${Script.version}`, `${image}:latest`]
-  const tagFlags = tags.flatMap((t) => ["-t", t])
-  await $`docker buildx build --platform ${platforms} ${tagFlags} --push .`
+  if (!windowsPriorityFlag && hasLinuxContainers) {
+    const image = "ghcr.io/anomalyco/killstata"
+    const platforms = "linux/amd64,linux/arm64"
+    const tags = [`${image}:${Script.version}`, `${image}:latest`]
+    const tagFlags = tags.flatMap((t) => ["-t", t])
+    await $`docker buildx build --platform ${platforms} ${tagFlags} --push .`
+  }
 }

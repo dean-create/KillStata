@@ -76,7 +76,26 @@ export namespace Server {
             status: 500,
           })
         })
+        .use(
+          cors({
+            origin(input) {
+              if (!input) return
+
+              if (input.startsWith("http://localhost:")) return input
+              if (input.startsWith("http://127.0.0.1:")) return input
+              if (input === "tauri://localhost" || input === "http://tauri.localhost") return input
+
+              if (_corsWhitelist.includes(input)) {
+                return input
+              }
+
+              return
+            },
+            allowHeaders: ["Authorization", "Content-Type", "X-Killstata-Directory"],
+          }),
+        )
         .use((c, next) => {
+          if (c.req.method === "OPTIONS") return next()
           const password = Flag.KILLSTATA_SERVER_PASSWORD
           if (!password) return next()
           const username = Flag.KILLSTATA_SERVER_USERNAME ?? "killstata"
@@ -99,23 +118,6 @@ export namespace Server {
             timer.stop()
           }
         })
-        .use(
-          cors({
-            origin(input) {
-              if (!input) return
-
-              if (input.startsWith("http://localhost:")) return input
-              if (input.startsWith("http://127.0.0.1:")) return input
-              if (input === "tauri://localhost" || input === "http://tauri.localhost") return input
-
-              if (_corsWhitelist.includes(input)) {
-                return input
-              }
-
-              return
-            },
-          }),
-        )
         .route("/global", GlobalRoutes())
         .use(async (c, next) => {
           let directory = c.req.query("directory") || c.req.header("x-killstata-directory") || process.cwd()

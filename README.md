@@ -1,4 +1,9 @@
 # killstata
+## Workflow Map
+
+- Current implemented workflow guide: [CURRENT_IMPLEMENTED_WORKFLOW.md](./CURRENT_IMPLEMENTED_WORKFLOW.md)
+- Final output chain audit report: [FINAL_OUTPUT_CHAIN_AUDIT.md](./FINAL_OUTPUT_CHAIN_AUDIT.md)
+- Desktop GUI 已迁移到 [../other/killstata_desktop](../other/killstata_desktop)，此仓当前只维护 CLI 核心。
 
 **killstata** - 基于CLI的计量经济学智能助理
 

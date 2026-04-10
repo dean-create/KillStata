@@ -17,7 +17,6 @@ import { Bus } from "../bus"
 import { ProviderTransform } from "../provider/transform"
 import { SystemPrompt } from "./system"
 import { Plugin } from "../plugin"
-import PROMPT_PLAN from "../session/prompt/plan.txt"
 import ANALYST_SWITCH from "../session/prompt/analyst-switch.txt"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
 import { defer } from "../util/defer"
@@ -50,6 +49,7 @@ import { QueryGuard } from "@/runtime/query-guard"
 import { RuntimeEvents } from "@/runtime/events"
 import type { QueuedSessionAction, ToolAvailabilityPolicy, WorkflowInputIntent } from "@/runtime/types"
 import { RuntimeHooks } from "@/runtime/hooks"
+import { allowMcpToolForWorkflow } from "@/runtime/workflow"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -882,7 +882,7 @@ export namespace SessionPrompt {
     SessionCompaction.prune({ sessionID })
     for await (const item of MessageV2.stream(sessionID)) {
       if (item.info.role === "user") continue
-      resolveCallbacks(sessionID, item)
+      resolveCallbacks(sessionID, item, activeAction?.id)
       return item
     }
     throw new Error("Impossible")
@@ -907,6 +907,7 @@ export namespace SessionPrompt {
   }) {
     using _ = log.time("resolveTools")
     const tools: Record<string, AITool> = {}
+    const resolvedIntent: WorkflowInputIntent = input.intent ?? "analysis"
 
     const extractKeyedValue = (input: string, key: string): string | undefined => {
       const match = new RegExp(`\\b${key}\\s*[:=]\\s*([^\\n\\r}]+)`, "i").exec(input)
@@ -1002,7 +1003,7 @@ export namespace SessionPrompt {
     const toolAvailability: ToolAvailabilityPolicy = {
       sessionID: input.session.id,
       agent: input.agent.name,
-      inputIntent: input.intent,
+      inputIntent: resolvedIntent,
       platformCapabilities: {
         mcp: true,
         images: input.hasImageInput ?? false,
@@ -1084,6 +1085,7 @@ export namespace SessionPrompt {
     }
 
     for (const [key, item] of Object.entries(await MCP.tools())) {
+      if (!allowMcpToolForWorkflow({ toolName: key, policy: toolAvailability })) continue
       const execute = item.execute
       if (!execute) continue
 
@@ -1581,6 +1583,14 @@ export namespace SessionPrompt {
   async function insertReminders(input: { messages: MessageV2.WithParts[]; agent: Agent.Info; session: Session.Info }) {
     const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
     if (!userMessage) return input.messages
+    const userText = userMessage.parts
+      .filter((part): part is MessageV2.TextPart => part.type === "text")
+      .map((part) => part.text)
+      .join("\n")
+    const isPlanSwitchRequest =
+      userMessage.info.agent === "explorer" && /User has requested to enter explorer mode/i.test(userText)
+    const isPlanApprovalSwitch =
+      userMessage.info.agent === "analyst" && /The plan at .* has been approved/i.test(userText)
 
     // Original logic when experimental explorer mode is disabled
     if (!Flag.KILLSTATA_EXPERIMENTAL_PLAN_MODE) {
@@ -1590,7 +1600,18 @@ export namespace SessionPrompt {
           messageID: userMessage.info.id,
           sessionID: userMessage.info.sessionID,
           type: "text",
-          text: PROMPT_PLAN,
+          text: `<system-reminder>
+Explorer mode is active.
+
+This is data-preparation mode. You may inspect files and run data-prep tools for import, QA, describe, correlation, preprocessing, and variable engineering.
+Before any deletion-like step such as filter/dropna/rollback, ask the user to confirm.
+Do not run formal econometric estimation or report-generation tools by default; hand prepared artifacts to Analyst.
+
+You can provide targeted help in three common ways:
+1. Analyze a dataset: inspect files, summarize structure, identify variable roles, flag QA issues, and do non-destructive cleaning.
+2. Design an empirical study: refine the question, variables, identification strategy, and required preparation steps.
+3. Solve an econometrics question: explain methods, assumptions, diagnostics, and recommended next steps.
+</system-reminder>`,
           synthetic: true,
         })
       }
@@ -1601,7 +1622,9 @@ export namespace SessionPrompt {
           messageID: userMessage.info.id,
           sessionID: userMessage.info.sessionID,
           type: "text",
-          text: ANALYST_SWITCH,
+          text:
+            ANALYST_SWITCH +
+            "\n\nReview the latest dataset and QA artifacts first, then present an execution checklist before running econometrics.",
           synthetic: true,
         })
       }
@@ -1613,16 +1636,39 @@ export namespace SessionPrompt {
 
     // Switching from explorer mode to analyst mode
     if (input.agent.name !== "explorer" && assistantMessage?.info.agent === "explorer") {
-      const plan = await Session.planReadPath(input.session)
-      const exists = await Bun.file(plan).exists()
-      if (exists) {
+      if (isPlanApprovalSwitch) {
+        const plan = await Session.planReadPath(input.session)
+        const exists = await Bun.file(plan).exists()
+        if (exists) {
+          const part = await Session.updatePart({
+            id: Identifier.ascending("part"),
+            messageID: userMessage.info.id,
+            sessionID: userMessage.info.sessionID,
+            type: "text",
+            text:
+              ANALYST_SWITCH + "\n\n" + `A plan file exists at ${plan}. You should execute on the plan defined within it`,
+            synthetic: true,
+          })
+          userMessage.parts.push(part)
+        }
+      } else {
         const part = await Session.updatePart({
           id: Identifier.ascending("part"),
           messageID: userMessage.info.id,
           sessionID: userMessage.info.sessionID,
           type: "text",
-          text:
-            ANALYST_SWITCH + "\n\n" + `A plan file exists at ${plan}. You should execute on the plan defined within it`,
+          text: `<system-reminder>
+Analyst mode is active.
+
+You are receiving a workflow handoff from Explorer. Do not jump straight into regression.
+
+Before empirical execution:
+1. Read the latest canonical dataset / datasetId-stageId context when available.
+2. Inspect the most recent QA, describe, and workflow artifacts.
+3. Present a concise execution checklist with these items: Data readiness, Identification & variables, Baseline model, Diagnostics & robustness, Reporting.
+4. Ask for approval before running estimation or execution-heavy data steps.
+5. Reuse Explorer-produced artifacts instead of re-importing or re-cleaning unless the workflow evidence says they are stale or missing.
+</system-reminder>`,
           synthetic: true,
         })
         userMessage.parts.push(part)
@@ -1632,6 +1678,33 @@ export namespace SessionPrompt {
 
     // Entering explorer mode
     if (input.agent.name === "explorer" && assistantMessage?.info.agent !== "explorer") {
+      if (!isPlanSwitchRequest) {
+        const part = await Session.updatePart({
+          id: Identifier.ascending("part"),
+          messageID: userMessage.info.id,
+          sessionID: userMessage.info.sessionID,
+          type: "text",
+          text: `<system-reminder>
+Explorer mode is active.
+
+This is data-preparation mode, not read-only planning mode.
+
+You may inspect files and run data-prep tools for import, describe, correlation, QA, preprocessing, and variable engineering.
+Before any deletion-like step such as filter/dropna/rollback, ask the user to confirm.
+Do not run formal econometric estimation, regression tables, or report-generation tools by default.
+Your job is to hand clean datasets, QA evidence, and variable candidates to Analyst.
+
+You can provide targeted help in three common ways:
+1. Analyze a dataset: inspect files, summarize structure, identify variable roles, flag QA issues, and do non-destructive cleaning.
+2. Design an empirical study: refine the research question, variables, identification strategy, and preparation plan.
+3. Solve an econometrics question: explain methods, assumptions, diagnostics, and what should happen next in the workflow.
+</system-reminder>`,
+          synthetic: true,
+        })
+        userMessage.parts.push(part)
+        return input.messages
+      }
+
       const plan = Session.plan(input.session)
       const exists = await Bun.file(plan).exists()
       if (!exists) await fs.mkdir(path.dirname(plan), { recursive: true })
@@ -2090,6 +2163,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     }
 
     const templateParts = await resolvePromptParts(template)
+    const commandParts = command.workflowAware
+      ? templateParts.map((part) => {
+        if (part.type !== "text") return part
+        return {
+          ...part,
+          synthetic: true,
+        }
+      })
+      : templateParts
     const isSubtask = (agent.mode === "subagent" && command.subtask !== false) || command.subtask === true
     const parts = isSubtask
       ? [
@@ -2103,10 +2185,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             modelID: taskModel.modelID,
           },
           // TODO: how can we make task tool accept a more complex input?
-          prompt: templateParts.find((y) => y.type === "text")?.text ?? "",
+          prompt: commandParts.find((y) => y.type === "text")?.text ?? "",
         },
       ]
-      : [...templateParts, ...(input.parts ?? [])]
+      : [...commandParts, ...(input.parts ?? [])]
 
     const userAgent = isSubtask ? (input.agent ?? (await Agent.defaultAgent())) : agentName
     const userModel = isSubtask

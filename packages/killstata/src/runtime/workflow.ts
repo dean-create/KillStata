@@ -3,6 +3,7 @@ import fs from "fs"
 import path from "path"
 import { Bus } from "@/bus"
 import type {
+  AnalysisChecklistItem,
   RepairHandler,
   RepairHandlerResult,
   StageFailureCode,
@@ -47,11 +48,61 @@ const DEFAULT_STAGE_EDGES = DEFAULT_STAGE_SEQUENCE.slice(0, -1).map((kind, index
   to: DEFAULT_STAGE_SEQUENCE[index + 1],
 }))
 
+const ANALYSIS_CHECKLIST_TEMPLATE = [
+  { id: "data_readiness", label: "Data readiness" },
+  { id: "identification", label: "Identification & variables" },
+  { id: "baseline_model", label: "Baseline model" },
+  { id: "diagnostics", label: "Diagnostics & robustness" },
+  { id: "reporting", label: "Reporting" },
+] as const satisfies ReadonlyArray<Pick<AnalysisChecklistItem, "id" | "label">>
+
 const AUTO_VERIFY_STAGES = new Set<WorkflowStageKind>([
   "import",
   "qa_gate",
   "preprocess_or_filter",
   "baseline_estimate",
+])
+
+const WORKFLOW_ARTIFACT_EXTENSIONS = new Set([
+  ".csv",
+  ".docx",
+  ".dta",
+  ".json",
+  ".log",
+  ".md",
+  ".parquet",
+  ".tex",
+  ".txt",
+  ".xls",
+  ".xlsx",
+])
+
+const VERIFIER_READABLE_ARTIFACT_EXTENSIONS = new Set([".csv", ".json", ".log", ".md", ".tex", ".txt"])
+
+const NON_ARTIFACT_PATH_KEYS = [
+  "install_command",
+  "installcommand",
+  "python_command",
+  "pythoncommand",
+  "python_executable",
+  "pythonexecutable",
+  "resolved_python_executable",
+  "resolvedpythonexecutable",
+  "interpreter",
+  "executable",
+]
+
+const NON_ARTIFACT_EXTENSIONS = new Set([
+  ".bat",
+  ".bin",
+  ".cmd",
+  ".dll",
+  ".exe",
+  ".msi",
+  ".node",
+  ".pyc",
+  ".so",
+  ".wasm",
 ])
 
 const STAGE_DEPENDENCIES: Record<WorkflowStageKind, WorkflowStageKind[]> = {
@@ -69,22 +120,22 @@ const STAGE_DEPENDENCIES: Record<WorkflowStageKind, WorkflowStageKind[]> = {
 const INPUT_INTENT_TOOL_BUNDLES = {
   status: ["workflow", "read", "glob", "grep", "skill"],
   verify: ["workflow", "read", "glob", "grep", "regression_table", "skill"],
-  repair: ["workflow", "read", "glob", "grep", "skill", "data_import", "econometrics", "regression_table"],
+  repair: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch", "econometrics", "regression_table"],
   report: ["workflow", "read", "research_brief", "paper_draft", "slide_generator", "regression_table"],
-  analysis: ["workflow", "read", "glob", "grep", "skill", "data_import", "econometrics", "regression_table"],
+  analysis: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch", "econometrics", "regression_table"],
 } as const
 
 const WORKFLOW_EXECUTION_POLICY = {
   autoVerifyStages: [...AUTO_VERIFY_STAGES],
   freshVerifierAgent: "verifier",
   repairOnlyBundles: {
-    healthcheck: ["workflow", "read", "glob", "grep", "skill", "data_import"],
-    import: ["workflow", "read", "glob", "grep", "skill", "data_import"],
-    profile_or_schema_check: ["workflow", "read", "glob", "grep", "skill", "data_import"],
-    qa_gate: ["workflow", "read", "glob", "grep", "skill", "data_import"],
-    preprocess_or_filter: ["workflow", "read", "glob", "grep", "skill", "data_import"],
-    describe_or_diagnostics: ["workflow", "read", "glob", "grep", "skill", "data_import"],
-    baseline_estimate: ["workflow", "read", "glob", "grep", "skill", "data_import", "econometrics", "regression_table"],
+    healthcheck: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch"],
+    import: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch"],
+    profile_or_schema_check: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch"],
+    qa_gate: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch"],
+    preprocess_or_filter: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch"],
+    describe_or_diagnostics: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch"],
+    baseline_estimate: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch", "econometrics", "regression_table"],
     verifier: ["workflow", "read", "glob", "grep", "skill", "regression_table"],
     report: ["workflow", "read", "glob", "grep", "skill"],
   },
@@ -124,7 +175,9 @@ function similarColumns(input: string, columns: string[]) {
       column,
       score: Math.min(
         levenshtein(input, column),
-        column.toLowerCase().includes(input.toLowerCase()) || input.toLowerCase().includes(column.toLowerCase()) ? 0 : 99,
+        column.toLowerCase().includes(input.toLowerCase()) || input.toLowerCase().includes(column.toLowerCase())
+          ? 0
+          : 99,
       ),
     }))
     .sort((a, b) => a.score - b.score || a.column.localeCompare(b.column))
@@ -135,6 +188,182 @@ function similarColumns(input: string, columns: string[]) {
 function normalizeRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {}
   return value as Record<string, unknown>
+}
+
+function latestStageByKinds(run: WorkflowRun | undefined, kinds: WorkflowStageKind[]) {
+  if (!run) return undefined
+  const wanted = new Set(kinds)
+  return [...run.stages].reverse().find((stage) => wanted.has(stage.kind))
+}
+
+function latestStageForChecklist(
+  run: WorkflowRun | undefined,
+  itemID: AnalysisChecklistItem["id"],
+): StageNode | undefined {
+  switch (itemID) {
+    case "data_readiness":
+      return latestStageByKinds(run, [
+        "healthcheck",
+        "import",
+        "profile_or_schema_check",
+        "qa_gate",
+        "preprocess_or_filter",
+        "describe_or_diagnostics",
+      ])
+    case "identification":
+      return latestStageByKinds(run, ["baseline_estimate", "verifier", "report"])
+    case "baseline_model":
+      return latestStageByKinds(run, ["baseline_estimate", "verifier", "report"])
+    case "diagnostics":
+      return latestStageByKinds(run, ["verifier", "report"])
+    case "reporting":
+      return latestStageByKinds(run, ["report"])
+  }
+}
+
+function checklistStatusForDataReadiness(run: WorkflowRun): AnalysisChecklistItem["status"] {
+  const prepStages = run.stages.filter((stage) =>
+    [
+      "healthcheck",
+      "import",
+      "profile_or_schema_check",
+      "qa_gate",
+      "preprocess_or_filter",
+      "describe_or_diagnostics",
+    ].includes(stage.kind),
+  )
+  if (prepStages.some((stage) => stage.status === "blocked" || stage.status === "failed")) return "blocked"
+  if (
+    prepStages.some((stage) => stage.kind === "describe_or_diagnostics" && stage.status === "completed") ||
+    run.stages.some((stage) => ["baseline_estimate", "verifier", "report"].includes(stage.kind))
+  ) {
+    return "completed"
+  }
+  if (
+    prepStages.some((stage) => stage.status === "completed" || stage.status === "running") ||
+    [
+      "healthcheck",
+      "import",
+      "profile_or_schema_check",
+      "qa_gate",
+      "preprocess_or_filter",
+      "describe_or_diagnostics",
+    ].includes(run.activeStage ?? "")
+  ) {
+    return "in_progress"
+  }
+  return "pending"
+}
+
+function checklistSummary(run: WorkflowRun, itemID: AnalysisChecklistItem["id"]) {
+  const stage = latestStageForChecklist(run, itemID)
+  if (itemID === "data_readiness") {
+    if (run.datasetId && stage?.stageId) return `Reusing ${run.datasetId} / ${stage.stageId}`
+    if (run.datasetId) return `Current dataset: ${run.datasetId}`
+    return stage ? `Latest prep stage: ${stage.stageId}` : "Waiting for import and QA"
+  }
+  if (itemID === "identification") {
+    const baselineStage = latestStageByKinds(run, ["baseline_estimate"])
+    if (baselineStage?.replayInput) {
+      const dependentVar = typeof baselineStage.replayInput["dependentVar"] === "string"
+        ? baselineStage.replayInput["dependentVar"]
+        : undefined
+      const treatmentVar = typeof baselineStage.replayInput["treatmentVar"] === "string"
+        ? baselineStage.replayInput["treatmentVar"]
+        : undefined
+      if (dependentVar || treatmentVar) {
+        return [dependentVar ? `Y=${dependentVar}` : undefined, treatmentVar ? `T=${treatmentVar}` : undefined]
+          .filter(Boolean)
+          .join(", ")
+      }
+    }
+    return run.approvalStatus === "required" ? "Waiting for execution approval" : "Need core variables and identification strategy"
+  }
+  if (itemID === "baseline_model") {
+    return stage ? `${stage.stageId} (${stage.status})` : "Baseline model has not run yet"
+  }
+  if (itemID === "diagnostics") {
+    if (run.latestVerifier?.status) return `verifier=${run.latestVerifier.status}`
+    return stage ? `${stage.stageId} (${stage.status})` : "Diagnostics and robustness checks have not run yet"
+  }
+  return stage ? `${stage.stageId} (${stage.status})` : "Grounded report has not been generated yet"
+}
+
+function refreshAnalysisChecklist(run: WorkflowRun) {
+  const dataReadiness = checklistStatusForDataReadiness(run)
+  const baselineStage = latestStageByKinds(run, ["baseline_estimate"])
+  const verifierStage = latestStageByKinds(run, ["verifier"])
+  const reportStage = latestStageByKinds(run, ["report"])
+
+  const identificationStatus: AnalysisChecklistItem["status"] =
+    dataReadiness === "blocked"
+      ? "blocked"
+      : reportStage || verifierStage || baselineStage
+        ? "completed"
+        : run.planGeneratedAt
+          ? "in_progress"
+          : "pending"
+
+  const baselineStatus: AnalysisChecklistItem["status"] =
+    baselineStage?.status === "blocked" || baselineStage?.status === "failed"
+      ? "blocked"
+      : reportStage || verifierStage || (baselineStage && baselineStage.status === "completed")
+        ? "completed"
+        : run.activeStage === "baseline_estimate"
+          ? "in_progress"
+          : "pending"
+
+  const diagnosticsStatus: AnalysisChecklistItem["status"] =
+    run.latestVerifier?.status === "block" || verifierStage?.status === "blocked" || verifierStage?.status === "failed"
+      ? "blocked"
+      : reportStage || run.latestVerifier?.status === "pass" || run.latestVerifier?.status === "warn"
+        ? "completed"
+        : run.activeStage === "verifier"
+          ? "in_progress"
+          : "pending"
+
+  const reportingStatus: AnalysisChecklistItem["status"] =
+    reportStage?.status === "blocked" || reportStage?.status === "failed"
+      ? "blocked"
+      : reportStage?.status === "completed"
+        ? "completed"
+        : run.activeStage === "report"
+          ? "in_progress"
+          : "pending"
+
+  const statusMap: Record<AnalysisChecklistItem["id"], AnalysisChecklistItem["status"]> = {
+    data_readiness: dataReadiness,
+    identification: identificationStatus,
+    baseline_model: baselineStatus,
+    diagnostics: diagnosticsStatus,
+    reporting: reportingStatus,
+  }
+
+  run.analysisChecklist = ANALYSIS_CHECKLIST_TEMPLATE.map((item) => {
+    const linkedStage = latestStageForChecklist(run, item.id)
+    return {
+      id: item.id,
+      label: item.label,
+      status: statusMap[item.id],
+      linkedStageId: linkedStage?.stageId,
+      summary: checklistSummary(run, item.id),
+    }
+  })
+}
+
+function currentChecklistItem(run?: WorkflowRun) {
+  if (!run) return undefined
+  return (
+    run.analysisChecklist.find((item) => item.status === "blocked") ??
+    run.analysisChecklist.find((item) => item.status === "in_progress") ??
+    run.analysisChecklist.find((item) => item.status === "pending")
+  )
+}
+
+function refreshWorkflowRunDerivedState(run: WorkflowRun) {
+  refreshWorkflowRunGraph(run)
+  refreshAnalysisChecklist(run)
+  return run
 }
 
 function workflowRoot() {
@@ -162,12 +391,14 @@ export function readWorkflowSession(sessionID: string): WorkflowSessionState {
   const filePath = workflowSessionPath(sessionID)
   if (!fs.existsSync(filePath)) return emptySessionState(sessionID)
   const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Partial<WorkflowSessionState>
-  return {
+  const state: WorkflowSessionState = {
     version: 1,
     sessionID,
     activeRunId: parsed.activeRunId,
     runs: Array.isArray(parsed.runs) ? parsed.runs : [],
   }
+  state.runs.forEach((run) => refreshWorkflowRunDerivedState(run))
+  return state
 }
 
 export function writeWorkflowSession(state: WorkflowSessionState) {
@@ -194,6 +425,11 @@ function emptyRun(input: { sessionID: string; datasetId?: string; runId?: string
     edges: [...DEFAULT_STAGE_EDGES],
     stages: [],
     trustedArtifacts: [],
+    analysisChecklist: ANALYSIS_CHECKLIST_TEMPLATE.map((item) => ({
+      id: item.id,
+      label: item.label,
+      status: item.id === "data_readiness" ? "in_progress" : "pending",
+    })),
     createdAt,
     updatedAt: createdAt,
   }
@@ -211,7 +447,9 @@ function ensureRun(
         (input.datasetId ? run.datasetId === input.datasetId : true) &&
         (input.runId ? run.runId === input.runId : true),
     ) ??
-    (sessionState.activeRunId ? sessionState.runs.find((run) => run.workflowRunId === sessionState.activeRunId) : undefined)
+    (sessionState.activeRunId
+      ? sessionState.runs.find((run) => run.workflowRunId === sessionState.activeRunId)
+      : undefined)
 
   if (existing) {
     existing.datasetId = input.datasetId ?? existing.datasetId
@@ -237,14 +475,97 @@ function findStage(run: WorkflowRun, stageId: string, branch: string) {
   return run.stages.find((stage) => stage.stageId === stageId && stage.branch === branch)
 }
 
+function resolveWorkflowStageId(input: {
+  run: WorkflowRun
+  branch: string
+  kind: WorkflowStageKind
+  preferredStageId: string
+  cacheKey?: string
+}) {
+  const initial = findStage(input.run, input.preferredStageId, input.branch)
+  if (!initial) return input.preferredStageId
+  if (initial.kind === input.kind && initial.cacheKey === input.cacheKey) return input.preferredStageId
+
+  const base = `${input.preferredStageId}__${input.kind}`
+  let candidate = base
+  let index = 1
+
+  while (true) {
+    const existing = findStage(input.run, candidate, input.branch)
+    if (!existing) return candidate
+    if (existing.kind === input.kind && existing.cacheKey === input.cacheKey) return candidate
+    candidate = `${base}_${index.toString().padStart(3, "0")}`
+    index += 1
+  }
+}
+
 function upsertStage(run: WorkflowRun, stage: StageNode) {
   const existing = findStage(run, stage.stageId, stage.branch)
   if (existing) {
     Object.assign(existing, stage, { createdAt: existing.createdAt, updatedAt: nowIso() })
+    refreshBranchDownstream(run, stage.branch)
     return existing
   }
   run.stages.push(stage)
+  refreshBranchDownstream(run, stage.branch)
   return stage
+}
+
+function normalizeArtifactCandidate(value: string) {
+  const trimmed = value.trim().replace(/^file:\/\//i, "")
+  if (!trimmed) return undefined
+  if (/[\r\n]/.test(trimmed)) return undefined
+  return trimmed
+}
+
+function hasCommandSyntax(value: string) {
+  return /\s-(?:m|c|I|u)\b/i.test(value) || /\s+(?:pip|conda|uv|bun|npm|pnpm|yarn)\s+/i.test(value)
+}
+
+function artifactKeyIsRuntimeOnly(key?: string) {
+  const normalized = key?.replace(/[^a-z0-9]/gi, "").toLowerCase() ?? ""
+  if (!normalized) return false
+  return NON_ARTIFACT_PATH_KEYS.some((item) => normalized.includes(item.replace(/[^a-z0-9]/gi, "")))
+}
+
+function existingPathIsDirectory(value: string) {
+  try {
+    return fs.existsSync(value) && fs.statSync(value).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+export function isWorkflowArtifactRef(value: string, key?: string) {
+  const candidate = normalizeArtifactCandidate(value)
+  if (!candidate) return false
+
+  const normalized = candidate.replace(/\\/g, "/").toLowerCase()
+  const ext = path.extname(candidate).toLowerCase()
+  const nestedKey = key?.toLowerCase() ?? ""
+
+  if (artifactKeyIsRuntimeOnly(key)) return false
+  if (nestedKey.includes("reflection")) return false
+  if (normalized.includes("/.killstata/runtime/health/")) return false
+  if (normalized.includes("/inspection/") && /\.(xlsx|xls|csv)$/i.test(candidate)) return false
+  if (hasCommandSyntax(candidate)) return false
+  if (NON_ARTIFACT_EXTENSIONS.has(ext)) return false
+  if (!WORKFLOW_ARTIFACT_EXTENSIONS.has(ext)) return false
+  if (existingPathIsDirectory(candidate)) return false
+  return true
+}
+
+export function isVerifierReadableArtifactRef(value: string) {
+  const candidate = normalizeArtifactCandidate(value)
+  if (!candidate) return false
+  const ext = path.extname(candidate).toLowerCase()
+  if (!VERIFIER_READABLE_ARTIFACT_EXTENSIONS.has(ext)) return false
+  if (existingPathIsDirectory(candidate)) return false
+  return fs.existsSync(candidate)
+}
+
+export function filterVerifierReadableArtifactRefs(values: string[]) {
+  return [...new Set(values.filter(isVerifierReadableArtifactRef))]
 }
 
 function collectArtifactRefs(metadata?: Record<string, unknown>) {
@@ -252,8 +573,7 @@ function collectArtifactRefs(metadata?: Record<string, unknown>) {
   const refs = new Set<string>()
   const visit = (value: unknown, key?: string) => {
     if (typeof value === "string") {
-      const looksLikePath = value.includes("\\") || value.includes("/") || /\.(json|md|xlsx|csv|dta|parquet|txt)$/i.test(value)
-      if (looksLikePath) refs.add(value)
+      if (isWorkflowArtifactRef(value, key)) refs.add(normalizeArtifactCandidate(value) ?? value)
       return
     }
     if (Array.isArray(value)) {
@@ -272,6 +592,32 @@ function collectArtifactRefs(metadata?: Record<string, unknown>) {
   }
   visit(metadata)
   return [...refs]
+}
+
+export function sanitizeVerifierPromptMetadata(value: unknown, key?: string): unknown {
+  if (typeof value === "string") {
+    if (artifactKeyIsRuntimeOnly(key)) return undefined
+    if (hasCommandSyntax(value)) return undefined
+    if (value.replace(/\\/g, "/").toLowerCase().includes("/.killstata/runtime/health/")) return undefined
+    if (isWorkflowArtifactRef(value, key) || isVerifierReadableArtifactRef(value))
+      return normalizeArtifactCandidate(value)
+    const ext = path.extname(value).toLowerCase()
+    if (NON_ARTIFACT_EXTENSIONS.has(ext)) return undefined
+    return value
+  }
+  if (Array.isArray(value)) {
+    const filtered = value.map((item) => sanitizeVerifierPromptMetadata(item, key)).filter((item) => item !== undefined)
+    return filtered
+  }
+  if (!value || typeof value !== "object") return value
+
+  const result: Record<string, unknown> = {}
+  for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+    if (artifactKeyIsRuntimeOnly(nestedKey) || nestedKey === "reflection") continue
+    const sanitized = sanitizeVerifierPromptMetadata(nestedValue, nestedKey)
+    if (sanitized !== undefined) result[nestedKey] = sanitized
+  }
+  return result
 }
 
 function collectColumnCandidates(...values: Array<Record<string, unknown> | undefined>) {
@@ -312,7 +658,12 @@ function latestStageForKind(run: WorkflowRun, branch: string, kind: WorkflowStag
   return [...run.stages].reverse().find((stage) => stage.branch === branch && stage.kind === kind)
 }
 
-function deriveParentStage(run: WorkflowRun, branch: string, kind: WorkflowStageKind, metadata?: Record<string, unknown>) {
+function deriveParentStage(
+  run: WorkflowRun,
+  branch: string,
+  kind: WorkflowStageKind,
+  metadata?: Record<string, unknown>,
+) {
   const explicitParentStageId = typeof metadata?.parentStageId === "string" ? metadata.parentStageId : undefined
   if (explicitParentStageId) {
     return run.stages.find((stage) => stage.branch === branch && stage.stageId === explicitParentStageId)
@@ -325,12 +676,17 @@ function deriveParentStage(run: WorkflowRun, branch: string, kind: WorkflowStage
   return undefined
 }
 
-function computeDependsOn(run: WorkflowRun, branch: string, kind: WorkflowStageKind, metadata?: Record<string, unknown>) {
+function computeDependsOn(
+  run: WorkflowRun,
+  branch: string,
+  kind: WorkflowStageKind,
+  metadata?: Record<string, unknown>,
+) {
   const parent = deriveParentStage(run, branch, kind, metadata)
   return parent ? [parent.stageId] : []
 }
 
-function computeDownstream(run: WorkflowRun, branch: string, kind: WorkflowStageKind) {
+function computeKindDownstream(run: WorkflowRun, branch: string, kind: WorkflowStageKind) {
   const downstream = new Set<string>()
   for (const stageKind of downstreamKinds(kind)) {
     for (const stage of run.stages) {
@@ -340,25 +696,91 @@ function computeDownstream(run: WorkflowRun, branch: string, kind: WorkflowStage
   return [...downstream]
 }
 
+function branchHasDependencyGraph(run: WorkflowRun, branch: string) {
+  return run.stages.some(
+    (stage) => stage.branch === branch && ((stage.dependsOn?.length ?? 0) > 0 || typeof stage.parentStageId === "string"),
+  )
+}
+
+function collectDependentStageIds(run: WorkflowRun, target: StageNode) {
+  if (!branchHasDependencyGraph(run, target.branch)) {
+    return computeKindDownstream(run, target.branch, target.kind)
+  }
+
+  const visited = new Set<string>([target.stageId])
+  const ordered: string[] = []
+  const queue = [target.stageId]
+
+  while (queue.length > 0) {
+    const currentStageId = queue.shift()!
+    const dependents = run.stages
+      .filter((stage) => {
+        if (stage.branch !== target.branch) return false
+        if (visited.has(stage.stageId)) return false
+        if (stage.parentStageId === currentStageId) return true
+        return (stage.dependsOn ?? []).includes(currentStageId)
+      })
+      .sort((left, right) => {
+        const leftIndex = DEFAULT_STAGE_SEQUENCE.indexOf(left.kind)
+        const rightIndex = DEFAULT_STAGE_SEQUENCE.indexOf(right.kind)
+        return leftIndex - rightIndex || left.createdAt.localeCompare(right.createdAt)
+      })
+
+    for (const stage of dependents) {
+      visited.add(stage.stageId)
+      ordered.push(stage.stageId)
+      queue.push(stage.stageId)
+    }
+  }
+
+  return ordered
+}
+
+function refreshBranchDownstream(run: WorkflowRun, branch: string) {
+  run.stages
+    .filter((stage) => stage.branch === branch)
+    .forEach((stage) => {
+      stage.downstream = collectDependentStageIds(run, stage)
+    })
+}
+
+function refreshWorkflowRunGraph(run: WorkflowRun) {
+  const branches = [...new Set(run.stages.map((stage) => stage.branch))]
+  branches.forEach((branch) => refreshBranchDownstream(run, branch))
+  return run
+}
+
 function stageNeedsVerifier(kind: WorkflowStageKind) {
   return AUTO_VERIFY_STAGES.has(kind)
 }
 
 function publishWorkflowState(sessionID: string, run?: WorkflowRun, rerunTargetStageId?: string) {
-  const workflow = run ?? getActiveWorkflowRun(sessionID)
-  const activeStage =
-    workflow?.activeNodeId ? workflow.stages.find((stage) => stage.nodeId === workflow.activeNodeId) : activeOrLatestStage(workflow)
+  const workflow = run ? refreshWorkflowRunDerivedState(run) : getActiveWorkflowRun(sessionID)
+  const activeStage = workflow?.activeNodeId
+    ? workflow.stages.find((stage) => stage.nodeId === workflow.activeNodeId)
+    : activeOrLatestStage(workflow)
+  const checklistItem = currentChecklistItem(workflow)
   Bus.publish(RuntimeEvents.WorkflowState, {
     sessionID,
     workflowRunId: workflow?.workflowRunId,
     branch: workflow?.branch,
     activeStage: workflow?.activeStage,
     activeStageId: activeStage?.stageId,
+    activeCoordinatorAgent: workflow?.activeCoordinatorAgent,
     repairOnly: workflow?.repairOnly ?? false,
     latestFailureCode: workflow?.latestFailure?.code,
     verifierStatus: workflow?.latestVerifier?.status,
     trustedArtifacts: workflow?.trustedArtifacts ?? [],
     rerunTargetStageId,
+    approvalStatus: workflow?.approvalStatus,
+    currentChecklistItem: checklistItem
+      ? {
+          id: checklistItem.id,
+          label: checklistItem.label,
+          status: checklistItem.status,
+        }
+      : undefined,
+    analysisChecklist: workflow?.analysisChecklist ?? [],
   })
 }
 
@@ -408,10 +830,13 @@ function verifierPrompt(input: { stage: StageNode; workflow: WorkflowRun }) {
     branch: input.stage.branch,
     replayInput: input.stage.replayInput ?? {},
     artifactRefs: input.stage.artifactRefs,
+    readableArtifactRefs: filterVerifierReadableArtifactRefs(
+      input.stage.readableArtifactRefs ?? input.stage.artifactRefs,
+    ),
     latestTrustedArtifacts: input.workflow.trustedArtifacts,
-    metadata: input.stage.metadata ?? {},
+    metadata: sanitizeVerifierPromptMetadata(input.stage.metadata ?? {}),
     instruction:
-      "Audit this workflow stage. Return only a JSON object inside <verifier_result> tags with keys status, checks, blockingFindings, repairHints, trustedArtifacts, summary, findings.",
+      "Audit this workflow stage. Read only readableArtifactRefs directly; use datasetId/stageId or structured tool outputs for binary artifacts. Return only a JSON object inside <verifier_result> tags with keys status, checks, blockingFindings, repairHints, trustedArtifacts, summary, findings.",
   }
   return [
     "You are a fresh-run verifier for killstata.",
@@ -449,8 +874,7 @@ async function runFreshVerifierTask(input: {
       type: "text" as const,
       text: verifierPrompt(input),
     },
-    ...input.stage.artifactRefs
-      .filter((artifact) => fs.existsSync(artifact))
+    ...filterVerifierReadableArtifactRefs(input.stage.readableArtifactRefs ?? input.stage.artifactRefs)
       .slice(0, 8)
       .map((artifact) => ({
         type: "file" as const,
@@ -490,8 +914,10 @@ async function runFreshVerifierTask(input: {
     status: "warn" as const,
     checks: [],
     blockingFindings: [],
-    repairHints: ["Verifier fallback: runtime report will be used because the fresh-run verifier output was not parseable."],
-    trustedArtifacts: input.stage.artifactRefs.filter((artifact) => fs.existsSync(artifact)),
+    repairHints: [
+      "Verifier fallback: runtime report will be used because the fresh-run verifier output was not parseable.",
+    ],
+    trustedArtifacts: filterVerifierReadableArtifactRefs(input.stage.readableArtifactRefs ?? input.stage.artifactRefs),
     summary: text,
     findings: text ? [text] : [],
     sessionID: session.id,
@@ -505,12 +931,13 @@ function mergeVerifierEnvelope(report: VerifierReport, envelope?: VerifierTaskEn
   if (!envelope) return report
   const checks = envelope.checks.length > 0 ? envelope.checks : report.checks
   const blockingFindings = envelope.blockingFindings.length > 0 ? envelope.blockingFindings : report.blockingFindings
+  const envelopeTrustedArtifacts = filterVerifierReadableArtifactRefs(envelope.trustedArtifacts)
   return {
     status: envelope.status ?? report.status,
     checks,
     blockingFindings,
     repairHints: envelope.repairHints.length > 0 ? envelope.repairHints : report.repairHints,
-    trustedArtifacts: envelope.trustedArtifacts.length > 0 ? envelope.trustedArtifacts : report.trustedArtifacts,
+    trustedArtifacts: envelopeTrustedArtifacts.length > 0 ? envelopeTrustedArtifacts : report.trustedArtifacts,
     createdAt: report.createdAt,
   }
 }
@@ -526,9 +953,14 @@ function cacheSourceForStage(run: WorkflowRun, stage: StageNode) {
   )
 }
 
-function stageKindFromTool(toolName: string, args: Record<string, unknown>, metadata?: Record<string, unknown>): WorkflowStageKind {
+function stageKindFromTool(
+  toolName: string,
+  args: Record<string, unknown>,
+  metadata?: Record<string, unknown>,
+): WorkflowStageKind {
   if (toolName === "data_import") {
-    const action = typeof args.action === "string" ? args.action : typeof metadata?.action === "string" ? metadata.action : ""
+    const action =
+      typeof args.action === "string" ? args.action : typeof metadata?.action === "string" ? metadata.action : ""
     if (action === "healthcheck") return "healthcheck"
     if (action === "import") return "import"
     if (action === "qa") return "qa_gate"
@@ -591,7 +1023,9 @@ function failureFromReflection(reflection: ToolReflection): StageFailureRecord {
 
 function stageFailure(
   partial: Omit<StageFailureRecord, "createdAt" | "maxRetries" | "autoRepairAllowed" | "requiresVerifier"> &
-    Partial<Pick<StageFailureRecord, "createdAt" | "maxRetries" | "autoRepairAllowed" | "requiresVerifier" | "repairMetadata">>,
+    Partial<
+      Pick<StageFailureRecord, "createdAt" | "maxRetries" | "autoRepairAllowed" | "requiresVerifier" | "repairMetadata">
+    >,
 ): StageFailureRecord {
   return {
     maxRetries: 3,
@@ -608,7 +1042,9 @@ const REPAIR_HANDLERS: Partial<Record<StageFailureCode, RepairHandler>> = {
     const requested = Object.entries(replay)
       .filter(([, value]) => typeof value === "string")
       .map(([, value]) => value as string)
-      .filter((value) => /var|column|outcome|dependent|independent|entity|time|treat|id/i.test(value) || value.includes("_"))
+      .filter(
+        (value) => /var|column|outcome|dependent|independent|entity|time|treat|id/i.test(value) || value.includes("_"),
+      )
     const columnCandidates = collectColumnCandidates(normalizeRecord(stage?.metadata), replay)
     const suggestions = requested.flatMap((name) => similarColumns(name, columnCandidates))
     return {
@@ -625,7 +1061,8 @@ const REPAIR_HANDLERS: Partial<Record<StageFailureCode, RepairHandler>> = {
   },
   PANEL_KEY_DUPLICATED: () => ({
     retryStage: "qa_gate",
-    repairAction: "Deduplicate or aggregate the entity-time keys, rerun QA, then rerun the failed estimation stage only.",
+    repairAction:
+      "Deduplicate or aggregate the entity-time keys, rerun QA, then rerun the failed estimation stage only.",
     autoApply: true,
     requiresVerifier: true,
     repairMetadata: {
@@ -675,11 +1112,7 @@ const REPAIR_HANDLERS: Partial<Record<StageFailureCode, RepairHandler>> = {
   }),
 }
 
-function applyRepairHandler(input: {
-  failure: StageFailureRecord
-  stage?: StageNode
-  workflow?: WorkflowRun
-}) {
+function applyRepairHandler(input: { failure: StageFailureRecord; stage?: StageNode; workflow?: WorkflowRun }) {
   const handler = REPAIR_HANDLERS[input.failure.code]
   if (!handler) return input.failure
   const result = handler(input)
@@ -706,24 +1139,87 @@ function activeOrLatestStage(run?: WorkflowRun) {
   return [...run.stages].reverse().find((stage) => stage.kind !== "verifier")
 }
 
+function requestedStage(run: WorkflowRun | undefined, stageId?: string) {
+  if (!run || !stageId) return undefined
+  return run.stages.find((stage) => stage.stageId === stageId || stage.nodeId === stageId)
+}
+
+function missingRequestedStageReason(stageId: string, action: string) {
+  return `Requested stage ${stageId} was not found in the active workflow run for ${action}.`
+}
+
 export function getActiveWorkflowRun(sessionID: string) {
   const session = readWorkflowSession(sessionID)
   if (!session.activeRunId) return session.runs.at(-1)
   return session.runs.find((run) => run.workflowRunId === session.activeRunId) ?? session.runs.at(-1)
 }
 
+export function ensureAnalysisPlan(input: {
+  sessionID: string
+  datasetId?: string
+  runId?: string
+  branch?: string
+}) {
+  const sessionState = readWorkflowSession(input.sessionID)
+  const run = ensureRun(sessionState, {
+    datasetId: input.datasetId,
+    runId: input.runId,
+    branch: input.branch,
+  })
+  run.planGeneratedAt = run.planGeneratedAt ?? nowIso()
+  if (run.approvalStatus !== "approved") run.approvalStatus = "required"
+  run.updatedAt = nowIso()
+  refreshWorkflowRunDerivedState(run)
+  writeWorkflowSession(sessionState)
+  publishWorkflowState(input.sessionID, run)
+  return run
+}
+
+export function setAnalysisPlanApproval(input: {
+  sessionID: string
+  approvalStatus: "approved" | "declined"
+  datasetId?: string
+  runId?: string
+  branch?: string
+}) {
+  const sessionState = readWorkflowSession(input.sessionID)
+  const run = ensureRun(sessionState, {
+    datasetId: input.datasetId,
+    runId: input.runId,
+    branch: input.branch,
+  })
+  run.planGeneratedAt = run.planGeneratedAt ?? nowIso()
+  run.approvalStatus = input.approvalStatus
+  run.updatedAt = nowIso()
+  refreshWorkflowRunDerivedState(run)
+  writeWorkflowSession(sessionState)
+  publishWorkflowState(input.sessionID, run)
+  return run
+}
+
+export function formatAnalysisChecklist(run?: WorkflowRun) {
+  if (!run) return []
+  return (run.analysisChecklist ?? []).map((item, index) => {
+    const detail = item.summary ? ` - ${item.summary}` : ""
+    return `${index + 1}. ${item.label} [${item.status}]${detail}`
+  })
+}
+
 export function workflowPromptSummary(sessionID: string) {
   const run = getActiveWorkflowRun(sessionID)
   if (!run) return []
   const stage =
-    (run.activeNodeId ? run.stages.find((item) => item.nodeId === run.activeNodeId) : undefined) ?? activeOrLatestStage(run)
+    (run.activeNodeId ? run.stages.find((item) => item.nodeId === run.activeNodeId) : undefined) ??
+    activeOrLatestStage(run)
   const base = [
     "Workflow runtime summary:",
     `- workflowRunId: ${run.workflowRunId}`,
     `- branch: ${run.branch}`,
     run.datasetId ? `- datasetId: ${run.datasetId}` : undefined,
     run.runId ? `- runId: ${run.runId}` : undefined,
-    run.activeStage ? `- active stage: ${run.activeStage}${stage ? ` (${stage.stageId}, status=${stage.status})` : ""}` : undefined,
+    run.activeStage
+      ? `- active stage: ${run.activeStage}${stage ? ` (${stage.stageId}, status=${stage.status})` : ""}`
+      : undefined,
     run.repairOnly ? `- repair-only mode: enabled` : `- repair-only mode: disabled`,
     run.latestFailure
       ? `- last failure: ${run.latestFailure.code}; retry stage=${run.latestFailure.retryStage}; repair=${run.latestFailure.repairAction}`
@@ -749,9 +1245,18 @@ export function workflowPromptSummary(sessionID: string) {
   ]
   const memory = [
     "Workflow memory:",
-    run.trustedArtifacts.length ? `- trusted artifacts: ${run.trustedArtifacts.slice(-6).join(", ")}` : "- trusted artifacts: none yet",
+    run.trustedArtifacts.length
+      ? `- trusted artifacts: ${run.trustedArtifacts.slice(-6).join(", ")}`
+      : "- trusted artifacts: none yet",
   ]
-  return [base.join("\n"), stagePolicy.join("\n"), verifierPolicy.join("\n"), memory.join("\n")].filter(
+  const checklist = [
+    "Workflow checklist:",
+    ...(run.analysisChecklist ?? []).map(
+      (item) => `- ${item.label}: ${item.status}${item.summary ? ` (${item.summary})` : ""}`,
+    ),
+    run.approvalStatus ? `- execution approval: ${run.approvalStatus}` : undefined,
+  ].filter(Boolean)
+  return [base.join("\n"), stagePolicy.join("\n"), verifierPolicy.join("\n"), memory.join("\n"), checklist.join("\n")].filter(
     (item) => item.trim().length > 0,
   )
 }
@@ -783,20 +1288,47 @@ export function recordWorkflowStageSuccess(input: {
 }) {
   const sessionState = readWorkflowSession(input.sessionID)
   const metadata = normalizeRecord(input.metadata)
-  const branch = typeof metadata.branch === "string" ? metadata.branch : typeof input.args.branch === "string" ? input.args.branch : "main"
+  const branch =
+    typeof metadata.branch === "string"
+      ? metadata.branch
+      : typeof input.args.branch === "string"
+        ? input.args.branch
+        : "main"
   const run = ensureRun(sessionState, {
-    datasetId: typeof metadata.datasetId === "string" ? metadata.datasetId : typeof input.args.datasetId === "string" ? input.args.datasetId : undefined,
-    runId: typeof metadata.runId === "string" ? metadata.runId : typeof input.args.runId === "string" ? input.args.runId : undefined,
+    datasetId:
+      typeof metadata.datasetId === "string"
+        ? metadata.datasetId
+        : typeof input.args.datasetId === "string"
+          ? input.args.datasetId
+          : undefined,
+    runId:
+      typeof metadata.runId === "string"
+        ? metadata.runId
+        : typeof input.args.runId === "string"
+          ? input.args.runId
+          : undefined,
     branch,
   })
   const kind = stageKindFromTool(input.toolName, input.args, metadata)
-  const stageId =
+  const cacheKey = stageCacheKey(kind, input.args, metadata)
+  const preferredStageId =
     (typeof metadata.stageId === "string" ? metadata.stageId : undefined) ??
     (typeof input.args.stageId === "string" ? input.args.stageId : undefined) ??
-    `${kind}_${run.stages.filter((stage) => stage.kind === kind).length.toString().padStart(3, "0")}`
+    `${kind}_${run.stages
+      .filter((stage) => stage.kind === kind)
+      .length.toString()
+      .padStart(3, "0")}`
+  const stageId = resolveWorkflowStageId({
+    run,
+    branch,
+    kind,
+    preferredStageId,
+    cacheKey,
+  })
   const stageStatus: StageStatus =
     metadata.qaGateStatus === "block" ? "blocked" : metadata.qaGateStatus === "warn" ? "completed" : "completed"
   const artifacts = collectArtifactRefs(metadata)
+  const readableArtifacts = filterVerifierReadableArtifactRefs(artifacts)
   const parent = deriveParentStage(run, branch, kind, metadata)
   const stage = upsertStage(run, {
     nodeId: `${branch}:${stageId}`,
@@ -809,14 +1341,15 @@ export function recordWorkflowStageSuccess(input: {
     parentStageId: parent?.stageId ?? (typeof metadata.parentStageId === "string" ? metadata.parentStageId : undefined),
     parentNodeId: parent?.nodeId,
     dependsOn: computeDependsOn(run, branch, kind, metadata),
-    downstream: computeDownstream(run, branch, kind),
-    cacheKey: stageCacheKey(kind, input.args, metadata),
+    downstream: computeKindDownstream(run, branch, kind),
+    cacheKey,
     replayable: true,
     executionMode: "normal",
     toolName: input.toolName,
     replayInput: normalizeReplayInput(input.args),
     artifactRefs: artifacts,
-    trustedArtifacts: stageNeedsVerifier(kind) ? [] : artifacts,
+    readableArtifactRefs: readableArtifacts,
+    trustedArtifacts: stageNeedsVerifier(kind) ? [] : readableArtifacts,
     metadata,
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -824,17 +1357,18 @@ export function recordWorkflowStageSuccess(input: {
   stage.failure = undefined
   stage.verifierReport = undefined
   run.activeNodeId = stage.nodeId
-  run.activeStage = stageStatus === "blocked" ? kind : stageNeedsVerifier(kind) ? "verifier" : nextStage(kind) ?? kind
+  run.activeStage = stageStatus === "blocked" ? kind : stageNeedsVerifier(kind) ? "verifier" : (nextStage(kind) ?? kind)
   run.repairOnly = stageStatus === "blocked"
   run.blockedStageId = stageStatus === "blocked" ? stage.stageId : undefined
   run.activeCoordinatorAgent = stageNeedsVerifier(kind) ? "verifier" : "general"
   run.updatedAt = nowIso()
   if (!stageNeedsVerifier(kind)) {
-    run.trustedArtifacts = [...new Set([...run.trustedArtifacts, ...artifacts])]
+    run.trustedArtifacts = [...new Set([...run.trustedArtifacts, ...readableArtifacts])]
   }
   if (stageStatus !== "blocked") {
     run.latestFailure = undefined
   }
+  refreshWorkflowRunDerivedState(run)
   writeWorkflowSession(sessionState)
   publishWorkflowState(input.sessionID, run)
   return { workflowRun: run, stage }
@@ -854,7 +1388,15 @@ export function recordWorkflowStageFailure(input: {
     branch,
   })
   const kind = stageKindFromTool(input.toolName, input.args)
-  const stageId = typeof input.args.stageId === "string" ? input.args.stageId : `${kind}_failed`
+  const cacheKey = stageCacheKey(kind, input.args)
+  const preferredStageId = typeof input.args.stageId === "string" ? input.args.stageId : `${kind}_failed`
+  const stageId = resolveWorkflowStageId({
+    run,
+    branch,
+    kind,
+    preferredStageId,
+    cacheKey,
+  })
   const parent = deriveParentStage(run, branch, kind)
   const failure = applyRepairHandler({
     failure: failureFromReflection(input.reflection),
@@ -872,8 +1414,8 @@ export function recordWorkflowStageFailure(input: {
     parentStageId: parent?.stageId,
     parentNodeId: parent?.nodeId,
     dependsOn: computeDependsOn(run, branch, kind),
-    downstream: computeDownstream(run, branch, kind),
-    cacheKey: stageCacheKey(kind, input.args),
+    downstream: computeKindDownstream(run, branch, kind),
+    cacheKey,
     replayable: true,
     executionMode: "normal",
     toolName: input.toolName,
@@ -889,9 +1431,11 @@ export function recordWorkflowStageFailure(input: {
   run.activeStage = kind
   run.repairOnly = true
   run.blockedStageId = stage.stageId
-  run.activeCoordinatorAgent = failure.code === "STAGE_NOT_RESOLVED" || failure.code === "ARTIFACT_MISSING" ? "explore" : "general"
+  run.activeCoordinatorAgent =
+    failure.code === "STAGE_NOT_RESOLVED" || failure.code === "ARTIFACT_MISSING" ? "explore" : "general"
   run.latestFailure = failure
   run.updatedAt = nowIso()
+  refreshWorkflowRunDerivedState(run)
   writeWorkflowSession(sessionState)
   publishWorkflowState(input.sessionID, run)
   return { workflowRun: run, stage }
@@ -903,25 +1447,39 @@ export function latestFailedStage(sessionID: string) {
   return [...run.stages].reverse().find((stage) => stage.status === "failed" || stage.status === "blocked")
 }
 
-export function buildRerunPlan(sessionID: string, stageId?: string) {
+type RerunPlanResult = {
+  blocked: boolean
+  reason?: string
+  workflowRun?: WorkflowRun
+  target?: StageNode
+  toolName?: string
+  replayInput?: Record<string, unknown>
+  repairAction?: string
+  downstreamTargets?: string[]
+  repairContext?: Record<string, unknown>
+  cacheHit?: boolean
+  cachedArtifacts?: string[]
+}
+
+export function buildRerunPlan(sessionID: string, stageId?: string): RerunPlanResult {
   const run = getActiveWorkflowRun(sessionID)
   if (!run) {
     return {
       blocked: true,
       reason: "No workflow run is recorded for this session yet.",
-    } as {
-      blocked: boolean
-      reason?: string
-      workflowRun?: WorkflowRun
-      target?: StageNode
-      toolName?: string
-      replayInput?: Record<string, unknown>
-      repairAction?: string
+    }
+  }
+
+  if (stageId && !requestedStage(run, stageId)) {
+    return {
+      blocked: true,
+      reason: missingRequestedStageReason(stageId, "rerun"),
+      workflowRun: run,
     }
   }
 
   const target =
-    (stageId ? run.stages.find((stage) => stage.stageId === stageId) : undefined) ??
+    requestedStage(run, stageId) ??
     latestFailedStage(sessionID) ??
     activeOrLatestStage(run)
 
@@ -930,14 +1488,6 @@ export function buildRerunPlan(sessionID: string, stageId?: string) {
       blocked: true,
       reason: "No stage is available to rerun.",
       workflowRun: run,
-    } as {
-      blocked: boolean
-      reason?: string
-      workflowRun?: WorkflowRun
-      target?: StageNode
-      toolName?: string
-      replayInput?: Record<string, unknown>
-      repairAction?: string
     }
   }
 
@@ -947,18 +1497,10 @@ export function buildRerunPlan(sessionID: string, stageId?: string) {
       reason: `Stage ${target.stageId} has no recorded replay input.`,
       target,
       workflowRun: run,
-    } as {
-      blocked: boolean
-      reason?: string
-      workflowRun?: WorkflowRun
-      target?: StageNode
-      toolName?: string
-      replayInput?: Record<string, unknown>
-      repairAction?: string
     }
   }
 
-  const downstreamTargets = computeDownstream(run, target.branch, target.kind)
+  const downstreamTargets = collectDependentStageIds(run, target)
   const cachedArtifacts = target.cacheKey
     ? run.stages.find(
         (stage) =>
@@ -980,37 +1522,380 @@ export function buildRerunPlan(sessionID: string, stageId?: string) {
     repairContext: target.failure?.repairMetadata,
     cacheHit: Boolean(cachedArtifacts?.length),
     cachedArtifacts: cachedArtifacts ?? [],
-  } as {
-    blocked: boolean
-    reason?: string
-    workflowRun?: WorkflowRun
-    target?: StageNode
-    toolName?: string
-    replayInput?: Record<string, unknown>
-    repairAction?: string
-    downstreamTargets?: string[]
-    repairContext?: Record<string, unknown>
-    cacheHit?: boolean
-    cachedArtifacts?: string[]
   }
   publishWorkflowState(sessionID, run, target.stageId)
   return result
 }
 
+async function loadWorkflowExecutableTool(toolName: string) {
+  switch (toolName) {
+    case "data_import": {
+      const { DataImportTool } = await import("@/tool/data-import")
+      return DataImportTool
+    }
+    case "econometrics": {
+      const { EconometricsTool } = await import("@/tool/econometrics")
+      return EconometricsTool
+    }
+    case "regression_table": {
+      const { RegressionTableTool } = await import("@/tool/regression-table")
+      return RegressionTableTool
+    }
+    case "workflow": {
+      const { WorkflowTool } = await import("@/tool/workflow")
+      return WorkflowTool
+    }
+    default:
+      return undefined
+  }
+}
+
+async function executeWorkflowStageTool(input: {
+  stage: StageNode
+  ctx: {
+    sessionID: string
+    messageID: string
+    agent: string
+    abort: AbortSignal
+    callID?: string
+    extra?: Record<string, unknown>
+    metadata: (input: { title?: string; metadata?: Record<string, unknown> }) => void
+    ask: (input: any) => Promise<void>
+  }
+  coordinatorDecision: WorkflowCoordinatorDecision
+}) {
+  if (!input.stage.toolName || !input.stage.replayInput) {
+    throw new Error(`Stage ${input.stage.stageId} has no executable tool replay.`)
+  }
+
+  if (input.stage.kind === "verifier") {
+    return {
+      skipped: true as const,
+      metadata: {
+        targetStageId: input.stage.parentStageId ?? input.stage.stageId,
+      },
+    }
+  }
+
+  const tool = await loadWorkflowExecutableTool(input.stage.toolName)
+  if (!tool) {
+    throw new Error(`No executable workflow tool is registered for ${input.stage.toolName}.`)
+  }
+
+  const { Agent } = await import("@/agent/agent")
+  const initAgent = await Agent.get(input.coordinatorDecision.agent === "explore" ? "explore" : "general")
+  const initialized: any = await tool.init({ agent: initAgent ?? undefined })
+  const result = await initialized.execute(input.stage.replayInput as any, input.ctx as any)
+  return {
+    skipped: false as const,
+    metadata: normalizeRecord(result.metadata),
+    output: result.output,
+    title: result.title,
+  }
+}
+
+function recordStageReuse(input: {
+  sessionID: string
+  workflowRunId: string
+  stageId: string
+  branch: string
+  source: StageNode
+}) {
+  const sessionState = readWorkflowSession(input.sessionID)
+  const run =
+    sessionState.runs.find((item) => item.workflowRunId === input.workflowRunId) ??
+    sessionState.runs.find((item) => item.sessionID === input.sessionID)
+  if (!run) return undefined
+  const stage = run.stages.find((item) => item.stageId === input.stageId && item.branch === input.branch)
+  if (!stage) return undefined
+  stage.status = "completed"
+  stage.executionMode = "reuse"
+  stage.reusedArtifacts = [...(input.source.trustedArtifacts ?? input.source.artifactRefs)]
+  stage.reuseSourceStageId = input.source.stageId
+  stage.artifactRefs = [...input.source.artifactRefs]
+  stage.readableArtifactRefs = filterVerifierReadableArtifactRefs(
+    input.source.readableArtifactRefs ?? input.source.artifactRefs,
+  )
+  stage.trustedArtifacts = [...(input.source.trustedArtifacts ?? stage.readableArtifactRefs)]
+  stage.failure = undefined
+  stage.updatedAt = nowIso()
+  stage.metadata = {
+    ...(stage.metadata ?? {}),
+    reuse: {
+      sourceStageId: input.source.stageId,
+      cacheKey: input.source.cacheKey,
+      artifactRefs: [...(input.source.trustedArtifacts ?? stage.readableArtifactRefs)],
+    },
+  }
+  run.activeNodeId = stage.nodeId
+  run.activeStage = stage.kind
+  run.updatedAt = nowIso()
+  run.activeCoordinatorAgent = "general"
+  run.trustedArtifacts = [...new Set([...(run.trustedArtifacts ?? []), ...(stage.trustedArtifacts ?? [])])]
+  refreshWorkflowRunDerivedState(run)
+  writeWorkflowSession(sessionState)
+  publishWorkflowState(input.sessionID, run, stage.stageId)
+  return {
+    stage,
+    reuse: {
+      stageId: stage.stageId,
+      sourceStageId: input.source.stageId,
+      artifactRefs: [...(stage.trustedArtifacts ?? [])],
+      cacheKey: input.source.cacheKey ?? "",
+    } satisfies StageReuseRecord,
+  }
+}
+
 export async function executeRerunPlan(input: {
   sessionID: string
   stageId?: string
-  ctx?: unknown
+  ctx: {
+    sessionID: string
+    messageID: string
+    agent: string
+    abort: AbortSignal
+    callID?: string
+    extra?: Record<string, unknown>
+    metadata: (input: { title?: string; metadata?: Record<string, unknown> }) => void
+    ask: (input: any) => Promise<void>
+  }
 }) {
-  const rerunPlan = buildRerunPlan(input.sessionID, input.stageId)
+  const plan = buildRerunPlan(input.sessionID, input.stageId)
+  if (plan.blocked || !plan.workflowRun || !plan.target) {
+    return {
+      ...plan,
+      execution: {
+        executedStageIds: [],
+        reusedStageIds: [],
+      },
+    }
+  }
+
+  const sessionState = readWorkflowSession(input.sessionID)
+  const run =
+    sessionState.runs.find((item) => item.workflowRunId === plan.workflowRun?.workflowRunId) ?? sessionState.runs.at(-1)
+  if (!run) {
+    return {
+      ...plan,
+      blocked: true,
+      reason: "No active workflow run is available for rerun execution.",
+    }
+  }
+
+  run.lastRerunPlan = {
+    targetStageId: plan.target.stageId,
+    downstreamTargets: plan.downstreamTargets ?? [],
+    repairContext: plan.repairContext ?? {},
+    cacheHit: plan.cacheHit ?? false,
+    cachedArtifacts: plan.cachedArtifacts ?? [],
+    createdAt: nowIso(),
+  }
+  run.activeCoordinatorAgent = "general"
+  run.updatedAt = nowIso()
+  refreshWorkflowRunDerivedState(run)
+  writeWorkflowSession(sessionState)
+  publishWorkflowState(input.sessionID, run, plan.target.stageId)
+
+  const stageIds = [plan.target.stageId, ...(plan.downstreamTargets ?? [])]
+  const stageQueue = stageIds
+    .map((stageId) => run.stages.find((item) => item.stageId === stageId && item.branch === plan.target?.branch))
+    .filter((item): item is StageNode => Boolean(item))
+    .sort((left, right) => {
+      const leftIndex = DEFAULT_STAGE_SEQUENCE.indexOf(left.kind)
+      const rightIndex = DEFAULT_STAGE_SEQUENCE.indexOf(right.kind)
+      return leftIndex - rightIndex || left.createdAt.localeCompare(right.createdAt)
+    })
+
+  const executedStageIds: string[] = []
+  const reusedStageIds: string[] = []
+  const reuseRecords: StageReuseRecord[] = []
+  let verifier: Awaited<ReturnType<typeof runVerifierGate>> | undefined
+
+  for (const stage of stageQueue) {
+    const currentRun = getActiveWorkflowRun(input.sessionID)
+    const currentStage =
+      currentRun?.stages.find((item) => item.stageId === stage.stageId && item.branch === stage.branch) ?? stage
+    const currentFailureCode = currentStage.failure?.code
+    const coordinatorDecision = createCoordinatorDecision({
+      agent:
+        currentFailureCode === "STAGE_NOT_RESOLVED" || currentFailureCode === "ARTIFACT_MISSING"
+          ? "explore"
+          : "general",
+      why:
+        currentFailureCode === "STAGE_NOT_RESOLVED" || currentFailureCode === "ARTIFACT_MISSING"
+          ? "Workflow rerun needs missing artifact or schema lineage resolved before replay."
+          : "Workflow rerun needs the recorded stage replay to execute with the stored contract.",
+      inputSlice: {
+        stageId: currentStage.stageId,
+        kind: currentStage.kind,
+        toolName: currentStage.toolName,
+        replayInput: currentStage.replayInput ?? {},
+        repairContext: currentStage.failure?.repairMetadata ?? plan.repairContext ?? {},
+      },
+      expectedOutputContract:
+        "Execute the recorded stage replay, preserve structured metadata, and return produced artifacts for verifier/audit use.",
+      linkedStageId: currentStage.stageId,
+    })
+
+    const reusable = cacheSourceForStage(currentRun ?? run, currentStage)
+    if (reusable && (reusable.trustedArtifacts?.length ?? 0) > 0) {
+      const reused = recordStageReuse({
+        sessionID: input.sessionID,
+        workflowRunId: run.workflowRunId,
+        stageId: currentStage.stageId,
+        branch: currentStage.branch,
+        source: reusable,
+      })
+      if (reused) {
+        reusedStageIds.push(currentStage.stageId)
+        reuseRecords.push(reused.reuse)
+      }
+      continue
+    }
+
+    try {
+      const executed = await executeWorkflowStageTool({
+        stage: currentStage,
+        ctx: input.ctx,
+        coordinatorDecision,
+      })
+      if (executed.skipped) {
+        if (currentStage.kind === "verifier") {
+          verifier = await runVerifierGate({
+            sessionID: input.sessionID,
+            stageId: currentStage.parentStageId ?? plan.target.stageId,
+            messageID: input.ctx.messageID,
+            agent: input.ctx.agent,
+            preferFreshRun: true,
+          })
+        }
+        continue
+      }
+
+      const success = recordWorkflowStageSuccess({
+        sessionID: input.sessionID,
+        toolName: currentStage.toolName ?? plan.toolName ?? "workflow",
+        args: currentStage.replayInput ?? plan.replayInput ?? {},
+        metadata: {
+          ...executed.metadata,
+          coordinatorDecision,
+        },
+      })
+      const rerunSessionState = readWorkflowSession(input.sessionID)
+      const rerunRun =
+        rerunSessionState.runs.find((item) => item.workflowRunId === success.workflowRun.workflowRunId) ??
+        rerunSessionState.runs.at(-1)
+      const rerunStage =
+        rerunRun?.stages.find(
+          (item) => item.stageId === success.stage.stageId && item.branch === success.stage.branch,
+        ) ?? success.stage
+      if (rerunRun && rerunStage) {
+        rerunStage.executionMode = "rerun"
+        rerunStage.reusedArtifacts = []
+        rerunStage.reuseSourceStageId = undefined
+        rerunStage.metadata = {
+          ...(rerunStage.metadata ?? {}),
+          coordinatorDecision,
+        }
+        rerunRun.activeCoordinatorAgent = "general"
+        rerunRun.updatedAt = nowIso()
+        refreshWorkflowRunDerivedState(rerunRun)
+        writeWorkflowSession(rerunSessionState)
+        publishWorkflowState(input.sessionID, rerunRun, rerunStage.stageId)
+      }
+      executedStageIds.push(currentStage.stageId)
+
+      if (stageNeedsVerifier(currentStage.kind)) {
+        verifier = await runVerifierGate({
+          sessionID: input.sessionID,
+          stageId: currentStage.stageId,
+          messageID: input.ctx.messageID,
+          agent: input.ctx.agent,
+          preferFreshRun: true,
+        })
+        if (verifier.report.status === "block") break
+      }
+    } catch (error) {
+      const { classifyToolFailure } = await import("@/tool/analysis-reflection")
+      const reflection = classifyToolFailure({
+        toolName: currentStage.toolName ?? plan.toolName ?? "workflow",
+        error: error instanceof Error ? error.message : String(error),
+        input: currentStage.replayInput ?? plan.replayInput ?? {},
+        sessionId: input.sessionID,
+      })
+      const failureResult = recordWorkflowStageFailure({
+        sessionID: input.sessionID,
+        toolName: currentStage.toolName ?? plan.toolName ?? "workflow",
+        args: currentStage.replayInput ?? plan.replayInput ?? {},
+        reflection,
+      })
+      const failureSessionState = readWorkflowSession(input.sessionID)
+      const failureRun =
+        failureSessionState.runs.find((item) => item.workflowRunId === failureResult.workflowRun.workflowRunId) ??
+        failureSessionState.runs.at(-1)
+      if (failureRun) {
+        failureRun.lastRerunExecution = {
+          targetStageId: plan.target.stageId,
+          executedStageIds,
+          reusedStageIds,
+          failedStageId: currentStage.stageId,
+          coordinatorDecision,
+          repairContext: failureResult.stage.failure?.repairMetadata ?? plan.repairContext ?? {},
+          completedAt: nowIso(),
+          status: "failed",
+        }
+        failureRun.updatedAt = nowIso()
+        refreshWorkflowRunDerivedState(failureRun)
+        writeWorkflowSession(failureSessionState)
+        publishWorkflowState(input.sessionID, failureRun, currentStage.stageId)
+      }
+      return {
+        ...plan,
+        blocked: true,
+        reason: reflection.userVisibleExplanation,
+        workflowRun: getActiveWorkflowRun(input.sessionID),
+        target: workflowStageDetails(input.sessionID, currentStage.stageId).stage ?? currentStage,
+        execution: {
+          status: "failed",
+          executedStageIds,
+          reusedStageIds,
+          reuseRecords,
+          failedStageId: currentStage.stageId,
+        },
+        verifier,
+      }
+    }
+  }
+
+  const finalState = readWorkflowSession(input.sessionID)
+  const finalRun = finalState.runs.find((item) => item.workflowRunId === run.workflowRunId) ?? finalState.runs.at(-1)
+  if (finalRun) {
+    finalRun.lastRerunExecution = {
+      targetStageId: plan.target.stageId,
+      executedStageIds,
+      reusedStageIds,
+      reuseRecords,
+      verifierStatus: verifier?.report.status,
+      completedAt: nowIso(),
+      status: verifier?.report.status === "block" ? "blocked" : "completed",
+    }
+    finalRun.updatedAt = nowIso()
+    refreshWorkflowRunDerivedState(finalRun)
+    writeWorkflowSession(finalState)
+    publishWorkflowState(input.sessionID, finalRun, plan.target.stageId)
+  }
+
   return {
-    ...rerunPlan,
-    executed: false,
-    note:
-      rerunPlan.blocked
-        ? rerunPlan.reason ?? "No runnable rerun target is available."
-        : "Automated stage replay is not wired in the runtime yet; use the rerun plan to replay only the failed stage.",
-    verifier: undefined,
+    ...plan,
+    workflowRun: getActiveWorkflowRun(input.sessionID),
+    target: workflowStageDetails(input.sessionID, plan.target.stageId).stage ?? plan.target,
+    execution: {
+      status: verifier?.report.status === "block" ? "blocked" : "completed",
+      executedStageIds,
+      reusedStageIds,
+      reuseRecords,
+    },
+    verifier,
   }
 }
 
@@ -1024,8 +1909,26 @@ export function buildVerifierReport(input: { sessionID: string; stageId?: string
     (sessionState.activeRunId
       ? sessionState.runs.find((item) => item.workflowRunId === sessionState.activeRunId)
       : undefined) ?? sessionState.runs.at(-1)
-  const stage =
-    (input.stageId ? run?.stages.find((item) => item.stageId === input.stageId) : undefined) ?? activeOrLatestStage(run)
+  const requested = requestedStage(run, input.stageId)
+  if (input.stageId && !requested) {
+    const report: VerifierReport = {
+      status: "block",
+      checks: [
+        {
+          key: "stage_exists",
+          label: "Stage exists",
+          status: "block",
+          message: missingRequestedStageReason(input.stageId, "verification"),
+        },
+      ],
+      blockingFindings: [missingRequestedStageReason(input.stageId, "verification")],
+      repairHints: ["Choose an existing workflow stage before requesting verification."],
+      trustedArtifacts: [],
+      createdAt: nowIso(),
+    }
+    return { workflowRun: run, stage: undefined, report }
+  }
+  const stage = requested ?? activeOrLatestStage(run)
   if (!run || !stage) {
     const report: VerifierReport = {
       status: "block",
@@ -1046,7 +1949,7 @@ export function buildVerifierReport(input: { sessionID: string; stageId?: string
   }
 
   const checks: VerifierCheck[] = []
-  const trustedArtifacts = stage.artifactRefs.filter((artifact) => fs.existsSync(artifact))
+  const trustedArtifacts = filterVerifierReadableArtifactRefs(stage.readableArtifactRefs ?? stage.artifactRefs)
   addCheck(checks, {
     key: "artifacts_present",
     label: "Artifacts present",
@@ -1168,6 +2071,7 @@ export function buildVerifierReport(input: { sessionID: string; stageId?: string
       stageId: stage.stageId,
     },
     artifactRefs: trustedArtifacts,
+    readableArtifactRefs: trustedArtifacts,
     metadata: {
       targetStageId: stage.stageId,
     },
@@ -1179,7 +2083,7 @@ export function buildVerifierReport(input: { sessionID: string; stageId?: string
   stage.trustedArtifacts = report.status === "block" ? [] : trustedArtifacts
   run.latestVerifier = report
   run.activeNodeId = verifierNodeId
-  run.activeStage = report.status === "block" ? stage.kind : nextStage(stage.kind) ?? "report"
+  run.activeStage = report.status === "block" ? stage.kind : (nextStage(stage.kind) ?? "report")
   run.repairOnly = report.status === "block"
   run.blockedStageId = report.status === "block" ? stage.stageId : undefined
   if (report.status === "block") {
@@ -1205,7 +2109,9 @@ export function buildVerifierReport(input: { sessionID: string; stageId?: string
     run.latestFailure = undefined
   }
   run.updatedAt = nowIso()
-  run.trustedArtifacts = report.status === "block" ? run.trustedArtifacts : [...new Set([...run.trustedArtifacts, ...trustedArtifacts])]
+  run.trustedArtifacts =
+    report.status === "block" ? run.trustedArtifacts : [...new Set([...run.trustedArtifacts, ...trustedArtifacts])]
+  refreshWorkflowRunDerivedState(run)
   writeWorkflowSession(sessionState)
   publishWorkflowState(input.sessionID, run)
   const refreshedSession = readWorkflowSession(input.sessionID)
@@ -1270,6 +2176,9 @@ export async function runVerifierGate(input: {
     if (run && targetStage) {
       targetStage.verifierReport = report
       targetStage.trustedArtifacts = report.status === "block" ? [] : report.trustedArtifacts
+      targetStage.readableArtifactRefs = filterVerifierReadableArtifactRefs(
+        targetStage.readableArtifactRefs ?? targetStage.artifactRefs,
+      )
       targetStage.metadata = {
         ...(targetStage.metadata ?? {}),
         freshVerifier: {
@@ -1285,6 +2194,7 @@ export async function runVerifierGate(input: {
       run.repairOnly = report.status === "block"
       run.blockedStageId = report.status === "block" ? targetStage.stageId : undefined
       run.updatedAt = nowIso()
+      refreshWorkflowRunDerivedState(run)
       writeWorkflowSession(sessionState)
       publishWorkflowState(input.sessionID, run)
     }
@@ -1307,8 +2217,8 @@ export async function runAutomaticVerifier(input: {
   model?: { providerID: string; modelID: string }
 }) {
   const run = getActiveWorkflowRun(input.sessionID)
-  const stage =
-    (input.stageId ? run?.stages.find((item) => item.stageId === input.stageId) : undefined) ?? activeOrLatestStage(run)
+  if (input.stageId && !requestedStage(run, input.stageId)) return undefined
+  const stage = requestedStage(run, input.stageId) ?? activeOrLatestStage(run)
   if (!stage || !stageNeedsVerifier(stage.kind)) return undefined
   return runVerifierGate({
     ...input,
@@ -1324,23 +2234,29 @@ export function workflowStatusSummary(sessionID: string) {
       workflow: null,
       activeStage: null,
       failedStage: null,
+      currentChecklistItem: null,
     }
   }
   const activeStage =
-    (run.activeNodeId ? run.stages.find((stage) => stage.nodeId === run.activeNodeId) : undefined) ?? activeOrLatestStage(run)
+    (run.activeNodeId ? run.stages.find((stage) => stage.nodeId === run.activeNodeId) : undefined) ??
+    activeOrLatestStage(run)
   return {
     sessionID,
     workflow: run,
     activeStage,
     failedStage: latestFailedStage(sessionID),
+    currentChecklistItem: currentChecklistItem(run) ?? null,
   }
 }
 
 export function workflowStageDetails(sessionID: string, stageId?: string) {
   const run = getActiveWorkflowRun(sessionID)
   if (!run) return { workflow: null, stage: null }
+  if (stageId && !requestedStage(run, stageId)) {
+    return { workflow: run, stage: null }
+  }
   const stage =
-    (stageId ? run.stages.find((item) => item.stageId === stageId || item.nodeId === stageId) : undefined) ??
+    requestedStage(run, stageId) ??
     (run.activeNodeId ? run.stages.find((item) => item.nodeId === run.activeNodeId) : undefined) ??
     activeOrLatestStage(run)
   return { workflow: run, stage }
@@ -1348,7 +2264,7 @@ export function workflowStageDetails(sessionID: string, stageId?: string) {
 
 export function workflowArtifactList(sessionID: string, stageId?: string) {
   const { workflow, stage } = workflowStageDetails(sessionID, stageId)
-  const artifacts = stage?.artifactRefs ?? workflow?.trustedArtifacts ?? []
+  const artifacts = stage ? stage.artifactRefs : stageId ? [] : workflow?.trustedArtifacts ?? []
   return {
     workflow,
     stage,
@@ -1366,22 +2282,22 @@ export function workflowToolPolicy(input: ToolAvailabilityPolicy) {
     workflowMode: run?.workflowMode,
     currentStage: run?.activeStage ?? stage?.kind,
     currentStageStatus: stage?.status,
+    approvalStatus: input.approvalStatus ?? run?.approvalStatus,
     repairOnly: input.repairOnly ?? run?.repairOnly ?? run?.latestVerifier?.status === "block",
   } satisfies ToolAvailabilityPolicy
 }
 
-export function filterToolsForWorkflow(input: {
+export function resolveToolAvailability(input: {
   policy: ToolAvailabilityPolicy
   toolIDs: string[]
-}) {
+}): ToolAvailabilityResolution {
   const allowed = new Set(input.toolIDs)
   const stage = input.policy.currentStage
   const status = input.policy.currentStageStatus
   const agent = input.policy.agent
   const inputIntent = input.policy.inputIntent
   const repairOnly = input.policy.repairOnly === true
-
-  if (!stage) return [...allowed]
+  const approvalStatus = input.policy.approvalStatus
 
   const readCore = [
     "invalid",
@@ -1399,18 +2315,59 @@ export function filterToolsForWorkflow(input: {
     "todo_read",
     "todoread",
     "todowrite",
-    "bash",
   ]
 
-  const importBundle = [...readCore, "data_import"]
+  const importBundle = [...readCore, "data_import", "data_batch"]
   const estimateBundle = [...readCore, "econometrics", "regression_table"]
   const verifyBundle = [...readCore, "regression_table"]
   const reportBundle = [...readCore, "regression_table", "research_brief", "paper_draft", "slide_generator"]
 
-  const repairBundle = [...readCore, "data_import", "econometrics", "regression_table"]
+  const repairBundle = [...readCore, "data_import", "data_batch", "econometrics", "regression_table"]
   let bundle = readCore
-  if (stage === "healthcheck" || stage === "import" || stage === "profile_or_schema_check" || stage === "qa_gate" || stage === "preprocess_or_filter" || stage === "describe_or_diagnostics") {
+  if (!stage) {
+    bundle =
+      input.policy.workflowMode === "econometrics" || inputIntent === "analysis" || inputIntent === "repair"
+        ? inputIntent === "analysis" || inputIntent === "repair"
+          ? [...new Set([...readCore, "data_import", "data_batch", "econometrics", "regression_table"])]
+          : [...readCore, "data_import", "data_batch"]
+        : readCore
+    if (agent === "explorer") {
+      bundle = [...new Set([...readCore, "data_import", "data_batch", "workflow"])]
+    }
+    if (agent === "analyst" && approvalStatus !== "approved") {
+      bundle = bundle.filter(
+        (tool) =>
+          ![
+            "regression_table",
+            "heterogeneity_runner",
+            "paper_draft",
+            "slide_generator",
+          ].includes(tool),
+      )
+    }
+    return {
+      policy: input.policy,
+      bundle,
+      allowedToolIDs: bundle.filter((tool) => allowed.has(tool)),
+    }
+  }
+
+  if (
+    stage === "healthcheck" ||
+    stage === "import" ||
+    stage === "profile_or_schema_check" ||
+    stage === "qa_gate" ||
+    stage === "preprocess_or_filter" ||
+    stage === "describe_or_diagnostics"
+  ) {
     bundle = importBundle
+    if (
+      (stage === "qa_gate" || stage === "preprocess_or_filter" || stage === "describe_or_diagnostics") &&
+      input.policy.workflowMode === "econometrics" &&
+      (inputIntent === "analysis" || inputIntent === "repair" || agent === "general" || agent === "analyst")
+    ) {
+      bundle = [...new Set([...importBundle, "econometrics", "regression_table"])]
+    }
   } else if (stage === "baseline_estimate") {
     bundle = estimateBundle
   } else if (stage === "verifier") {
@@ -1420,19 +2377,39 @@ export function filterToolsForWorkflow(input: {
   }
 
   if (status === "blocked" || status === "failed" || repairOnly) {
-    bundle = stage === "baseline_estimate" ? repairBundle : [...readCore, "data_import"]
+      bundle = stage === "baseline_estimate" ? repairBundle : [...readCore, "data_import", "data_batch"]
   }
 
   if (agent === "verifier") {
     bundle = [...readCore, "regression_table"]
+  } else if (agent === "explorer") {
+    bundle = [...new Set([...readCore, "data_import", "data_batch", "workflow"])]
   } else if (agent === "explore") {
-    bundle = [...readCore, "workflow"]
+    bundle =
+      input.policy.workflowMode === "econometrics" ? [...new Set([...bundle, "workflow"])] : [...readCore, "workflow"]
   } else if (agent === "general") {
     bundle = [...new Set([...bundle, "workflow"])]
   }
 
+  if (agent === "analyst" && approvalStatus !== "approved") {
+    bundle = bundle.filter(
+      (tool) =>
+        ![
+          "regression_table",
+          "heterogeneity_runner",
+          "paper_draft",
+          "slide_generator",
+        ].includes(tool),
+    )
+  }
+
   if (inputIntent) {
-    bundle = [...new Set([...bundle.filter((tool) => INPUT_INTENT_TOOL_BUNDLES[inputIntent].includes(tool as never)), "workflow"])]
+    bundle = [
+      ...new Set([
+        ...bundle.filter((tool) => INPUT_INTENT_TOOL_BUNDLES[inputIntent].includes(tool as never)),
+        "workflow",
+      ]),
+    ]
   }
 
   if (input.policy.modelCapabilities?.supportsTools === false) {
@@ -1451,7 +2428,31 @@ export function filterToolsForWorkflow(input: {
     bundle = bundle.filter((tool) => !["bash", "edit", "write", "apply_patch"].includes(tool))
   }
 
-  return bundle.filter((tool) => allowed.has(tool))
+  return {
+    policy: input.policy,
+    bundle,
+    allowedToolIDs: bundle.filter((tool) => allowed.has(tool)),
+  }
+}
+
+export function filterToolsForWorkflow(input: { policy: ToolAvailabilityPolicy; toolIDs: string[] }) {
+  return resolveToolAvailability(input).allowedToolIDs
+}
+
+export function allowMcpToolForWorkflow(input: { toolName: string; policy: ToolAvailabilityPolicy }) {
+  const stage = input.policy.currentStage
+  const repairOnly = input.policy.repairOnly === true
+  const agent = input.policy.agent
+
+  if (input.toolName.startsWith("context7_")) return false
+  if (input.toolName.startsWith("stata_")) return false
+  if (repairOnly) return false
+  if (agent === "verifier") return false
+  if (stage === "healthcheck" || stage === "import" || stage === "profile_or_schema_check" || stage === "qa_gate") {
+    return false
+  }
+
+  return false
 }
 
 export function datasetStageSnapshot(datasetId: string, stageId?: string) {

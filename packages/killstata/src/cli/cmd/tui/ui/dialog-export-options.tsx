@@ -77,7 +77,7 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
     <box paddingLeft={2} paddingRight={2} gap={1}>
       <box flexDirection="row" justifyContent="space-between">
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
-          Export Options
+          报告模式导出
         </text>
         <text fg={theme.textMuted}>esc</text>
       </box>
@@ -116,7 +116,7 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
           <text fg={store.active === "thinking" ? theme.primary : theme.textMuted}>
             {store.thinking ? "[x]" : "[ ]"}
           </text>
-          <text fg={store.active === "thinking" ? theme.primary : theme.text}>Include thinking</text>
+          <text fg={store.active === "thinking" ? theme.primary : theme.text}>包含原始思考</text>
         </box>
         <box
           flexDirection="row"
@@ -128,7 +128,7 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
           <text fg={store.active === "toolDetails" ? theme.primary : theme.textMuted}>
             {store.toolDetails ? "[x]" : "[ ]"}
           </text>
-          <text fg={store.active === "toolDetails" ? theme.primary : theme.text}>Include tool details</text>
+          <text fg={store.active === "toolDetails" ? theme.primary : theme.text}>包含内部工具细节</text>
         </box>
         <box
           flexDirection="row"
@@ -140,7 +140,7 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
           <text fg={store.active === "assistantMetadata" ? theme.primary : theme.textMuted}>
             {store.assistantMetadata ? "[x]" : "[ ]"}
           </text>
-          <text fg={store.active === "assistantMetadata" ? theme.primary : theme.text}>Include assistant metadata</text>
+          <text fg={store.active === "assistantMetadata" ? theme.primary : theme.text}>包含助手元数据</text>
         </box>
         <box
           flexDirection="row"
@@ -152,7 +152,7 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
           <text fg={store.active === "openWithoutSaving" ? theme.primary : theme.textMuted}>
             {store.openWithoutSaving ? "[x]" : "[ ]"}
           </text>
-          <text fg={store.active === "openWithoutSaving" ? theme.primary : theme.text}>Open without saving</text>
+          <text fg={store.active === "openWithoutSaving" ? theme.primary : theme.text}>只打开不保存</text>
         </box>
       </box>
       <Show when={store.active !== "filename"}>

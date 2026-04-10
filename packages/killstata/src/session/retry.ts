@@ -18,6 +18,26 @@ export namespace SessionRetry {
     )
   }
 
+  function hasTransientCertificateError(message: string | undefined) {
+    if (!message) return false
+    const lower = message.toLowerCase()
+    return (
+      lower.includes("unknown certificate verification error") ||
+      lower.includes("certificate verification error") ||
+      lower.includes("certificate verification failed") ||
+      lower.includes("unable to verify the first certificate") ||
+      lower.includes("client network socket disconnected before secure tls connection was established") ||
+      lower.includes("tls handshake") ||
+      lower.includes("ssl handshake")
+    )
+  }
+
+  function retryReasonFromMessage(message: string | undefined) {
+    if (hasTransientDisconnect(message)) return "Provider stream disconnected"
+    if (hasTransientCertificateError(message)) return "Provider TLS/certificate verification failed"
+    return undefined
+  }
+
   export async function sleep(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
       const abortHandler = () => {
@@ -70,15 +90,15 @@ export namespace SessionRetry {
 
   export function retryable(error: ReturnType<NamedError["toObject"]>) {
     if (MessageV2.APIError.isInstance(error)) {
-      if (hasTransientDisconnect(error.data.message)) return "Provider stream disconnected"
+      const reason = retryReasonFromMessage(error.data.message)
+      if (reason) return reason
       if (!error.data.isRetryable) return undefined
       return error.data.message.includes("Overloaded") ? "Provider is overloaded" : error.data.message
     }
 
     if (typeof error.data?.message === "string") {
-      if (hasTransientDisconnect(error.data.message)) {
-        return "Provider stream disconnected"
-      }
+      const reason = retryReasonFromMessage(error.data.message)
+      if (reason) return reason
       try {
         const json = JSON.parse(error.data.message)
         if (json.type === "error" && json.error?.type === "too_many_requests") {

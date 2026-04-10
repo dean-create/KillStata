@@ -8,17 +8,49 @@ import { BunProc } from "../bun"
 import { Instance } from "../project/instance"
 import { Flag } from "../flag/flag"
 import { CodexAuthPlugin } from "./codex"
-import { Session } from "../session"
-import { NamedError } from "@killstata/util/error"
 import { CopilotAuthPlugin } from "./copilot"
 
 export namespace Plugin {
   const log = Log.create({ service: "plugin" })
 
   const BUILTIN = ["killstata-anthropic-auth@0.0.9", "@gitlab/killstata-gitlab-auth@1.3.2"]
+  const BUILTIN_PROVIDER_REQUIREMENTS: Record<string, string[]> = {
+    "killstata-anthropic-auth": ["anthropic", "google-vertex-anthropic"],
+    "@gitlab/killstata-gitlab-auth": ["gitlab"],
+  }
 
   // Built-in plugins that are directly imported (not installed from npm)
   const INTERNAL_PLUGINS: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin]
+
+  function pluginPackageName(plugin: string) {
+    const lastAtIndex = plugin.lastIndexOf("@")
+    return lastAtIndex > 0 ? plugin.substring(0, lastAtIndex) : plugin
+  }
+
+  function referencedProviders(config: Awaited<ReturnType<typeof Config.get>>) {
+    const providers = new Set<string>()
+    for (const model of [config.model, config.small_model]) {
+      if (typeof model !== "string") continue
+      const slash = model.indexOf("/")
+      if (slash > 0) providers.add(model.slice(0, slash))
+    }
+    for (const providerID of Object.keys(config.provider ?? {})) {
+      providers.add(providerID)
+    }
+    return providers
+  }
+
+  function shouldAutoloadBuiltinPlugin(
+    plugin: string,
+    config: Awaited<ReturnType<typeof Config.get>>,
+    explicitPlugins: string[],
+  ) {
+    if (explicitPlugins.some((item) => pluginPackageName(item) === pluginPackageName(plugin))) return true
+    const requiredProviders = BUILTIN_PROVIDER_REQUIREMENTS[pluginPackageName(plugin)]
+    if (!requiredProviders?.length) return true
+    const activeProviders = referencedProviders(config)
+    return requiredProviders.some((providerID) => activeProviders.has(providerID))
+  }
 
   const state = Instance.state(async () => {
     const client = createKillstataClient({
@@ -45,7 +77,18 @@ export namespace Plugin {
 
     const plugins = [...(config.plugin ?? [])]
     if (!Flag.KILLSTATA_DISABLE_DEFAULT_PLUGINS) {
-      plugins.push(...BUILTIN)
+      plugins.push(
+        ...BUILTIN.filter((plugin) => {
+          const enabled = shouldAutoloadBuiltinPlugin(plugin, config, config.plugin ?? [])
+          if (!enabled) {
+            log.info("skipping builtin plugin autoload", {
+              plugin,
+              reason: "provider_not_referenced_in_current_config",
+            })
+          }
+          return enabled
+        }),
+      )
     }
 
     for (let plugin of plugins) {
@@ -61,17 +104,11 @@ export namespace Plugin {
           if (!builtin) throw err
 
           const message = err instanceof Error ? err.message : String(err)
-          log.error("failed to install builtin plugin", {
+          log.warn("failed to install builtin plugin", {
             pkg,
             version,
             error: message,
           })
-          Bus.publish(Session.Event.Error, {
-            error: new NamedError.Unknown({
-              message: `Failed to install built-in plugin ${pkg}@${version}: ${message}`,
-            }).toObject(),
-          })
-
           return ""
         })
         if (!plugin) continue

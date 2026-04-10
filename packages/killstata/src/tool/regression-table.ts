@@ -15,13 +15,15 @@ import {
   resolveFinalOutputsPath,
 } from "./analysis-state"
 import { relativeWithinProject, resolveToolPath } from "./analysis-path"
+import { createToolDisplay } from "./analysis-display"
+import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./analysis-user-view"
 import type { Tool as ToolNamespace } from "./tool"
 
 const log = Log.create({ service: "regression-table-tool" })
 const PYTHON_RESULT_PREFIX = "__KILLSTATA_JSON__"
 const PYTHON_CMD = process.env.KILLSTATA_PYTHON ?? (process.platform === "win32" ? "python" : "python3")
 
-const TABLE_FORMATS = ["markdown", "latex", "xlsx"] as const
+const TABLE_FORMATS = ["markdown", "latex", "xlsx", "docx"] as const
 type TableFormat = (typeof TABLE_FORMATS)[number]
 
 export type RegressionTableResult = {
@@ -33,6 +35,7 @@ export type RegressionTableResult = {
   markdown_path?: string
   latex_path?: string
   workbook_path?: string
+  docx_path?: string
   dataset_id?: string
   run_id?: string
   branch?: string
@@ -120,7 +123,7 @@ function defaultOutputDir(firstModelPath: string) {
 
 export async function generateRegressionTable(
   input: RegressionTableInput,
-  ctx?: Pick<ToolNamespace.Context, "sessionID" | "messageID" | "callID">,
+  ctx?: Pick<ToolNamespace.Context, "sessionID" | "messageID" | "callID" | "ask">,
 ) {
   const resolvedModelDirs = ctx
     ? await Promise.all(
@@ -132,6 +135,7 @@ export async function generateRegressionTable(
             sessionID: ctx.sessionID,
             messageID: ctx.messageID,
             callID: ctx.callID,
+            ask: ctx.ask,
           }),
         ),
       )
@@ -145,6 +149,7 @@ export async function generateRegressionTable(
           sessionID: ctx.sessionID,
           messageID: ctx.messageID,
           callID: ctx.callID,
+          ask: ctx.ask,
         })
       : path.isAbsolute(input.outputDir)
         ? input.outputDir
@@ -173,6 +178,7 @@ from pathlib import Path
 import traceback
 
 import pandas as pd
+from docx import Document
 
 RESULT_PREFIX = "${PYTHON_RESULT_PREFIX}"
 ERRORS_DIR = r"${projectErrorsRoot().replace(/\\/g, "\\\\")}"
@@ -333,6 +339,22 @@ def latex_table(title, header, subheader, rows, notes):
     ])
     return "\\n".join(lines)
 
+def docx_table(title, header, subheader, rows, notes, output_path):
+    document = Document()
+    document.add_heading(title, level=1)
+    table_rows = [header]
+    if subheader:
+        table_rows.append(subheader)
+    table_rows.extend(rows)
+    table = document.add_table(rows=len(table_rows), cols=len(header))
+    table.style = "Table Grid"
+    for row_idx, row in enumerate(table_rows):
+        for col_idx, value in enumerate(row):
+            table.cell(row_idx, col_idx).text = "" if value is None else str(value)
+    document.add_paragraph("")
+    document.add_paragraph(notes)
+    document.save(output_path)
+
 payload = json.loads(base64.b64decode("${payloadB64}").decode("utf-8"))
 
 try:
@@ -367,6 +389,7 @@ try:
     markdown_path = None
     latex_path = None
     workbook_path = None
+    docx_path = None
 
     if "markdown" in payload.get("formats", []):
         markdown_path = output_dir / "three_line_table.md"
@@ -387,12 +410,17 @@ try:
         with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
             table_df.to_excel(writer, sheet_name="table", index=False, header=False)
 
+    if "docx" in payload.get("formats", []):
+        docx_path = output_dir / "three_line_table.docx"
+        docx_table(payload["title"], header, subheader, rows, notes, docx_path)
+
     emit({
         "success": True,
         "output_dir": str(output_dir),
         "markdown_path": str(markdown_path) if markdown_path else None,
         "latex_path": str(latex_path) if latex_path else None,
         "workbook_path": str(workbook_path) if workbook_path else None,
+        "docx_path": str(docx_path) if docx_path else None,
         "dataset_id": models[0].get("dataset_id"),
         "branch": models[0].get("branch"),
         "model_count": len(models),
@@ -425,7 +453,7 @@ except Exception as e:
 
 export const RegressionTableTool = Tool.define("regression_table", async () => ({
   description:
-    "Generate academic three-line regression tables from one or more econometrics result directories. Outputs Markdown, LaTeX, and Excel files suitable for papers.",
+    "Generate academic three-line regression tables from one or more econometrics result directories. Outputs Markdown, LaTeX, Excel, and Word files suitable for papers.",
   parameters: RegressionTableInputSchema,
   async execute(params, ctx) {
     const result = await generateRegressionTable(params, ctx)
@@ -458,6 +486,7 @@ export const RegressionTableTool = Tool.define("regression_table", async () => (
         publish("regression_table_markdown", "regression_table_markdown", result.markdown_path)
         publish("regression_table_latex", "regression_table_latex", result.latex_path)
         publish("regression_table_xlsx", "regression_table_workbook", result.workbook_path)
+        publish("regression_table_docx", "regression_table_docx", result.docx_path)
       } catch {}
     }
 
@@ -478,6 +507,7 @@ export const RegressionTableTool = Tool.define("regression_table", async () => (
     if (result.markdown_path) output += `- Markdown: ${relativeWithinProject(result.markdown_path)}\n`
     if (result.latex_path) output += `- LaTeX: ${relativeWithinProject(result.latex_path)}\n`
     if (result.workbook_path) output += `- Excel: ${relativeWithinProject(result.workbook_path)}\n`
+    if (result.docx_path) output += `- Word: ${relativeWithinProject(result.docx_path)}\n`
     if (visibleOutputs.length) {
       output += `\nVisible outputs:\n`
       for (const item of visibleOutputs) output += `- ${item.label}: ${item.relativePath}\n`
@@ -491,6 +521,45 @@ export const RegressionTableTool = Tool.define("regression_table", async () => (
         result,
         visibleOutputs,
         finalOutputsPath: manifestPath ? relativeWithinProject(manifestPath) : undefined,
+        analysisView: createToolAnalysisView({
+          kind: "regression_table",
+          step: "regression_table",
+          datasetId: result.dataset_id,
+          results: [
+            analysisMetric("模型数", result.model_count),
+            analysisMetric("表格行数", result.row_count),
+          ],
+          artifacts: [
+            analysisArtifact(result.markdown_path, { label: "three_line_table.md" }),
+            analysisArtifact(result.latex_path, { label: "three_line_table.tex" }),
+            analysisArtifact(result.workbook_path, { label: "three_line_table.xlsx" }),
+            analysisArtifact(result.docx_path, { label: "three_line_table.docx" }),
+            ...visibleOutputs.map((item) => analysisArtifact(item.relativePath, { label: item.label })),
+          ],
+          conclusion: `已生成《${params.title}》对应的三线表和回归表格文件。`,
+        }),
+        display: createToolDisplay({
+          summary: `已生成《${params.title}》对应的回归表格。`,
+          details: [
+            `模型数：${result.model_count ?? params.modelDirs.length}`,
+            result.row_count !== undefined ? `表格行数：${result.row_count}` : undefined,
+            manifestPath ? `Final outputs manifest: ${relativeWithinProject(manifestPath)}` : undefined,
+          ],
+          artifacts: [
+            result.markdown_path
+              ? { label: "Markdown", path: result.markdown_path, visibility: "user_default" as const }
+              : undefined,
+            result.latex_path
+              ? { label: "LaTeX", path: result.latex_path, visibility: "user_collapsed" as const }
+              : undefined,
+            result.workbook_path
+              ? { label: "Excel", path: result.workbook_path, visibility: "user_collapsed" as const }
+              : undefined,
+            result.docx_path
+              ? { label: "Word", path: result.docx_path, visibility: "user_collapsed" as const }
+              : undefined,
+          ],
+        }),
       },
     }
   },

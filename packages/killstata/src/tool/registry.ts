@@ -29,13 +29,14 @@ import { PlanExitTool, PlanEnterTool } from "./plan"
 import { ApplyPatchTool } from "./apply_patch"
 import { EconometricsTool } from "./econometrics"
 import { DataImportTool } from "./data-import"
+import { DataBatchTool } from "./data-batch"
 import { RegressionTableTool } from "./regression-table"
 import { ResearchBriefTool } from "./research-brief"
 import { HeterogeneityRunnerTool } from "./heterogeneity-runner"
 import { PaperDraftTool } from "./paper-draft"
 import { SlideGeneratorTool } from "./slide-generator"
 import { WorkflowTool } from "./workflow"
-import { filterToolsForWorkflow, workflowToolPolicy } from "@/runtime/workflow"
+import { resolveToolAvailability, workflowToolPolicy } from "@/runtime/workflow"
 import type { ToolAvailabilityPolicy } from "@/runtime/types"
 
 export namespace ToolRegistry {
@@ -124,6 +125,7 @@ export namespace ToolRegistry {
       EconometricsTool,
       RegressionTableTool,
       DataImportTool,
+      DataBatchTool,
       ResearchBriefTool,
       HeterogeneityRunnerTool,
       PaperDraftTool,
@@ -162,7 +164,8 @@ export namespace ToolRegistry {
         supportsImages: context?.modelCapabilities?.supportsImages ?? true,
       },
     })
-    const workflowAllowed = new Set(filterToolsForWorkflow({ policy, toolIDs: tools.map((tool) => tool.id) }))
+    const resolution = resolveToolAvailability({ policy, toolIDs: tools.map((tool) => tool.id) })
+    const workflowAllowed = new Set(resolution.allowedToolIDs)
     const result = await Promise.all(
       tools
         .filter((t) => {

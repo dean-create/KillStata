@@ -25,7 +25,8 @@ For analytical tasks, structure your output as:
 
 ## Data Handling
 - Start by scanning the working directory for data files (csv, xlsx, dta). If you cannot access files, ask for the path.
-- For non-trivial data cleaning or econometric workflows, state a concise stage plan before calling tools.
+- For non-trivial data cleaning or econometric workflows, plan internally before calling tools.
+- Keep user-visible output concise and report-like unless the user explicitly asks for detailed execution steps.
 - Prefer the canonical workflow: plan -> healthcheck/import -> preprocess/qa -> baseline estimate -> diagnostics -> robustness -> grounded narrative.
 - Summarize each dataset: rows, columns, variable names, types, missingness, potential identifiers, and panel/time structure.
 - Never run models before understanding data quality. Propose cleaning operations with explicit reasons.

@@ -4,11 +4,12 @@ import { useSync } from "@tui/context/sync"
 import { pipe, sumBy } from "remeda"
 import { useTheme } from "@tui/context/theme"
 import { SplitBorder } from "@tui/component/border"
-import type { AssistantMessage, Session } from "@killstata/sdk/v2"
+import type { Session } from "@killstata/sdk/v2"
 import { useCommandDialog } from "@tui/component/dialog-command"
 import { useKeybind } from "../../context/keybind"
 import { Installation } from "@/installation"
 import { useTerminalDimensions } from "@opentui/solid"
+import { formatContextUsage, getContextUsage, type ContextUsage } from "./context-usage"
 
 const Title = (props: { session: Accessor<Session> }) => {
   const { theme } = useTheme()
@@ -19,13 +20,21 @@ const Title = (props: { session: Accessor<Session> }) => {
   )
 }
 
-const ContextInfo = (props: { context: Accessor<string | undefined>; cost: Accessor<string> }) => {
+const ContextInfo = (props: { context: Accessor<ContextUsage | undefined>; cost: Accessor<string> }) => {
   const { theme } = useTheme()
+  const color = createMemo(() => {
+    const usage = props.context()
+    if (usage?.level === "danger") return theme.error
+    if (usage?.level === "watch") return theme.warning
+    return theme.textMuted
+  })
   return (
     <Show when={props.context()}>
-      <text fg={theme.textMuted} wrapMode="none" flexShrink={0}>
-        {props.context()} ({props.cost()})
-      </text>
+      {(usage) => (
+        <text fg={theme.textMuted} wrapMode="none" flexShrink={0}>
+          <span style={{ fg: color() }}>{formatContextUsage(usage())}</span> ({props.cost()})
+        </text>
+      )}
     </Show>
   )
 }
@@ -47,18 +56,7 @@ export function Header() {
     }).format(total)
   })
 
-  const context = createMemo(() => {
-    const last = messages().findLast((x) => x.role === "assistant" && x.tokens.output > 0) as AssistantMessage
-    if (!last) return
-    const total =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
-    const model = sync.data.provider.find((x) => x.id === last.providerID)?.models[last.modelID]
-    let result = total.toLocaleString()
-    if (model?.limit.context) {
-      result += "  " + Math.round((total / model.limit.context) * 100) + "%"
-    }
-    return result
-  })
+  const context = createMemo(() => getContextUsage(messages(), sync.data.provider))
 
   const { theme } = useTheme()
   const keybind = useKeybind()

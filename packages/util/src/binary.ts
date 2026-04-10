@@ -39,3 +39,5 @@ export namespace Binary {
     return array
   }
 }
+
+export default Binary

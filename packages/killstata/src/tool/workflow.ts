@@ -126,7 +126,7 @@ export const WorkflowTool = Tool.define("workflow", async () => ({
     }
 
     if (params.action === "rerun") {
-      const result = await executeRerunPlan({
+      const result: any = await executeRerunPlan({
         sessionID: ctx.sessionID,
         stageId: params.stageId,
         ctx,

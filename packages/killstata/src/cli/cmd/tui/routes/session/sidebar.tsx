@@ -4,13 +4,13 @@ import { createStore } from "solid-js/store"
 import { useTheme } from "../../context/theme"
 import { Locale } from "@/util/locale"
 import path from "path"
-import type { AssistantMessage } from "@killstata/sdk/v2"
 import { Global } from "@/global"
 import { Installation } from "@/installation"
 import { useKeybind } from "../../context/keybind"
 import { useDirectory } from "../../context/directory"
 import { useKV } from "../../context/kv"
 import { TodoItem } from "../../component/todo-item"
+import { contextUsageHint, getContextUsage } from "./context-usage"
 
 export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const sync = useSync()
@@ -19,6 +19,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const diff = createMemo(() => sync.data.session_diff[props.sessionID] ?? [])
   const todo = createMemo(() => sync.data.todo[props.sessionID] ?? [])
   const messages = createMemo(() => sync.data.message[props.sessionID] ?? [])
+  const workflow = createMemo(() => sync.data.workflow[props.sessionID])
 
   const [expanded, setExpanded] = createStore({
     mcp: false,
@@ -48,16 +49,16 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     }).format(total)
   })
 
-  const context = createMemo(() => {
-    const last = messages().findLast((x) => x.role === "assistant" && x.tokens.output > 0) as AssistantMessage
-    if (!last) return
-    const total =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
-    const model = sync.data.provider.find((x) => x.id === last.providerID)?.models[last.modelID]
-    return {
-      tokens: total.toLocaleString(),
-      percentage: model?.limit.context ? Math.round((total / model.limit.context) * 100) : null,
-    }
+  const context = createMemo(() => getContextUsage(messages(), sync.data.provider))
+  const contextColor = createMemo(() => {
+    const usage = context()
+    if (usage?.level === "danger") return theme.error
+    if (usage?.level === "watch") return theme.warning
+    return theme.textMuted
+  })
+  const contextHint = createMemo(() => {
+    const usage = context()
+    return usage ? contextUsageHint(usage) : undefined
   })
 
   const directory = useDirectory()
@@ -92,8 +93,11 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
               <text fg={theme.text}>
                 <b>Context</b>
               </text>
-              <text fg={theme.textMuted}>{context()?.tokens ?? 0} tokens</text>
-              <text fg={theme.textMuted}>{context()?.percentage ?? 0}% used</text>
+              <text fg={contextColor()}>{context()?.tokensLabel ?? 0} tokens</text>
+              <text fg={contextColor()}>{context()?.percentage ?? 0}% used</text>
+              <Show when={contextHint()}>
+                {(hint) => <text fg={contextColor()}>{hint()}</text>}
+              </Show>
               <text fg={theme.textMuted}>{cost()} spent</text>
             </box>
             <Show when={mcpEntries().length > 0}>
@@ -217,6 +221,41 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                 <Show when={todo().length <= 2 || expanded.todo}>
                   <For each={todo()}>{(todo) => <TodoItem status={todo.status} content={todo.content} />}</For>
                 </Show>
+              </box>
+            </Show>
+            <Show when={workflow()?.analysisChecklist?.length}>
+              <box>
+                <text fg={theme.text}>
+                  <b>Workflow Plan</b>
+                </text>
+                <Show when={workflow()?.approvalStatus}>
+                  <text fg={theme.textMuted}>Approval: {workflow()?.approvalStatus}</text>
+                </Show>
+                <Show when={workflow()?.activeStage}>
+                  <text fg={theme.textMuted}>
+                    Stage: {workflow()?.activeStage}
+                    {workflow()?.activeStageId ? ` (${workflow()?.activeStageId})` : ""}
+                  </text>
+                </Show>
+                <For each={workflow()?.analysisChecklist ?? []}>
+                  {(item) => (
+                    <text
+                      fg={
+                        item.status === "completed"
+                          ? theme.success
+                          : item.status === "blocked"
+                            ? theme.error
+                            : item.status === "in_progress"
+                              ? theme.warning
+                              : theme.textMuted
+                      }
+                      wrapMode="word"
+                    >
+                      {item.label}: {item.status}
+                      {item.summary ? ` - ${item.summary}` : ""}
+                    </text>
+                  )}
+                </For>
               </box>
             </Show>
             <Show when={diff().length > 0}>

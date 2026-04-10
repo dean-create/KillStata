@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 
-const { execSync, spawn } = require("child_process")
-const fs = require("fs")
-const os = require("os")
-const path = require("path")
+import { execSync, spawn } from "child_process"
+import fs from "fs"
+import os from "os"
+import path from "path"
+import { fileURLToPath } from "url"
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 const PACKAGE_ROOT = path.resolve(__dirname, "..")
 const PACKAGE_NAME = "killstata"
@@ -27,6 +31,7 @@ function launch(runtime, entryFile) {
 
   const child = spawn(runtime, args, {
     stdio: "inherit",
+    cwd: PACKAGE_ROOT,
     env: {
       ...process.env,
       KILLSTATA: "1",
@@ -69,31 +74,38 @@ function installedBinaryCandidates() {
 
 if (process.env.KILLSTATA_BIN_PATH) {
   launch(process.env.KILLSTATA_BIN_PATH, "")
-  return
-}
+} else {
+  let launched = false
 
-for (const binaryPath of installedBinaryCandidates()) {
-  if (fs.existsSync(binaryPath)) {
+  for (const binaryPath of installedBinaryCandidates()) {
+    if (!fs.existsSync(binaryPath)) continue
     launch(binaryPath, "")
-    return
+    launched = true
+    break
   }
-}
 
-const tsEntry = path.join(PACKAGE_ROOT, "src", "index.ts")
-if (commandExists("bun") && fs.existsSync(tsEntry)) {
-  launch("bun", tsEntry)
-  return
-}
+  if (!launched) {
+    const tsEntry = path.join(PACKAGE_ROOT, "src", "index.ts")
+    if (commandExists("bun") && fs.existsSync(tsEntry)) {
+      launch("bun", tsEntry)
+      launched = true
+    }
+  }
 
-const jsEntry = path.join(PACKAGE_ROOT, "dist", "index.js")
-if (fs.existsSync(jsEntry)) {
-  launch("node", jsEntry)
-  return
-}
+  if (!launched) {
+    const jsEntry = path.join(PACKAGE_ROOT, "dist", "index.js")
+    if (fs.existsSync(jsEntry)) {
+      launch("node", jsEntry)
+      launched = true
+    }
+  }
 
-console.error(`
+  if (!launched) {
+    console.error(`
   killstata could not find a bundled native binary, a local dist build, or a Bun runtime.
   Reinstall the npm package for your platform, or install Bun for source-mode development:
     https://bun.sh
 `)
-process.exit(1)
+    process.exit(1)
+  }
+}

@@ -47,7 +47,7 @@ bin/killstata → bin/killstata (已重命名)
 - .scriptName("killstata")
 + .scriptName("killstata")
 
-- process.env.OPENCODE = "1"
+- process.env.KILLSTATA = "1"
 + process.env.KILLSTATA = "1"
 
 - Log.Default.info("killstata", {...})

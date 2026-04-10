@@ -40,6 +40,7 @@ import { LoadAPIKeyError } from "ai"
 import type { Event, KillstataClient, SessionMessageResponse } from "@killstata/sdk/v2"
 import { applyPatch } from "diff"
 import { Command } from "@/command"
+import { renderToolDisplay } from "@/tool/analysis-display"
 
 export namespace ACP {
   const log = Log.create({ service: "acp-agent" })
@@ -209,10 +210,18 @@ export namespace ACP {
             sessionID: string
             activeStage?: string
             activeStageId?: string
+            activeCoordinatorAgent?: "explore" | "general" | "verifier"
             repairOnly?: boolean
             latestFailureCode?: string
             verifierStatus?: "pass" | "warn" | "block"
             rerunTargetStageId?: string
+            approvalStatus?: "required" | "approved" | "declined"
+            analysisChecklist?: {
+              id: string
+              label: string
+              status: "pending" | "in_progress" | "completed" | "blocked"
+              summary?: string
+            }[]
           }
           const session = this.sessionManager.tryGet(props.sessionID)
           if (!session) return
@@ -231,6 +240,13 @@ export namespace ACP {
               content: `Verifier: ${props.verifierStatus}`,
             })
           }
+          if (props.activeCoordinatorAgent) {
+            entries.push({
+              priority: props.activeCoordinatorAgent === "verifier" ? "high" : "medium",
+              status: props.activeCoordinatorAgent === "verifier" ? "in_progress" : "pending",
+              content: `Coordinator: ${props.activeCoordinatorAgent}`,
+            })
+          }
           if (props.latestFailureCode) {
             entries.push({
               priority: "high",
@@ -243,6 +259,25 @@ export namespace ACP {
               priority: "high",
               status: "in_progress",
               content: `Repair-only mode${props.rerunTargetStageId ? `; rerun target ${props.rerunTargetStageId}` : ""}`,
+            })
+          }
+          if (props.approvalStatus) {
+            entries.push({
+              priority: props.approvalStatus === "required" ? "high" : "medium",
+              status: props.approvalStatus === "approved" ? "completed" : "pending",
+              content: `Execution approval: ${props.approvalStatus}`,
+            })
+          }
+          for (const item of props.analysisChecklist ?? []) {
+            entries.push({
+              priority: item.status === "blocked" ? "high" : item.status === "in_progress" ? "medium" : "low",
+              status:
+                item.status === "completed"
+                  ? "completed"
+                  : item.status === "in_progress"
+                    ? "in_progress"
+                    : "pending",
+              content: `${item.label}: ${item.status}${item.summary ? ` (${item.summary})` : ""}`,
             })
           }
           if (!entries.length) return
@@ -415,7 +450,7 @@ export namespace ACP {
                     type: "content",
                     content: {
                       type: "text",
-                      text: part.state.output,
+                      text: toolContentText(part),
                     },
                   },
                 ]
@@ -503,7 +538,7 @@ export namespace ACP {
                           type: "content",
                           content: {
                             type: "text",
-                            text: part.state.error,
+                            text: toolContentText(part),
                           },
                         },
                       ],
@@ -897,7 +932,7 @@ export namespace ACP {
                   type: "content",
                   content: {
                     type: "text",
-                    text: part.state.output,
+                    text: toolContentText(part),
                   },
                 },
               ]
@@ -984,7 +1019,7 @@ export namespace ACP {
                         type: "content",
                         content: {
                           type: "text",
-                          text: part.state.error,
+                          text: toolContentText(part),
                         },
                       },
                     ],
@@ -1598,5 +1633,25 @@ export namespace ACP {
       return undefined
     }
     return result
+  }
+
+  function truncateToolText(text: string, limit = 1200) {
+    const normalized = text.trim()
+    if (normalized.length <= limit) return normalized
+    return normalized.slice(0, limit) + "\n...(truncated)"
+  }
+
+  function toolContentText(part: MessageV2.ToolPart) {
+    const metadata =
+      part.state.status === "completed" || part.state.status === "running" ? part.state.metadata : undefined
+    const display = renderToolDisplay(metadata, {
+      includeDetails: true,
+      includeArtifacts: true,
+      pathMode: "relative",
+    })
+    if (display) return display
+    if (part.state.status === "completed") return truncateToolText(part.state.output)
+    if (part.state.status === "error") return truncateToolText(part.state.error)
+    return part.tool
   }
 }

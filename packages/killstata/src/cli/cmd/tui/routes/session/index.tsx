@@ -74,6 +74,14 @@ import { PermissionPrompt } from "./permission"
 import { QuestionPrompt } from "./question"
 import { DialogExportOptions } from "../../ui/dialog-export-options"
 import { formatTranscript } from "../../util/transcript"
+import { readToolDisplay, renderToolDisplay } from "@/tool/analysis-display"
+import {
+  sanitizeAnalysisAssistantText,
+  containsEngineInternalData,
+  userFacingAnalysisErrorText,
+  type AnalysisToolPartLike,
+} from "@/runtime/analysis-text-sanitizer"
+import { isAnalysisTurn } from "@/runtime/analysis-user-view"
 
 addDefaultParsers(parsers.parsers)
 
@@ -85,6 +93,35 @@ class CustomSpeedScroll implements ScrollAcceleration {
   }
 
   reset(): void {}
+}
+
+const ANALYSIS_INTERNAL_ERROR_PATTERNS = [
+  /Cannot read .* as text/i,
+  /Cannot read binary file/i,
+  /Model tried to call unavailable tool/i,
+  /\bartifactRefs\b/i,
+  /\blatestTrustedArtifacts\b/i,
+  /\bworkflowRunId\b/i,
+  /\btrustedArtifacts\b/i,
+  /^Bash \[command=/i,
+]
+
+function isInternalAnalysisErrorText(text?: string) {
+  if (!text) return false
+  return containsEngineInternalData(text) || ANALYSIS_INTERNAL_ERROR_PATTERNS.some((pattern) => pattern.test(text))
+}
+
+function analysisErrorDisplayText(input: {
+  text?: string
+  isAnalysis: boolean
+  showDetails: boolean
+  waitingForAccess?: boolean
+}) {
+  const message = input.text?.trim()
+  if (!message) return undefined
+  if (!input.isAnalysis || input.showDetails) return message
+  if (input.waitingForAccess) return undefined
+  return userFacingAnalysisErrorText(message) ?? (isInternalAnalysisErrorText(message) ? undefined : message)
 }
 
 const context = createContext<{
@@ -140,11 +177,12 @@ export function Session() {
   const [sidebar, setSidebar] = kv.signal<"auto" | "hide">("sidebar", "hide")
   const [sidebarOpen, setSidebarOpen] = createSignal(false)
   const [conceal, setConceal] = createSignal(true)
-  const [showThinking, setShowThinking] = kv.signal("thinking_visibility", true)
+  const [showThinking, setShowThinking] = kv.signal("thinking_visibility", false)
   const [timestamps, setTimestamps] = kv.signal<"hide" | "show">("timestamps", "hide")
-  const [showDetails, setShowDetails] = kv.signal("tool_details_visibility", true)
+  const [showDetails, setShowDetails] = kv.signal("tool_details_visibility", false)
   const [showAssistantMetadata, setShowAssistantMetadata] = kv.signal("assistant_metadata_visibility", true)
   const [showScrollbar, setShowScrollbar] = kv.signal("scrollbar_visible", false)
+  const [contentOverflows, setContentOverflows] = createSignal(false)
   const [diffWrapMode, setDiffWrapMode] = createSignal<"word" | "none">("word")
   const [animationsEnabled, setAnimationsEnabled] = kv.signal("animations_enabled", true)
 
@@ -157,6 +195,10 @@ export function Session() {
   })
   const showTimestamps = createMemo(() => timestamps() === "show")
   const contentWidth = createMemo(() => dimensions().width - (sidebarVisible() ? 42 : 0) - 4)
+  const renderedPartCount = createMemo(() =>
+    messages().reduce((count, message) => count + (sync.data.part[message.id]?.length ?? 0), 0),
+  )
+  const scrollbarVisible = createMemo(() => showScrollbar() || contentOverflows())
 
   const scrollAcceleration = createMemo(() => {
     const tui = sync.data.config.tui
@@ -277,6 +319,22 @@ export function Session() {
       if (scroll) scroll.scrollTo(scroll.scrollHeight)
     }, 50)
   }
+
+  function refreshScrollbarVisibility() {
+    if (!scroll) return
+    setContentOverflows(scroll.scrollHeight > scroll.height)
+  }
+
+  createEffect(() => {
+    renderedPartCount()
+    dimensions()
+    sidebarVisible()
+    conceal()
+    showThinking()
+    showTimestamps()
+    showDetails()
+    setTimeout(refreshScrollbarVisibility, 0)
+  })
 
   const local = useLocal()
 
@@ -561,7 +619,7 @@ export function Session() {
       },
     },
     {
-      title: "Toggle session scrollbar",
+      title: showScrollbar() ? "Auto-hide session scrollbar" : "Always show session scrollbar",
       value: "session.toggle.scrollbar",
       keybind: "scrollbar_toggle",
       category: "Session",
@@ -723,7 +781,7 @@ export function Session() {
       onSelect: (dialog) => {
         const revertID = session()?.revert?.messageID
         const lastAssistantMessage = messages().findLast(
-          (msg) => msg.role === "assistant" && (!revertID || msg.id < revertID),
+          (msg): msg is AssistantMessage => msg.role === "assistant" && (!revertID || msg.id < revertID),
         )
         if (!lastAssistantMessage) {
           toast.show({ message: "No assistant messages found", variant: "error" })
@@ -732,17 +790,7 @@ export function Session() {
         }
 
         const parts = sync.data.part[lastAssistantMessage.id] ?? []
-        const textParts = parts.filter((part) => part.type === "text")
-        if (textParts.length === 0) {
-          toast.show({ message: "No text parts found in last assistant message", variant: "error" })
-          dialog.clear()
-          return
-        }
-
-        const text = textParts
-          .map((part) => part.text)
-          .join("\n")
-          .trim()
+        const text = copyableAssistantText(lastAssistantMessage, parts, sync)
         if (!text) {
           toast.show({
             message: "No text content found in last assistant message",
@@ -774,9 +822,10 @@ export function Session() {
             sessionData,
             sessionMessages.map((msg) => ({ info: msg, parts: sync.data.part[msg.id] ?? [] })),
             {
-              thinking: showThinking(),
-              toolDetails: showDetails(),
-              assistantMetadata: showAssistantMetadata(),
+              thinking: false,
+              toolDetails: false,
+              assistantMetadata: false,
+              pendingAccessMessageIDs: pendingExternalDirectoryMessageIDs(route.sessionID, sync),
             },
           )
           await Clipboard.copy(transcript)
@@ -803,14 +852,7 @@ export function Session() {
 
           const defaultFilename = `session-${sessionData.id.slice(0, 8)}.md`
 
-          const options = await DialogExportOptions.show(
-            dialog,
-            defaultFilename,
-            showThinking(),
-            showDetails(),
-            showAssistantMetadata(),
-            false,
-          )
+          const options = await DialogExportOptions.show(dialog, defaultFilename, false, false, false, false)
 
           if (options === null) return
 
@@ -821,6 +863,7 @@ export function Session() {
               thinking: options.thinking,
               toolDetails: options.toolDetails,
               assistantMetadata: options.assistantMetadata,
+              pendingAccessMessageIDs: pendingExternalDirectoryMessageIDs(route.sessionID, sync),
             },
           )
 
@@ -966,11 +1009,11 @@ export function Session() {
             <scrollbox
               ref={(r) => (scroll = r)}
               viewportOptions={{
-                paddingRight: showScrollbar() ? 1 : 0,
+                paddingRight: scrollbarVisible() ? 1 : 0,
               }}
               verticalScrollbarOptions={{
                 paddingLeft: 1,
-                visible: showScrollbar(),
+                visible: scrollbarVisible(),
                 trackOptions: {
                   backgroundColor: theme.backgroundElement,
                   foregroundColor: theme.border,
@@ -1236,6 +1279,7 @@ function UserMessage(props: {
 }
 
 function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; last: boolean }) {
+  const ctx = use()
   const local = useLocal()
   const { theme } = useTheme()
   const sync = useSync()
@@ -1251,6 +1295,18 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
     const user = messages().find((x) => x.role === "user" && x.id === props.message.parentID)
     if (!user || !user.time) return 0
     return props.message.time.completed - user.time.created
+  })
+
+  const visibleError = createMemo(() => {
+    const error = props.message.error
+    if (!error || error.name === "MessageAbortedError") return undefined
+    const rawMessage = typeof error.data.message === "string" ? error.data.message : undefined
+    return analysisErrorDisplayText({
+      text: rawMessage,
+      isAnalysis: isAnalysisAssistantMessage(props.message, sync),
+      showDetails: ctx.showDetails(),
+      waitingForAccess: isAnalysisAssistantWaitingForAccess(props.message, sync),
+    })
   })
 
   return (
@@ -1270,7 +1326,7 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
           )
         }}
       </For>
-      <Show when={props.message.error && props.message.error.name !== "MessageAbortedError"}>
+      <Show when={visibleError()}>
         <box
           border={["left"]}
           paddingTop={1}
@@ -1281,7 +1337,7 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
           customBorderChars={SplitBorder.customBorderChars}
           borderColor={theme.error}
         >
-          <text fg={theme.textMuted}>{props.message.error?.data.message}</text>
+          <text fg={theme.textMuted}>{visibleError()}</text>
         </box>
       </Show>
       <Switch>
@@ -1320,34 +1376,166 @@ const PART_MAPPING = {
   reasoning: ReasoningPart,
 }
 
+// 在 analysis turn 中，这些工具的输出对用户是纯噪音，应当被隐藏
+// bash: 内部 Python 脚本执行；write: 写入 parquet/json 产物文件
+const INTERNAL_ANALYSIS_MESSAGE_TOOLS = new Set([
+  "data_import",
+  "econometrics",
+  "heterogeneity_runner",
+  "research_brief",
+  "paper_draft",
+  "slide_generator",
+  "regression_table",
+  "glob",
+  "grep",
+  "list",
+  "read",
+  "write",
+  "bash",
+  "workflow",
+  "skill",
+  "invalid",
+  "todowrite",
+  "todoread",
+])
+
+function assistantToolsForMessage(message: AssistantMessage, sync: ReturnType<typeof useSync>): AnalysisToolPartLike[] {
+  return (sync.data.part[message.id] ?? [])
+    .filter((part): part is Extract<Part, { type: "tool" }> => part.type === "tool")
+    .map((part) => ({
+      tool: part.tool,
+      state: {
+        status: part.state.status,
+        input: part.state.input,
+        metadata: "metadata" in part.state ? part.state.metadata : undefined,
+      },
+    }))
+}
+
+function latestUserTextForMessage(message: AssistantMessage, sync: ReturnType<typeof useSync>) {
+  const messages = sync.data.message[message.sessionID] ?? []
+  const currentIndex = messages.findIndex((entry) => entry.id === message.id)
+  const searchIndex = currentIndex >= 0 ? currentIndex - 1 : messages.length - 1
+
+  for (let index = searchIndex; index >= 0; index -= 1) {
+    const entry = messages[index]
+    if (entry.role !== "user") continue
+    const parts = sync.data.part[entry.id] ?? []
+    const text = parts
+      .filter((part): part is Extract<Part, { type: "text" }> => part.type === "text" && !part.synthetic)
+      .map((part) => part.text.trim())
+      .filter(Boolean)
+      .join("\n")
+    if (text) return text
+  }
+
+  return undefined
+}
+
+function copyableAssistantText(message: AssistantMessage, parts: Part[], sync: ReturnType<typeof useSync>) {
+  const tools = assistantToolsForMessage(message, sync)
+  const latestUserText = latestUserTextForMessage(message, sync)
+  const rendered: string[] = []
+  let lastRendered: string | undefined
+  const isAnalysis = isAnalysisTurn(tools, latestUserText)
+
+  for (const part of parts) {
+    if (part.type !== "text" || part.synthetic) continue
+    const text = sanitizeAnalysisAssistantText({
+      text: part.text,
+      tools,
+      latestUserText,
+    }).text.trim()
+    if (!text || text === lastRendered) continue
+    rendered.push(text)
+    lastRendered = text
+  }
+
+  if (rendered.length === 0) {
+    const rawMessage = typeof message.error?.data.message === "string" ? message.error.data.message : undefined
+    const fallback = analysisErrorDisplayText({
+      text: rawMessage,
+      isAnalysis,
+      showDetails: false,
+      waitingForAccess: isAnalysisAssistantWaitingForAccess(message, sync),
+    })
+    if (fallback) return fallback
+  }
+
+  return rendered.join("\n").trim()
+}
+
+function isAnalysisAssistantMessage(message: AssistantMessage, sync: ReturnType<typeof useSync>) {
+  return isAnalysisTurn(assistantToolsForMessage(message, sync), latestUserTextForMessage(message, sync))
+}
+
+function pendingExternalDirectoryRequestsForMessage(message: AssistantMessage, sync: ReturnType<typeof useSync>) {
+  return (sync.data.permission[message.sessionID] ?? []).filter(
+    (request) => request.permission === "external_directory" && request.tool?.messageID === message.id,
+  )
+}
+
+function isAnalysisAssistantWaitingForAccess(message: AssistantMessage, sync: ReturnType<typeof useSync>) {
+  return (
+    isAnalysisAssistantMessage(message, sync) && pendingExternalDirectoryRequestsForMessage(message, sync).length > 0
+  )
+}
+
+function pendingExternalDirectoryMessageIDs(sessionID: string, sync: ReturnType<typeof useSync>) {
+  return new Set(
+    (sync.data.permission[sessionID] ?? [])
+      .filter((request) => request.permission === "external_directory" && request.tool?.messageID)
+      .map((request) => request.tool!.messageID),
+  )
+}
+
 function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: AssistantMessage }) {
   const { theme, subtleSyntax } = useTheme()
   const ctx = use()
+  const sync = useSync()
+  const renderer = useRenderer()
+  const [expanded, setExpanded] = createSignal(false)
   const content = createMemo(() => {
-    // Filter out redacted reasoning chunks from OpenRouter
-    // OpenRouter sends encrypted reasoning data that appears as [REDACTED]
     return props.part.text.replace("[REDACTED]", "").trim()
   })
+  const shouldShow = createMemo(() => {
+    if (!content() || !ctx.showThinking()) return false
+    if (isAnalysisAssistantMessage(props.message, sync) && !ctx.showDetails()) return false
+    return !isAnalysisAssistantWaitingForAccess(props.message, sync)
+  })
   return (
-    <Show when={content() && ctx.showThinking()}>
+    <Show when={shouldShow()}>
       <box
         id={"text-" + props.part.id}
         paddingLeft={2}
         marginTop={1}
         flexDirection="column"
         border={["left"]}
+        paddingTop={1}
+        paddingBottom={1}
         customBorderChars={SplitBorder.customBorderChars}
         borderColor={theme.backgroundElement}
+        backgroundColor={theme.backgroundPanel}
+        onMouseUp={() => {
+          if (renderer.getSelection()?.getSelectedText()) return
+          setExpanded((prev) => !prev)
+        }}
       >
-        <code
-          filetype="markdown"
-          drawUnstyledText={false}
-          streaming={true}
-          syntaxStyle={subtleSyntax()}
-          content={"_Thinking:_ " + content()}
-          conceal={ctx.conceal()}
-          fg={theme.textMuted}
-        />
+        <text fg={theme.textMuted} paddingLeft={1}>
+          {expanded() ? "[-] Thinking" : "[+] Thinking"}
+          <span style={{ fg: theme.textMuted }}> {expanded() ? "click to collapse" : "click to expand"}</span>
+        </text>
+        <Show when={expanded()}>
+          <code
+            filetype="markdown"
+            drawUnstyledText={false}
+            streaming={true}
+            syntaxStyle={subtleSyntax()}
+            content={content()}
+            conceal={ctx.conceal()}
+            fg={theme.textMuted}
+          />
+        </Show>
       </box>
     </Show>
   )
@@ -1356,15 +1544,61 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
 function TextPart(props: { last: boolean; part: TextPart; message: AssistantMessage }) {
   const ctx = use()
   const { theme, syntax } = useTheme()
+  const sync = useSync()
+  const latestUserText = createMemo(() => latestUserTextForMessage(props.message, sync))
+  const content = createMemo(() => {
+    const text = props.part.text.trim()
+    if (!text) return ""
+    const tools = assistantToolsForMessage(props.message, sync)
+    const userText = latestUserText()
+    const isAnalysis = isAnalysisTurn(tools, userText)
+    const waitingForAccess = isAnalysisAssistantWaitingForAccess(props.message, sync)
+    if (isAnalysis && props.part.synthetic && !ctx.showDetails()) return ""
+
+    const renderText = (value: string) => {
+      const trimmed = value.trim()
+      if (!trimmed) return ""
+      const hasEngineData = containsEngineInternalData(trimmed)
+      if (!isAnalysis && !hasEngineData) return trimmed
+      if (ctx.showDetails() && isAnalysis && !hasEngineData) return trimmed
+      return sanitizeAnalysisAssistantText({
+        text: trimmed,
+        tools,
+        latestUserText: userText,
+      }).text.trim()
+    }
+
+    const rendered = renderText(text)
+    if (!rendered) return ""
+
+    if (isAnalysis && !ctx.showDetails()) {
+      if (waitingForAccess) return ""
+
+      const textParts = (sync.data.part[props.message.id] ?? []).filter(
+        (part): part is Extract<Part, { type: "text" }> => part.type === "text" && !part.synthetic,
+      )
+      const currentIndex = textParts.findIndex((part) => part.id === props.part.id)
+      if (currentIndex > 0) {
+        for (let index = currentIndex - 1; index >= 0; index -= 1) {
+          const previous = renderText(textParts[index].text)
+          if (!previous) continue
+          if (previous === rendered) return ""
+          break
+        }
+      }
+    }
+
+    return rendered
+  })
   return (
-    <Show when={props.part.text.trim()}>
+    <Show when={content()}>
       <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
         <code
           filetype="markdown"
           drawUnstyledText={false}
           streaming={true}
           syntaxStyle={syntax()}
-          content={props.part.text.trim()}
+          content={content()}
           conceal={ctx.conceal()}
           fg={theme.text}
         />
@@ -1378,17 +1612,36 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
 function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMessage }) {
   const ctx = use()
   const sync = useSync()
+  const latestUserText = createMemo(() => latestUserTextForMessage(props.message, sync))
+  const metadata = createMemo(() => (props.part.state.status === "pending" ? {} : (props.part.state.metadata ?? {})))
+  const display = createMemo(() => readToolDisplay(metadata()))
+  const waitingForAccess = createMemo(() => isAnalysisAssistantWaitingForAccess(props.message, sync))
+  const analysisToolErrorText = createMemo(() =>
+    analysisErrorDisplayText({
+      text: props.part.state.status === "error" ? props.part.state.error : undefined,
+      isAnalysis: isAnalysisAssistantMessage(props.message, sync),
+      showDetails: ctx.showDetails(),
+      waitingForAccess: waitingForAccess(),
+    }),
+  )
 
   // Hide tool if showDetails is false and tool completed successfully
   const shouldHide = createMemo(() => {
     if (ctx.showDetails()) return false
-    if (props.part.state.status !== "completed") return false
-    return true
+    if (analysisToolErrorText()) return false
+    if (waitingForAccess()) {
+      if (props.part.state.status !== "completed") return true
+      if (display()?.visibility === "internal_only") return true
+      return INTERNAL_ANALYSIS_MESSAGE_TOOLS.has(props.part.tool)
+    }
+    if (display()?.visibility === "internal_only") return true
+    if (!isAnalysisTurn(assistantToolsForMessage(props.message, sync), latestUserText())) return false
+    return INTERNAL_ANALYSIS_MESSAGE_TOOLS.has(props.part.tool)
   })
 
   const toolprops = {
     get metadata() {
-      return props.part.state.status === "pending" ? {} : (props.part.state.metadata ?? {})
+      return metadata()
     },
     get input() {
       return props.part.state.input ?? {}
@@ -1471,10 +1724,43 @@ type ToolProps<T extends Tool.Info> = {
   part: ToolPart
 }
 function GenericTool(props: ToolProps<any>) {
+  const ctx = use()
+  const { theme } = useTheme()
+  const summary = createMemo(() => {
+    const raw =
+      renderToolDisplay(props.metadata, {
+        includeDetails: false,
+        includeArtifacts: false,
+        pathMode: "name",
+      }) ?? `${props.tool} ${input(props.input)}`.trim()
+    // 防止 metadata dump 溢出：超过 200 字符的 summary 自动截断
+    if (raw.length > 200) return raw.slice(0, 197) + "..."
+    return raw
+  })
+  const details = createMemo(() => {
+    return renderToolDisplay(props.metadata, {
+      includeDetails: true,
+      includeArtifacts: true,
+      pathMode: "relative",
+    })
+  })
+
   return (
-    <InlineTool icon="⚙" pending="Writing command..." complete={true} part={props.part}>
-      {props.tool} {input(props.input)}
-    </InlineTool>
+    <Switch>
+      <Match when={ctx.showDetails() && details()}>
+        <BlockTool title={`# ${props.tool}`} part={props.part}>
+          <box gap={1}>
+            <text fg={theme.text}>{summary()}</text>
+            <text fg={theme.textMuted}>{details()}</text>
+          </box>
+        </BlockTool>
+      </Match>
+      <Match when={true}>
+        <InlineTool icon="⚙" pending="Preparing tool..." complete={true} part={props.part}>
+          {summary()}
+        </InlineTool>
+      </Match>
+    </Switch>
   )
 }
 
@@ -1513,8 +1799,45 @@ function InlineTool(props: {
     if (props.complete) return theme.textMuted
     return theme.text
   })
+  const assistantMessage = createMemo(
+    () =>
+      (sync.data.message[props.part.sessionID] ?? []).find(
+        (entry): entry is AssistantMessage => entry.id === props.part.messageID && entry.role === "assistant",
+      ),
+  )
 
+  const suppressError = createMemo(() => {
+    const display = props.part.state.status === "pending" ? undefined : readToolDisplay(props.part.state.metadata ?? {})
+    const message = assistantMessage()
+    const errorText = analysisErrorDisplayText({
+      text: props.part.state.status === "error" ? props.part.state.error : undefined,
+      isAnalysis: Boolean(message && isAnalysisAssistantMessage(message, sync)),
+      showDetails: ctx.showDetails(),
+      waitingForAccess: Boolean(message && isAnalysisAssistantWaitingForAccess(message, sync)),
+    })
+    const analysisTool =
+      !ctx.showDetails() &&
+      message &&
+      isAnalysisAssistantMessage(message, sync) &&
+      INTERNAL_ANALYSIS_MESSAGE_TOOLS.has(props.part.tool)
+    if (errorText) return false
+    return (
+      props.part.tool === "todowrite" ||
+      props.part.tool === "todoread" ||
+      display?.visibility === "internal_only" ||
+      Boolean(analysisTool)
+    )
+  })
   const error = createMemo(() => (props.part.state.status === "error" ? props.part.state.error : undefined))
+  const visibleError = createMemo(
+    () =>
+      analysisErrorDisplayText({
+        text: error(),
+        isAnalysis: Boolean(assistantMessage() && isAnalysisAssistantMessage(assistantMessage()!, sync)),
+        showDetails: ctx.showDetails(),
+        waitingForAccess: Boolean(assistantMessage() && isAnalysisAssistantWaitingForAccess(assistantMessage()!, sync)),
+      }) ?? error(),
+  )
 
   const denied = createMemo(
     () =>
@@ -1555,18 +1878,62 @@ function InlineTool(props: {
           <span style={{ fg: props.iconColor }}>{props.icon}</span> {props.children}
         </Show>
       </text>
-      <Show when={error() && !denied()}>
-        <text fg={theme.error}>{error()}</text>
+      <Show when={visibleError() && !denied() && !suppressError()}>
+        <text fg={theme.error}>{visibleError()}</text>
       </Show>
     </box>
   )
 }
 
 function BlockTool(props: { title: string; children: JSX.Element; onClick?: () => void; part?: ToolPart }) {
+  const ctx = use()
+  const sync = useSync()
   const { theme } = useTheme()
   const renderer = useRenderer()
   const [hover, setHover] = createSignal(false)
-  const error = createMemo(() => (props.part?.state.status === "error" ? props.part.state.error : undefined))
+  const assistantMessage = createMemo(() => {
+    const part = props.part
+    if (!part) return undefined
+    return (sync.data.message[part.sessionID] ?? []).find(
+      (entry): entry is AssistantMessage => entry.id === part.messageID && entry.role === "assistant",
+    )
+  })
+  const suppressError = createMemo(() => {
+    if (!props.part || props.part.state.status === "pending") return false
+    const part = props.part
+    const display = readToolDisplay("metadata" in part.state ? (part.state.metadata ?? {}) : {})
+    const message = assistantMessage()
+    const errorText = analysisErrorDisplayText({
+      text: part.state.status === "error" ? part.state.error : undefined,
+      isAnalysis: Boolean(message && isAnalysisAssistantMessage(message, sync)),
+      showDetails: ctx.showDetails(),
+      waitingForAccess: Boolean(message && isAnalysisAssistantWaitingForAccess(message, sync)),
+    })
+    const analysisTool =
+      !ctx.showDetails() &&
+      message &&
+      isAnalysisAssistantMessage(message, sync) &&
+      INTERNAL_ANALYSIS_MESSAGE_TOOLS.has(part.tool)
+    if (errorText) return false
+    return (
+      part.tool === "todowrite" ||
+      part.tool === "todoread" ||
+      display?.visibility === "internal_only" ||
+      Boolean(analysisTool)
+    )
+  })
+  const error = createMemo(() => {
+    const part = props.part
+    return part?.state.status === "error" ? part.state.error : undefined
+  })
+  const visibleError = createMemo(() =>
+    analysisErrorDisplayText({
+      text: error(),
+      isAnalysis: Boolean(assistantMessage() && isAnalysisAssistantMessage(assistantMessage()!, sync)),
+      showDetails: ctx.showDetails(),
+      waitingForAccess: Boolean(assistantMessage() && isAnalysisAssistantWaitingForAccess(assistantMessage()!, sync)),
+    }) ?? error(),
+  )
   return (
     <box
       border={["left"]}
@@ -1589,8 +1956,8 @@ function BlockTool(props: { title: string; children: JSX.Element; onClick?: () =
         {props.title}
       </text>
       {props.children}
-      <Show when={error()}>
-        <text fg={theme.error}>{error()}</text>
+      <Show when={visibleError() && !suppressError()}>
+        <text fg={theme.error}>{visibleError()}</text>
       </Show>
     </box>
   )
@@ -1976,7 +2343,7 @@ function TodoWrite(props: ToolProps<typeof TodoWriteTool>) {
         <BlockTool title="# Todos" part={props.part}>
           <box>
             <For each={props.input.todos ?? []}>
-              {(todo) => <TodoItem status={todo.status} content={todo.content} />}
+              {(todo) => <TodoItem status={todo.status ?? "pending"} content={todo.content ?? ""} />}
             </For>
           </box>
         </BlockTool>

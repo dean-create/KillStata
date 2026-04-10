@@ -90,6 +90,8 @@ export const TuiThreadCommand = cmd({
       return
     }
 
+    UI.clearBootNoise()
+
     const worker = new Worker(workerPath, {
       env: Object.fromEntries(
         Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),

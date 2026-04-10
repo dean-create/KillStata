@@ -9,10 +9,75 @@ import { Instance } from "../project/instance"
 import { Identifier } from "../id/id"
 import { assertExternalDirectory } from "./external-directory"
 import { resolveWorkspacePath } from "./analysis-path"
+import { createToolDisplay, displayPath } from "./analysis-display"
+import { numericSnapshotPreview } from "./analysis-tool-metadata"
+import type { NumericSnapshotDocument } from "./analysis-grounding"
 
 const DEFAULT_READ_LIMIT = 2000
+const NUMERIC_SNAPSHOT_READ_LIMIT = 300
 const MAX_LINE_LENGTH = 2000
 const MAX_BYTES = 50 * 1024
+const NUMERIC_SNAPSHOT_MAX_BYTES = 12 * 1024
+
+function isNumericSnapshotPath(filepath: string) {
+  return path.basename(filepath).toLowerCase().includes("numeric_snapshot")
+}
+
+function isParquetPath(filepath: string) {
+  return path.extname(filepath).toLowerCase() === ".parquet"
+}
+
+function isBinaryTabularPath(filepath: string) {
+  return [".dta", ".xls", ".xlsx"].includes(path.extname(filepath).toLowerCase())
+}
+
+export function buildParquetReadGuidance(filepath: string) {
+  const normalized = path.normalize(filepath)
+  const isCanonicalStage =
+    normalized.includes(`${path.sep}.killstata${path.sep}`) &&
+    normalized.includes(`${path.sep}datasets${path.sep}`) &&
+    normalized.includes(`${path.sep}stages${path.sep}`)
+
+  const headline = isCanonicalStage
+    ? `Cannot read canonical parquet stage as text: ${filepath}`
+    : `Cannot read parquet file as text: ${filepath}`
+
+  const guidance = isCanonicalStage
+    ? [
+        "This file is the canonical working dataset for killstata.",
+        "Do not use the read tool on canonical parquet stages.",
+        "Use datasetId/stageId with data_import or econometrics instead.",
+      ]
+    : [
+        "Parquet is a binary tabular format and is not readable as plain text.",
+        "Do not use the read tool on parquet datasets when you need analysis results.",
+        "Use data_import/econometrics on the dataset, or inspect exported CSV/XLSX artifacts instead.",
+      ]
+
+  const alternatives = [
+    "Recommended alternatives:",
+    "- inspection CSV/XLSX for row-level inspection",
+    "- results.json for model results",
+    "- diagnostics.json for QA and diagnostics",
+    "- model_metadata.json for specification metadata",
+    "- numeric_snapshot.json for grounded statistics",
+  ]
+
+  return [headline, ...guidance, ...alternatives].join("\n")
+}
+
+export function buildBinaryTabularReadGuidance(filepath: string) {
+  const ext = path.extname(filepath).toLowerCase()
+  const label = ext === ".dta" ? "Stata dataset" : ext === ".xlsx" || ext === ".xls" ? "Excel workbook" : "Binary data file"
+  return [
+    `Cannot read ${label} as text: ${filepath}`,
+    `${label} is a structured binary format and should not be opened with the read tool as plain text.`,
+    "Recommended alternatives:",
+    "- use data_import with action=\"import\" for analysis intake",
+    "- use exported inspection CSV/XLSX files for row-level inspection",
+    "- use results.json / diagnostics.json / model_metadata.json / numeric_snapshot.json for structured outputs",
+  ].join("\n")
+}
 
 export const ReadTool = Tool.define("read", {
   description: DESCRIPTION,
@@ -70,6 +135,12 @@ export const ReadTool = Tool.define("read", {
         metadata: {
           preview: msg,
           truncated: false,
+          numericSnapshotPreview: undefined,
+          display: createToolDisplay({
+            summary: `Read ${displayPath(filepath, "name")}`,
+            details: [`Source: ${displayPath(filepath)}`],
+            visibility: "user_collapsed",
+          }),
         },
         attachments: [
           {
@@ -84,12 +155,24 @@ export const ReadTool = Tool.define("read", {
       }
     }
 
+    if (isParquetPath(filepath)) {
+      throw new Error(buildParquetReadGuidance(filepath))
+    }
+
+    if (isBinaryTabularPath(filepath)) {
+      throw new Error(buildBinaryTabularReadGuidance(filepath))
+    }
+
     const isBinary = await isBinaryFile(filepath, file)
     if (isBinary) throw new Error(`Cannot read binary file: ${filepath}`)
 
-    const limit = params.limit ?? DEFAULT_READ_LIMIT
+    const numericSnapshot = isNumericSnapshotPath(filepath)
+    const limit = params.limit ?? (numericSnapshot ? NUMERIC_SNAPSHOT_READ_LIMIT : DEFAULT_READ_LIMIT)
     const offset = params.offset || 0
-    const lines = await file.text().then((text) => text.split("\n"))
+    const maxBytes = numericSnapshot ? NUMERIC_SNAPSHOT_MAX_BYTES : MAX_BYTES
+    const fileText = await file.text()
+    const lines = fileText.split("\n")
+    const parsedNumericSnapshot = numericSnapshot ? parseNumericSnapshot(fileText) : undefined
 
     const raw: string[] = []
     let bytes = 0
@@ -97,7 +180,7 @@ export const ReadTool = Tool.define("read", {
     for (let i = offset; i < Math.min(lines.length, offset + limit); i++) {
       const line = lines[i].length > MAX_LINE_LENGTH ? lines[i].substring(0, MAX_LINE_LENGTH) + "..." : lines[i]
       const size = Buffer.byteLength(line, "utf-8") + (raw.length > 0 ? 1 : 0)
-      if (bytes + size > MAX_BYTES) {
+      if (bytes + size > maxBytes) {
         truncatedByBytes = true
         break
       }
@@ -119,11 +202,14 @@ export const ReadTool = Tool.define("read", {
     const truncated = hasMoreLines || truncatedByBytes
 
     if (truncatedByBytes) {
-      output += `\n\n(Output truncated at ${MAX_BYTES} bytes. Use 'offset' parameter to read beyond line ${lastReadLine})`
+      output += `\n\n(Output truncated at ${maxBytes} bytes. Use 'offset' parameter to read beyond line ${lastReadLine})`
     } else if (hasMoreLines) {
       output += `\n\n(File has more lines. Use 'offset' parameter to read beyond line ${lastReadLine})`
     } else {
       output += `\n\n(End of file - total ${totalLines} lines)`
+    }
+    if (numericSnapshot && params.limit === undefined) {
+      output += "\n(Numeric snapshot files default to a smaller preview window. Use offset/limit to inspect only the needed metrics.)"
     }
     output += "\n</file>"
 
@@ -137,6 +223,24 @@ export const ReadTool = Tool.define("read", {
       metadata: {
         preview,
         truncated,
+        numericSnapshotPreview: parsedNumericSnapshot ? numericSnapshotPreview(parsedNumericSnapshot) : undefined,
+        display: createToolDisplay({
+          summary: `Read ${displayPath(filepath, "name")}`,
+          details: [
+            `Source: ${displayPath(filepath)}`,
+            `Lines returned: ${raw.length}`,
+            truncated ? "Result truncated" : `Complete file preview (${totalLines} lines)`,
+            parsedNumericSnapshot ? `Numeric snapshot entries: ${parsedNumericSnapshot.entries.length}` : undefined,
+          ],
+          artifacts: [
+            {
+              label: "source",
+              path: filepath,
+              visibility: "user_collapsed",
+            },
+          ],
+          visibility: "user_collapsed",
+        }),
       },
     }
   },
@@ -160,6 +264,7 @@ async function isBinaryFile(filepath: string, file: Bun.BunFile): Promise<boolea
     case ".docx":
     case ".xls":
     case ".xlsx":
+    case ".dta":
     case ".ppt":
     case ".pptx":
     case ".odt":
@@ -197,4 +302,14 @@ async function isBinaryFile(filepath: string, file: Bun.BunFile): Promise<boolea
   }
   // If >30% non-printable characters, consider it binary
   return nonPrintableCount / bytes.length > 0.3
+}
+
+function parseNumericSnapshot(text: string) {
+  try {
+    const parsed = JSON.parse(text) as NumericSnapshotDocument
+    if (parsed && typeof parsed === "object" && Array.isArray(parsed.entries)) {
+      return parsed
+    }
+  } catch {}
+  return undefined
 }

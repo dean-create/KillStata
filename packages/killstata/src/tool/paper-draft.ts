@@ -6,6 +6,8 @@ import { Tool } from "./tool"
 import { generatedArtifactRoot, loadResultBundle, readJsonFile, resolvePublishedJsonPath } from "./analysis-artifacts"
 import { finalOutputsPath, inferRunId, publishVisibleOutput, readDatasetManifest } from "./analysis-state"
 import { relativeWithinProject, resolveToolPath, resolveWorkspacePath } from "./analysis-path"
+import { createToolDisplay } from "./analysis-display"
+import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./analysis-user-view"
 
 export const PaperDraftInputSchema = z.object({
   datasetId: z.string().optional(),
@@ -101,6 +103,7 @@ export const PaperDraftTool = Tool.define("paper_draft", {
           sessionID: ctx.sessionID,
           messageID: ctx.messageID,
           callID: ctx.callID,
+          ask: ctx.ask,
         })
       : generatedArtifactRoot({ module: "paper_draft", runId, branch: params.branch })
     fs.mkdirSync(outputDir, { recursive: true })
@@ -128,7 +131,7 @@ export const PaperDraftTool = Tool.define("paper_draft", {
       [
         `建议标题：${brief.core_question ?? brief.idea ?? "待补充标题"}`,
         "",
-        `摘要：本文围绕“${brief.core_question ?? brief.idea}”展开研究，基于${brief.preferred_design?.name ?? "基准识别设计"}构建经验策略。现有基准结果显示核心处理效应系数为 ${coeff?.toFixed(6) ?? "待补充"}，p-value 为 ${pValue?.toFixed(6) ?? "待补充"}。全文后续将围绕机制、稳健性与异质性进行展开。`,
+        `摘要：本文围绕“${brief.core_question ?? brief.idea ?? "待补充研究问题"}”展开研究，基于${brief.preferred_design?.name ?? "基准识别设计"}构建经验策略。当前基准结果显示核心处理效应系数为 ${coeff?.toFixed(6) ?? "待补充"}，p-value 为 ${pValue?.toFixed(6) ?? "待补充"}。后续将围绕机制、稳健性与异质性进一步展开。`,
       ],
       coeff !== undefined,
       [relativeWithinProject(briefJsonPath), relativeWithinProject(baseline.resultPath)],
@@ -137,8 +140,8 @@ export const PaperDraftTool = Tool.define("paper_draft", {
     pushSection(
       "研究背景与问题提出",
       [
-        brief.idea ?? "待补充",
-        brief.core_question ?? "待补充",
+        brief.idea ?? "待补充研究背景",
+        brief.core_question ?? "待补充核心问题",
       ],
       false,
       [relativeWithinProject(briefJsonPath)],
@@ -149,7 +152,7 @@ export const PaperDraftTool = Tool.define("paper_draft", {
       [
         ...(Array.isArray(brief.theory_and_mechanisms)
           ? brief.theory_and_mechanisms.map((item: any) => `- ${item.name}: ${item.rationale}`)
-          : ["待补充"]),
+          : ["- 待补充理论机制"]),
         ...(Array.isArray(brief.testable_hypotheses) ? ["", ...brief.testable_hypotheses.map((item: string) => `- ${item}`)] : []),
       ],
       false,
@@ -157,10 +160,10 @@ export const PaperDraftTool = Tool.define("paper_draft", {
       [],
     )
     pushSection(
-      "制度背景/政策背景",
+      "制度背景与政策脉络",
       [
-        "本节基于 research brief 中的制度与公开背景线索撰写，正式交稿前应补充经人工核对后的制度细节与文献综述。",
-        brief.context ?? "待补充。",
+        "本节基于 research brief 中的制度与公开背景线索撰写，正式交稿前应补充人工核对后的制度细节与文献综述。",
+        brief.context ?? "待补充制度背景",
       ],
       false,
       [relativeWithinProject(briefJsonPath)],
@@ -171,7 +174,7 @@ export const PaperDraftTool = Tool.define("paper_draft", {
       [
         `样本单位：${brief.required_data?.target_units ?? "待补充"}`,
         `时间范围：${brief.required_data?.time_span ?? "待补充"}`,
-        `核心变量：结果变量 ${brief.variable_blueprint?.outcome ?? params.outputLanguage}, 处理变量 ${brief.variable_blueprint?.treatment ?? params.outputLanguage}。`,
+        `核心变量：结果变量 ${brief.variable_blueprint?.outcome ?? "待补充"}，处理变量 ${brief.variable_blueprint?.treatment ?? "待补充"}。`,
         `当前基准回归使用样本量 ${rows ?? "待补充"}。`,
       ],
       rows !== undefined,
@@ -203,7 +206,7 @@ export const PaperDraftTool = Tool.define("paper_draft", {
       "稳健性检验",
       [
         heterogeneityBundle
-          ? `已读取扩展 bundle：${relativeWithinProject(heterogeneityBundlePath!)}。placebo / 替代口径结果可在附属摘要中查看。`
+          ? `已读取扩展 bundle：${relativeWithinProject(heterogeneityBundlePath!)}。placebo 或替代口径结果可在附属摘要中查看。`
           : "待补充：尚未提供 placebo 或替代口径扩展 bundle。",
       ],
       Boolean(heterogeneityBundle),
@@ -221,7 +224,7 @@ export const PaperDraftTool = Tool.define("paper_draft", {
               ? `机制分析已完成 ${mechanismSpecs.length} 个成功规格。`
               : "待补充：机制规格尚未成功执行。",
           ]
-        : ["待补充：尚未提供异质性/机制分析 bundle。"],
+        : ["待补充：尚未提供异质性或机制分析 bundle。"],
       Boolean(heterogeneityBundle),
       heterogeneityBundlePath ? [relativeWithinProject(heterogeneityBundlePath)] : [],
       heterogeneityBundlePath ? [relativeWithinProject(heterogeneityBundlePath)] : [],
@@ -230,7 +233,7 @@ export const PaperDraftTool = Tool.define("paper_draft", {
       "结论与政策含义",
       [
         "基于当前 research brief 与基准估计结果，可以先形成一个保守结论：核心处理变量与结果变量之间存在待进一步验证的经验关系。",
-        "正式定稿前应补足稳健性、异质性和机制证据后再上升到政策含义。",
+        "正式定稿前应补足稳健性、异质性和机制证据后，再上升到政策含义。",
       ],
       coeff !== undefined,
       [relativeWithinProject(briefJsonPath), relativeWithinProject(baseline.resultPath)],
@@ -239,8 +242,8 @@ export const PaperDraftTool = Tool.define("paper_draft", {
     pushSection(
       "局限性与后续工作",
       [
-        ...(Array.isArray(brief.validity_risks) ? brief.validity_risks.map((item: string) => `- ${item}`) : ["- 待补充"]),
-        "后续工作包括：补充稳健性、异质性、机制与正式文献综述。",
+        ...(Array.isArray(brief.validity_risks) ? brief.validity_risks.map((item: string) => `- ${item}`) : ["- 待补充局限性"]),
+        "后续工作包括：补充稳健性、异质性、机制证据，以及正式文献综述。",
       ],
       false,
       [relativeWithinProject(briefJsonPath)],
@@ -335,6 +338,51 @@ export const PaperDraftTool = Tool.define("paper_draft", {
         assetManifestPath: relativeWithinProject(assetManifestPath),
         visibleOutputs,
         finalOutputsPath: manifestPath ? relativeWithinProject(manifestPath) : undefined,
+        analysisView: createToolAnalysisView({
+          kind: "paper_draft",
+          step: "paper_draft",
+          datasetId,
+          stageId: baseline.stageId,
+          results: [
+            analysisMetric("template", params.targetTemplate),
+            analysisMetric("sections", traces.length),
+            analysisMetric("grounded sections", traces.filter((item) => item.grounded).length),
+          ],
+          artifacts: [
+            analysisArtifact(relativeWithinProject(paperDraftPath), {
+              label: "paper_draft.md",
+              visibility: "user_default",
+            }),
+            analysisArtifact(relativeWithinProject(paperDraftJsonPath), {
+              label: "paper_draft.json",
+              visibility: "user_collapsed",
+            }),
+            analysisArtifact(relativeWithinProject(appendixPath), {
+              label: "paper_appendix_outline.md",
+              visibility: "user_collapsed",
+            }),
+            ...visibleOutputs.map((item) =>
+              analysisArtifact(item.relativePath, {
+                label: item.label,
+                visibility: "user_collapsed",
+              }),
+            ),
+          ],
+          conclusion: "论文草稿已生成，建议先查看 paper_draft.md，再补充稳健性、异质性和正式文献综述。",
+        }),
+        display: createToolDisplay({
+          summary: `paper_draft generated using template ${params.targetTemplate}`,
+          details: [
+            `Run ID: ${runId}`,
+            `Baseline result: ${relativeWithinProject(baseline.resultPath)}`,
+            heterogeneityBundlePath ? `Heterogeneity bundle: ${relativeWithinProject(heterogeneityBundlePath)}` : undefined,
+          ],
+          artifacts: visibleOutputs.map((item) => ({
+            label: item.label,
+            path: item.relativePath,
+            visibility: "user_collapsed" as const,
+          })),
+        }),
       },
     }
   },

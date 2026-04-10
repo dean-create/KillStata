@@ -14,6 +14,8 @@ import {
   type DatasetManifest,
 } from "./analysis-state"
 import { relativeWithinProject, resolveToolPath } from "./analysis-path"
+import { createToolDisplay } from "./analysis-display"
+import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./analysis-user-view"
 
 const log = Log.create({ service: "research-brief-tool" })
 
@@ -86,6 +88,8 @@ export type ResearchBriefMetadata = {
   sourcesPath: string
   finalOutputsPath?: string
   visibleOutputs: Array<{ label: string; relativePath: string }>
+  analysisView?: ReturnType<typeof createToolAnalysisView>
+  display?: ReturnType<typeof createToolDisplay>
 }
 
 export type ResearchBriefResult = {
@@ -443,6 +447,7 @@ export const ResearchBriefTool = Tool.define("research_brief", {
           sessionID: ctx.sessionID,
           messageID: ctx.messageID,
           callID: ctx.callID,
+          ask: ctx.ask,
         })
       : generatedArtifactRoot({
           module: "research_brief",
@@ -594,6 +599,54 @@ export const ResearchBriefTool = Tool.define("research_brief", {
         sourcesPath: relativeWithinProject(sourcesPath),
         finalOutputsPath: manifestPath ? relativeWithinProject(manifestPath) : undefined,
         visibleOutputs,
+        analysisView: createToolAnalysisView({
+          kind: "research_brief",
+          step: "research_brief",
+          datasetId: manifest?.datasetId ?? params.datasetId,
+          stageId: params.stageId ?? datasetContext.stage?.stageId,
+          results: [
+            analysisMetric("grounding mode", groundingMode),
+            analysisMetric("preferred design", preferredStrategy.name),
+            analysisMetric("candidate designs", strategies.length),
+          ],
+          artifacts: [
+            analysisArtifact(relativeWithinProject(briefPath), {
+              label: "research_brief.md",
+              visibility: "user_default",
+            }),
+            analysisArtifact(relativeWithinProject(briefJsonPath), {
+              label: "research_brief.json",
+              visibility: "user_collapsed",
+            }),
+            analysisArtifact(relativeWithinProject(sourcesPath), {
+              label: "research_brief_sources.json",
+              visibility: "user_collapsed",
+            }),
+            ...visibleOutputs.map((item) =>
+              analysisArtifact(item.relativePath, {
+                label: item.label,
+                visibility: "user_collapsed",
+              }),
+            ),
+          ],
+          conclusion: `研究摘要已生成，建议先查看 research_brief.md 并围绕 ${preferredStrategy.name} 组织后续实证。`,
+        }),
+        display: createToolDisplay({
+          summary: `research_brief completed with grounding mode ${groundingMode}`,
+          details: [
+            `Run ID: ${runId}`,
+            `Core question: ${coreQuestion}`,
+            `Preferred design: ${preferredStrategy.name}`,
+            `Candidate designs: ${strategies.length}`,
+          ],
+          artifacts: [
+            ...visibleOutputs.map((item) => ({
+              label: item.label,
+              path: item.relativePath,
+              visibility: "user_collapsed" as const,
+            })),
+          ],
+        }),
       } satisfies ResearchBriefMetadata,
     }
   },

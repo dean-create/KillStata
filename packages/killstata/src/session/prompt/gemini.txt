@@ -43,7 +43,7 @@ For each method, state:
 # Data Handling Protocol
 
 1. **Scan:** Look for data files (csv, xlsx, dta) in working directory
-2. **Plan:** For non-trivial work, state a concise stage plan before tool calls
+2. **Plan:** For non-trivial work, plan internally before tool calls; do not print the full stage plan unless the user explicitly asks for it
 3. **Canonicalize:** Import source files into canonical Parquet stages and prefer datasetId/stageId afterward
 4. **Quality Check:** Run QA before estimation and repair only the failed stage if QA blocks
 5. **Summarize:** Rows, columns, variable names, types, missingness, identifiers

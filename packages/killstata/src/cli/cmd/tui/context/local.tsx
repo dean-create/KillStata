@@ -132,6 +132,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         Bun.write(
           file,
           JSON.stringify({
+            model: modelStore.model,
             recent: modelStore.recent,
             favorite: modelStore.favorite,
             variant: modelStore.variant,
@@ -142,6 +143,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       file
         .json()
         .then((x) => {
+          if (typeof x.model === "object" && x.model !== null) setModelStore("model", x.model)
           if (Array.isArray(x.recent)) setModelStore("recent", x.recent)
           if (Array.isArray(x.favorite)) setModelStore("favorite", x.favorite)
           if (typeof x.variant === "object" && x.variant !== null) setModelStore("variant", x.variant)
@@ -208,6 +210,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         get ready() {
           return modelStore.ready
         },
+        saved(name: string) {
+          return modelStore.model[name]
+        },
         recent() {
           return modelStore.recent
         },
@@ -243,6 +248,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           const val = recent[next]
           if (!val) return
           setModelStore("model", agent.current().name, { ...val })
+          save()
         },
         cycleFavorite(direction: 1 | -1) {
           const favorites = modelStore.favorite.filter((item) => isModelValid(item))
@@ -295,8 +301,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
                 "recent",
                 uniq.map((x) => ({ providerID: x.providerID, modelID: x.modelID })),
               )
-              save()
             }
+            save()
           })
         },
         toggleFavorite(model: { providerID: string; modelID: string }) {
@@ -384,6 +390,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     createEffect(() => {
       const value = agent.current()
       if (value.model) {
+        if (model.saved(value.name)) return
         if (isModelValid(value.model))
           model.set({
             providerID: value.model.providerID,

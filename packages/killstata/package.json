@@ -5,10 +5,10 @@
   "type": "module",
   "license": "MIT",
   "author": "killstata",
-  "homepage": "https://github.com/killstata/killstata",
+  "homepage": "https://github.com/dean-create/KILLSTATA",
   "repository": {
     "type": "git",
-    "url": "https://github.com/killstata/killstata.git",
+    "url": "https://github.com/dean-create/KILLSTATA.git",
     "directory": "packages/killstata"
   },
   "keywords": [
@@ -30,8 +30,11 @@
     "typecheck": "tsgo --noEmit",
     "test": "bun test",
     "build": "bun run script/build.ts",
+    "build:windows-priority": "bun run script/build.ts --windows-priority",
     "pack:publish": "bun run script/publish.ts --pack-only",
-    "dev": "bun run --conditions=browser ./src/index.ts",
+    "pack:publish:windows": "bun run script/publish.ts --pack-only --windows-priority",
+    "publish:windows": "bun run script/publish.ts --windows-priority",
+    "dev": "BROWSERSLIST_IGNORE_OLD_DATA=1 bun run --conditions=browser ./src/index.ts",
     "random": "echo 'Random script updated at $(date)' && echo 'Change queued successfully' && echo 'Another change made' && echo 'Yet another change' && echo 'One more change' && echo 'Final change' && echo 'Another final change' && echo 'Yet another final change'",
     "clean": "echo 'Cleaning up...' && rm -rf node_modules dist",
     "lint": "echo 'Running lint checks...' && bun test --coverage",
