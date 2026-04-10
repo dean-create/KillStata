@@ -1,6 +1,6 @@
-# KILLSTATA
+# KillStata
 
-KILLSTATA is an AI-native CLI for econometric research workflows.
+KillStata is an AI-native CLI for econometric research workflows.
 
 It is built for people who work with panel data, policy evaluation, causal inference, and paper-ready outputs, but do not want to manually stitch together Stata, Python, spreadsheets, and reporting scripts every time.
 
@@ -8,7 +8,7 @@ This repository is the open-source CLI core. It focuses on reproducible data imp
 
 ## What KILLSTATA Does
 
-KILLSTATA is not just a chat interface and not just a regression wrapper.
+KillStata is not just a chat interface and not just a regression wrapper.
 
 It treats empirical analysis as a workflow:
 
@@ -17,7 +17,7 @@ It treats empirical analysis as a workflow:
 3. Execute econometric methods against the current stage.
 4. Save structured outputs that can be verified, exported, and reused.
 
-In practice, that means KILLSTATA is designed to answer questions like:
+In practice, that means KillStata is designed to answer questions like:
 
 - "Import this Excel file and check whether the panel keys are duplicated."
 - "Run a panel fixed-effects regression on the cleaned stage."
@@ -52,7 +52,7 @@ In practice, that means KILLSTATA is designed to answer questions like:
 
 ## Why The Architecture Matters
 
-KILLSTATA follows three product principles:
+KillStata follows three product principles:
 
 - `Artifact-first`: continue from saved analysis artifacts, not from raw files every time
 - `Stage-based`: every important data transformation creates a new stage instead of silently overwriting the old one
@@ -92,7 +92,7 @@ Typical workflow:
 
 1. Open a project folder with your data files.
 2. Import a dataset.
-3. Let KILLSTATA run QA and build the working dataset stage.
+3. Let KillStata run QA and build the working dataset stage.
 4. Ask for estimation, diagnostics, tables, or report outputs.
 
 Example prompts:
