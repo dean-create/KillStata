@@ -722,6 +722,7 @@ export namespace ProviderTransform {
 
   export function error(providerID: string, error: APICallError) {
     let message = error.message
+    const lowered = message.toLowerCase()
     if (providerID.includes("github-copilot") && error.statusCode === 403) {
       return "Please reauthenticate with the copilot provider to ensure your credentials work properly with Killstata."
     }
@@ -730,6 +731,14 @@ export namespace ProviderTransform {
         message +
         "\n\nMake sure the model is enabled in your copilot settings: https://github.com/settings/copilot/features"
       )
+    }
+    if (
+      lowered.includes("incorrect api key provided") ||
+      lowered.includes("apikeyerror") ||
+      lowered.includes("alibabacloud.com") ||
+      lowered.includes("invalid_api_key")
+    ) {
+      return "API key 无效或未生效。请重新连接该 provider，并确认粘贴的是完整、可用的 API key。"
     }
 
     return message

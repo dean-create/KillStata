@@ -16,24 +16,32 @@ import { useToast } from "../ui/toast"
 
 const PROVIDER_PRIORITY: Record<string, number> = {
   anthropic: 1,
-  "github-copilot": 2,
-  openai: 3,
-  google: 4,
-  openrouter: 5,
-  xai: 6,
-  groq: 7,
-  mistral: 8,
+  openai: 2,
+  google: 3,
+  openrouter: 4,
+  xai: 5,
+  groq: 6,
+  mistral: 7,
+}
+
+function supportsApiKey(provider: { env?: string[]; id: string }, methods: Array<{ type: "oauth" | "api"; label: string }> = []) {
+  if (methods.some((method) => method.type === "api")) return true
+  if ((provider.env?.length ?? 0) > 0) return true
+  return methods.length === 0
 }
 
 export function createDialogProviderOptions() {
   const sync = useSync()
   const dialog = useDialog()
-  const sdk = useSDK()
   const connected = createMemo(() => new Set(sync.data.provider_next.connected))
   const options = createMemo(() => {
     return pipe(
       sync.data.provider_next.all,
-      (providers) => providers.filter((provider) => provider.id !== "killstata"),
+      (providers) =>
+        providers.filter((provider) => provider.id !== "killstata").filter((provider) => {
+          const methods = sync.data.provider_auth[provider.id] ?? []
+          return supportsApiKey(provider, methods)
+        }),
       sortBy((x) => PROVIDER_PRIORITY[x.id] ?? 99),
       map((provider) => {
         const isConnected = connected().has(provider.id)
@@ -41,30 +49,34 @@ export function createDialogProviderOptions() {
           title: provider.name,
           value: provider.id,
           description: {
-            anthropic: "(Claude Max or API key)",
-            openai: "(ChatGPT Plus/Pro or API key)",
-            openrouter: "(aggregated models via API key)",
-            xai: "(Grok via API key)",
-            groq: "(fast inference via API key)",
-            mistral: "(Mistral API key)",
+            anthropic: "(API key)",
+            openai: "(API key)",
+            google: "(API key)",
+            openrouter: "(API key)",
+            xai: "(API key)",
+            groq: "(API key)",
+            mistral: "(API key)",
           }[provider.id],
           category: provider.id in PROVIDER_PRIORITY ? "Popular" : "Other",
           footer: isConnected ? "Connected" : undefined,
           async onSelect() {
-            const methods = sync.data.provider_auth[provider.id] ?? [
+            const methods = (sync.data.provider_auth[provider.id] ?? []).filter((method) => method.type === "api")
+            const apiMethods = methods.length
+              ? methods
+              : [
               {
                 type: "api",
                 label: "API key",
               },
             ]
             let index: number | null = 0
-            if (methods.length > 1) {
+            if (apiMethods.length > 1) {
               index = await new Promise<number | null>((resolve) => {
                 dialog.replace(
                   () => (
                     <DialogSelect
                       title="Select auth method"
-                      options={methods.map((x, index) => ({
+                      options={apiMethods.map((x, index) => ({
                         title: x.label,
                         value: index,
                       }))}
@@ -76,33 +88,7 @@ export function createDialogProviderOptions() {
               })
             }
             if (index == null) return
-            const method = methods[index]
-            if (method.type === "oauth") {
-              const result = await sdk.client.provider.oauth.authorize({
-                providerID: provider.id,
-                method: index,
-              })
-              if (result.data?.method === "code") {
-                dialog.replace(() => (
-                  <CodeMethod
-                    providerID={provider.id}
-                    title={method.label}
-                    index={index}
-                    authorization={result.data!}
-                  />
-                ))
-              }
-              if (result.data?.method === "auto") {
-                dialog.replace(() => (
-                  <AutoMethod
-                    providerID={provider.id}
-                    title={method.label}
-                    index={index}
-                    authorization={result.data!}
-                  />
-                ))
-              }
-            }
+            const method = apiMethods[index]
             if (method.type === "api") {
               return dialog.replace(() => <ApiMethod providerID={provider.id} title={method.label} />)
             }
@@ -116,7 +102,7 @@ export function createDialogProviderOptions() {
 
 export function DialogProvider() {
   const options = createDialogProviderOptions()
-  return <DialogSelect title="Connect a provider" options={options()} />
+  return <DialogSelect title="Connect a provider (API key only)" options={options()} />
 }
 
 interface AutoMethodProps {
@@ -227,20 +213,20 @@ function ApiMethod(props: ApiMethodProps) {
   const dialog = useDialog()
   const sdk = useSDK()
   const sync = useSync()
-  const { theme } = useTheme()
 
   return (
     <DialogPrompt
       title={props.title}
       placeholder="API key"
-      description={undefined}
+      description={() => <text>Paste your API key. Subscription logins are not supported in this build.</text>}
       onConfirm={async (value) => {
-        if (!value) return
+        const key = value.trim().replace(/^(['"])(.*)\1$/, "$2").trim()
+        if (!key) return
         await sdk.client.auth.set({
           providerID: props.providerID,
           auth: {
             type: "api",
-            key: value,
+            key,
           },
         })
         await sdk.client.instance.dispose()

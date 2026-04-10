@@ -6,6 +6,12 @@ import z from "zod"
 export const OAUTH_DUMMY_KEY = "killstata-oauth-dummy-key"
 
 export namespace Auth {
+  function normalizeSecret(value: string) {
+    const trimmed = value.trim()
+    const quoted = trimmed.match(/^(['"])(.*)\1$/)
+    return quoted ? quoted[2].trim() : trimmed
+  }
+
   export const Oauth = z
     .object({
       type: z.literal("oauth"),
@@ -59,7 +65,13 @@ export namespace Auth {
   export async function set(key: string, info: Info) {
     const file = Bun.file(filepath)
     const data = await all()
-    await Bun.write(file, JSON.stringify({ ...data, [key]: info }, null, 2))
+    const normalized =
+      info.type === "api"
+        ? { ...info, key: normalizeSecret(info.key) }
+        : info.type === "wellknown"
+          ? { ...info, key: normalizeSecret(info.key), token: normalizeSecret(info.token) }
+          : info
+    await Bun.write(file, JSON.stringify({ ...data, [key]: normalized }, null, 2))
     await fs.chmod(file.name!, 0o600)
   }
 

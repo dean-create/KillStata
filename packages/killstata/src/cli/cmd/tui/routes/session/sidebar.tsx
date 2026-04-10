@@ -323,7 +323,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                 </box>
                 <text fg={theme.textMuted}>Connect a provider to start using killstata models.</text>
                 <text fg={theme.textMuted}>
-                  Connect a supported provider to use models such as Claude, GPT, Gemini and Kimi
+                  Connect a supported provider with an API key to use models such as Claude, GPT, Gemini and Kimi
                 </text>
                 <box flexDirection="row" gap={1} justifyContent="space-between">
                   <text fg={theme.text}>Connect provider</text>
