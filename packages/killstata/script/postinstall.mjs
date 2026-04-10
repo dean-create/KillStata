@@ -157,9 +157,9 @@ const hasAdvertisedNativeBinary = advertisedNativeBinary()
 if (hasNativeBinary) {
   console.log(`  ${GREEN}[OK]${RESET} Native package installed for ${os.platform()}/${os.arch()}`)
 } else if (hasAdvertisedNativeBinary) {
-  console.log(`  ${YELLOW}[WARN]${RESET} Native package for ${os.platform()}/${os.arch()} was expected but is not installed`)
+  console.log(`  ${YELLOW}[WARN]${RESET} Native package for ${os.platform()}/${os.arch()} was expected but was not found after install`)
 } else {
-  console.log(`  ${YELLOW}[WARN]${RESET} This release does not bundle a native package for ${os.platform()}/${os.arch()}`)
+  console.log(`  ${YELLOW}[WARN]${RESET} This release does not currently bundle a native package for ${os.platform()}/${os.arch()}`)
 }
 
 const hasBun = commandExists("bun")
@@ -168,7 +168,7 @@ if (hasBun) {
 } else if (hasNativeBinary) {
   console.log(`  ${GREEN}[OK]${RESET} Bun runtime not required for this install`)
 } else {
-  console.log(`  ${YELLOW}[WARN]${RESET} Bun runtime not found; this install will not run without Bun or a native binary`)
+  console.log(`  ${YELLOW}[WARN]${RESET} Bun runtime not found; this install will not run without Bun or a bundled native binary`)
 }
 
 const pythonCmd = os.platform() === "win32" ? "python" : "python3"
@@ -187,6 +187,7 @@ console.log(`  ${GREEN}[OK]${RESET} Managed default manifest: ${managedManifestP
 
 console.log("")
 console.log(`${BOLD}Next steps${RESET}`)
+console.log(`  Windows users: reinstall with ${CYAN}npm i -g killstata@latest${RESET} if the native binary was not installed correctly.`)
 console.log(`  Run ${CYAN}killstata init${RESET} to set up the Python econometrics environment.`)
 console.log(`  Run ${CYAN}killstata skills list${RESET} to inspect built-in, default, and custom skills.`)
 console.log(`  Put custom skills under ${CYAN}${localRoot}${RESET} or project-local ${CYAN}.killstata/skills${RESET}.`)

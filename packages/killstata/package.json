@@ -1,26 +1,34 @@
 {
   "version": "0.1.0",
   "name": "killstata",
-  "description": "AI-powered CLI assistant for econometric analysis. Supports data preprocessing, OLS regression, IV-2SLS, DID, PSM and more causal inference methods.",
+  "description": "AI-native econometrics CLI with staged data import, regression workflows, and paper-ready outputs.",
   "type": "module",
   "license": "MIT",
   "author": "killstata",
-  "homepage": "https://github.com/dean-create/KILLSTATA",
+  "homepage": "https://github.com/dean-create/KillStata#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dean-create/KILLSTATA.git",
+    "url": "https://github.com/dean-create/KillStata.git",
     "directory": "packages/killstata"
   },
   "keywords": [
     "econometrics",
+    "econometrics-cli",
     "stata",
+    "stata-alternative",
     "regression",
     "causal-inference",
+    "empirical-research",
+    "data-analysis",
     "panel-data",
+    "panel-regression",
     "DID",
+    "difference-in-differences",
     "PSM",
     "IV",
+    "iv-2sls",
     "cli",
+    "windows-cli",
     "ai-agent"
   ],
   "engines": {

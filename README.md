@@ -1,5 +1,6 @@
 # KillStata
 
+[![npm version](https://img.shields.io/npm/v/killstata?label=npm)](https://www.npmjs.com/package/killstata)
 [![License](https://img.shields.io/github/license/dean-create/KillStata?label=license)](./LICENSE)
 [![Typecheck](https://img.shields.io/github/actions/workflow/status/dean-create/KillStata/typecheck.yml?branch=main&label=typecheck)](https://github.com/dean-create/KillStata/actions/workflows/typecheck.yml)
 ![CLI](https://img.shields.io/badge/interface-CLI-111111)
@@ -16,9 +17,12 @@ This repository is the open-source CLI core. It focuses on reproducible data imp
 ## Table of Contents
 
 - [Why KillStata](#why-killstata)
+- [Screenshots](#screenshots)
 - [Core Features](#core-features)
 - [Installation](#installation)
-- [Quick Start](#quick-start)
+- [Common Commands](#common-commands)
+- [Prompt Examples](#prompt-examples)
+- [Artifacts Layout](#artifacts-layout)
 - [Repository Structure](#repository-structure)
 - [Development](#development)
 - [FAQ](#faq)
@@ -54,6 +58,16 @@ The core idea is simple:
 
 That design is what keeps the CLI usable when the analysis gets long, multi-step, and data-heavy.
 
+## Screenshots
+
+### Start Screen
+
+![KillStata start screen](./docs/images/killstata-home.png)
+
+### Capability View
+
+![KillStata capability view](./docs/images/killstata-capabilities.png)
+
 ## Core Features
 
 ### Data Workflow
@@ -82,17 +96,15 @@ That design is what keeps the CLI usable when the analysis gets long, multi-step
 
 ## Installation
 
-### For Users
-
-If you want the CLI from npm:
+### Windows Users
 
 ```bash
-npm install -g killstata
+npm i -g killstata@latest
 ```
 
-Current packaging is optimized for Windows-first CLI distribution.
+This is the recommended install path right now. Windows users should get the bundled native binary and be able to run the CLI out of the box.
 
-### For Source Development
+### Source Development
 
 If you are working from source:
 
@@ -100,26 +112,70 @@ If you are working from source:
 bun install
 ```
 
-## Quick Start
-
-Start the CLI:
+## Common Commands
 
 ```bash
 killstata
+killstata --version
+killstata init
+killstata skills list
 ```
 
-Typical flow:
+What they do:
 
-1. Open a project folder with your data files.
-2. Import a dataset.
-3. Let KillStata run QA and build the working dataset stage.
-4. Ask for estimation, diagnostics, tables, or report outputs.
+- `killstata`: start the interactive CLI
+- `killstata --version`: verify the installed version
+- `killstata init`: set up the local Python econometrics environment
+- `killstata skills list`: inspect built-in and local skills
 
-Example prompts:
+## Prompt Examples
+
+Once the CLI starts, useful prompts look like this:
 
 - `Import this Excel file and show me the schema.`
+- `Run QA on the current dataset and tell me if panel keys are duplicated.`
 - `Use the current panel stage and run a fixed-effects regression with clustered SE.`
 - `Export a three-line table and a short result summary.`
+- `Continue from the current artifact instead of rereading the raw file.`
+
+## Artifacts Layout
+
+KillStata stores analysis outputs as tracked artifacts instead of treating the raw spreadsheet as permanent working memory.
+
+Typical layout:
+
+```text
+.killstata/
+  datasets/
+    <datasetId>/
+      manifest.json
+      stages/
+        stage_000_*.parquet
+      inspection/
+        stage_000_*.csv
+        stage_000_*.xlsx
+      meta/
+        *_schema.json
+        *_labels.json
+      audit/
+        *_summary.json
+        *_log.md
+      reports/
+        main/
+          results.json
+          diagnostics.json
+          numeric_snapshot.json
+          three_line_table.tex
+          three_line_table.docx
+          delivery_result_summary.md
+```
+
+Why this matters:
+
+- `manifest.json` records the source of truth
+- `stages/` stores processing history
+- `inspection/` stores user-readable table outputs
+- `reports/` stores econometric results and paper-ready deliverables
 
 ## Repository Structure
 
@@ -187,6 +243,24 @@ Because the current npm packaging and release flow are optimized for Windows use
 ### Can it handle large datasets or many tables?
 
 That is exactly why the project uses an artifact-first design. The goal is to avoid shoving raw tables into prompt context and instead continue from saved dataset stages, summaries, diagnostics, and result artifacts.
+
+### What should I do if installation fails?
+
+For Windows users, retry the recommended path first:
+
+```bash
+npm i -g killstata@latest
+```
+
+If the CLI still cannot find a native binary, reinstall the package and then check:
+
+```bash
+killstata --version
+```
+
+For source-mode development on unsupported platforms, install Bun:
+
+- https://bun.sh
 
 ### Is this repository the desktop app?
 

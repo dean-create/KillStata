@@ -103,7 +103,9 @@ if (process.env.KILLSTATA_BIN_PATH) {
   if (!launched) {
     console.error(`
   killstata could not find a bundled native binary, a local dist build, or a Bun runtime.
-  Reinstall the npm package for your platform, or install Bun for source-mode development:
+  Windows users should retry:
+    npm i -g killstata@latest
+  For source-mode development on unsupported platforms, install Bun:
     https://bun.sh
 `)
     process.exit(1)
