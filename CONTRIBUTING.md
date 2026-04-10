@@ -1,260 +1,149 @@
-# Contributing to Killstata
+# Contributing to KILLSTATA
 
-We want to make it easy for you to contribute to Killstata. Here are the most common type of changes that get merged:
+Thanks for contributing.
 
-- Bug fixes
-- Additional LSPs / Formatters
-- Improvements to LLM performance
-- Support for new providers
-- Fixes for environment-specific quirks
-- Missing standard behavior
-- Documentation improvements
+This repository is now centered on the CLI core, so the highest-value contributions are the ones that improve reliability, traceability, analysis quality, packaging, and developer clarity.
 
-However, any UI or core product feature must go through a design review with the core team before implementation.
+## Good Contribution Types
 
-If you are unsure if a PR would be accepted, feel free to ask a maintainer or look for issues with any of the following labels:
+- bug fixes
+- CLI workflow reliability improvements
+- better error messages and fallback behavior
+- documentation improvements
+- tests for runtime, CLI, and packaging behavior
+- release and distribution improvements
 
-- [`help wanted`](https://github.com/anomalyco/killstata/issues?q=is%3Aissue%20state%3Aopen%20label%3Ahelp-wanted)
-- [`good first issue`](https://github.com/anomalyco/killstata/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22good%20first%20issue%22)
-- [`bug`](https://github.com/anomalyco/killstata/issues?q=is%3Aissue%20state%3Aopen%20label%3Abug)
-- [`perf`](https://github.com/anomalyco/killstata/issues?q=is%3Aopen%20is%3Aissue%20label%3A%22perf%22)
+## Before You Open A PR
 
-> [!NOTE]
-> PRs that ignore these guardrails will likely be closed.
+1. Check whether an issue already exists.
+2. Keep the change focused.
+3. Explain what changed and how you verified it.
+4. Avoid mixing refactors, docs changes, and behavior changes in one giant PR.
 
-Want to take on an issue? Leave a comment and a maintainer may assign it to you unless it is something we are already working on.
+If you are planning a large feature, start with an issue or discussion first. It saves everyone from surprise architecture fanfiction.
 
-## Developing Killstata
+## Development Setup
 
-- Requirements: Bun 1.3+
-- Install dependencies and start the dev server from the repo root:
+Requirements:
 
-  ```bash
-  bun install
-  bun dev
-  ```
+- Bun 1.3+
+- Node.js 18+
 
-### Running against a different directory
-
-By default, `bun dev` runs Killstata in the `packages/killstata` directory. To run it against a different directory or repository:
+Install dependencies from the repo root:
 
 ```bash
-bun dev <directory>
+bun install
 ```
 
-To run Killstata in the root of the killstata repo itself:
+## Useful Commands
+
+Typecheck the workspace:
 
 ```bash
-bun dev .
+bun run typecheck
 ```
 
-### Building a "localcode"
-
-To compile a standalone executable:
+Run CLI package tests:
 
 ```bash
-./packages/killstata/script/build.ts --single
+bun run --cwd packages/killstata test
 ```
 
-Then run it with:
+Build the CLI package:
 
 ```bash
-./packages/killstata/dist/killstata-<platform>/bin/killstata
+bun run --cwd packages/killstata build
 ```
 
-Replace `<platform>` with your platform (e.g., `darwin-arm64`, `linux-x64`).
-
-- Core pieces:
-  - `packages/killstata`: Killstata core business logic & server.
-  - `packages/killstata/src/cli/cmd/tui/`: The TUI code, written in SolidJS with [opentui](https://github.com/sst/opentui)
-  - `packages/app`: The shared web UI components, written in SolidJS
-  - `packages/desktop`: The native desktop app, built with Tauri (wraps `packages/app`)
-  - `packages/plugin`: Source for `@killstata/plugin`
-
-### Understanding bun dev vs killstata
-
-During development, `bun dev` is the local equivalent of the built `killstata` command. Both run the same CLI interface:
+Windows-priority build:
 
 ```bash
-# Development (from project root)
-bun dev --help           # Show all available commands
-bun dev serve            # Start headless API server
-bun dev web              # Start server + open web interface
-bun dev <directory>      # Start TUI in specific directory
-
-# Production
-killstata --help          # Show all available commands
-killstata serve           # Start headless API server
-killstata web             # Start server + open web interface
-killstata <directory>     # Start TUI in specific directory
+bun run --cwd packages/killstata build:windows-priority
 ```
 
-### Running the API Server
-
-To start the Killstata headless API server:
+Run the CLI from source:
 
 ```bash
-bun dev serve
+bun dev
 ```
 
-This starts the headless server on port 4096 by default. You can specify a different port:
+## Repository Layout
 
-```bash
-bun dev serve --port 8080
-```
+Important paths:
 
-### Running the Web App
+- `packages/killstata`: main CLI package
+- `packages/plugin`: plugin-related code
+- `packages/script`: shared scripts
+- `packages/sdk/js`: SDK code
+- `packages/util`: shared utilities
 
-To test UI changes during development:
-
-1. **First, start the Killstata server** (see [Running the API Server](#running-the-api-server) section above)
-2. **Then run the web app:**
-
-```bash
-bun run --cwd packages/app dev
-```
-
-This starts a local dev server at http://localhost:5173 (or similar port shown in output). Most UI changes can be tested here, but the server must be running for full functionality.
-
-### Running the Desktop App
-
-The desktop app is a native Tauri application that wraps the web UI.
-
-To run the native desktop app:
-
-```bash
-bun run --cwd packages/desktop tauri dev
-```
-
-This starts the web dev server on http://localhost:1420 and opens the native window.
-
-If you only want the web dev server (no native shell):
-
-```bash
-bun run --cwd packages/desktop dev
-```
-
-To create a production `dist/` and build the native app bundle:
-
-```bash
-bun run --cwd packages/desktop tauri build
-```
-
-This runs `bun run --cwd packages/desktop build` automatically via Tauri’s `beforeBuildCommand`.
-
-> [!NOTE]
-> Running the desktop app requires additional Tauri dependencies (Rust toolchain, platform-specific libraries). See the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for setup instructions.
-
-> [!NOTE]
-> If you make changes to the API or SDK (e.g. `packages/killstata/src/server/server.ts`), run `./script/generate.ts` to regenerate the SDK and related files.
-
-Please try to follow the [style guide](./STYLE_GUIDE.md)
-
-### Setting up a Debugger
-
-Bun debugging is currently rough around the edges. We hope this guide helps you get set up and avoid some pain points.
-
-The most reliable way to debug Killstata is to run it manually in a terminal via `bun run --inspect=<url> dev ...` and attach
-your debugger via that URL. Other methods can result in breakpoints being mapped incorrectly, at least in VSCode (YMMV).
-
-Caveats:
-
-- If you want to run the Killstata TUI and have breakpoints triggered in the server code, you might need to run `bun dev spawn` instead of
-  the usual `bun dev`. This is because `bun dev` runs the server in a worker thread and breakpoints might not work there.
-- If `spawn` does not work for you, you can debug the server separately:
-  - Debug server: `bun run --inspect=ws://localhost:6499/ --cwd packages/killstata ./src/index.ts serve --port 4096`,
-    then attach TUI with `killstata attach http://localhost:4096`
-  - Debug TUI: `bun run --inspect=ws://localhost:6499/ --cwd packages/killstata --conditions=browser ./src/index.ts`
-
-Other tips and tricks:
-
-- You might want to use `--inspect-wait` or `--inspect-brk` instead of `--inspect`, depending on your workflow
-- Specifying `--inspect=ws://localhost:6499/` on every invocation can be tiresome, you may want to `export BUN_OPTIONS=--inspect=ws://localhost:6499/` instead
-
-#### VSCode Setup
-
-If you use VSCode, you can use our example configurations [.vscode/settings.example.json](.vscode/settings.example.json) and [.vscode/launch.example.json](.vscode/launch.example.json).
-
-Some debug methods that can be problematic:
-
-- Debug configurations with `"request": "launch"` can have breakpoints incorrectly mapped and thus unusable
-- The same problem arises when running Killstata in the VSCode `JavaScript Debug Terminal`
-
-With that said, you may want to try these methods, as they might work for you.
+If you are changing user-facing workflow behavior, the most important code usually lives in `packages/killstata`.
 
 ## Pull Request Expectations
 
-### Issue First Policy
+### Keep It Reviewable
 
-**All PRs must reference an existing issue.** Before opening a PR, open an issue describing the bug or feature. This helps maintainers triage and prevents duplicate work. PRs without a linked issue may be closed without review.
+- prefer small PRs over giant repo-wide rewrites
+- explain the problem first, then the fix
+- include reproduction or verification steps
 
-- Use `Fixes #123` or `Closes #123` in your PR description to link the issue
-- For small fixes, a brief issue is fine - just enough context for maintainers to understand the problem
+### If You Change Behavior
 
-### General Requirements
+Please say:
 
-- Keep pull requests small and focused
-- Explain the issue and why your change fixes it
-- Before adding new functionality, ensure it doesn't already exist elsewhere in the codebase
+- what changed
+- why it changed
+- how you verified it
+- whether there are edge cases or known tradeoffs
 
-### UI Changes
+### If You Change Docs Only
 
-If your PR includes UI changes, please include screenshots or videos showing the before and after. This helps maintainers review faster and gives you quicker feedback.
+Say so clearly in the PR description. Review goes faster when people do not have to play detective.
 
-### Logic Changes
+### Commit Style
 
-For non-UI changes (bug fixes, new features, refactors), explain **how you verified it works**:
+Conventional-style commit prefixes are preferred:
 
-- What did you test?
-- How can a reviewer reproduce/confirm the fix?
-
-### No AI-Generated Walls of Text
-
-Long, AI-generated PR descriptions and issues are not acceptable and may be ignored. Respect the maintainers' time:
-
-- Write short, focused descriptions
-- Explain what changed and why in your own words
-- If you can't explain it briefly, your PR might be too large
-
-### PR Titles
-
-PR titles should follow conventional commit standards:
-
-- `feat:` new feature or functionality
-- `fix:` bug fix
-- `docs:` documentation or README changes
-- `chore:` maintenance tasks, dependency updates, etc.
-- `refactor:` code refactoring without changing behavior
-- `test:` adding or updating tests
-
-You can optionally include a scope to indicate which package is affected:
-
-- `feat(app):` feature in the app package
-- `fix(desktop):` bug fix in the desktop package
-- `chore(killstata):` maintenance in the killstata package
+- `feat:`
+- `fix:`
+- `docs:`
+- `chore:`
+- `refactor:`
+- `test:`
 
 Examples:
 
-- `docs: update contributing guidelines`
-- `fix: resolve crash on startup`
-- `feat: add dark mode support`
-- `feat(app): add dark mode support`
-- `fix(desktop): resolve crash on startup`
-- `chore: bump dependency versions`
+- `docs: clarify Windows-first npm packaging`
+- `fix: handle missing stage artifact gracefully`
+- `test: add regression table output coverage`
 
-### Style Preferences
+## Style Notes
 
-These are not strictly enforced, they are just general guidelines:
+General preferences:
 
-- **Functions:** Keep logic within a single function unless breaking it out adds clear reuse or composition benefits.
-- **Destructuring:** Do not do unnecessary destructuring of variables.
-- **Control flow:** Avoid `else` statements.
-- **Error handling:** Prefer `.catch(...)` instead of `try`/`catch` when possible.
-- **Types:** Reach for precise types and avoid `any`.
-- **Variables:** Stick to immutable patterns and avoid `let`.
-- **Naming:** Choose concise single-word identifiers when they remain descriptive.
-- **Runtime APIs:** Use Bun helpers such as `Bun.file()` when they fit the use case.
+- keep logic explicit
+- avoid vague abstractions
+- use precise types
+- prefer traceable behavior over clever shortcuts
+- preserve user-facing clarity when handling failures
 
-## Feature Requests
+In short: boring and correct beats magical and flaky.
 
-For net-new functionality, start with a design conversation. Open an issue describing the problem, your proposed approach (optional), and why it belongs in Killstata. The core team will help decide whether it should move forward; please wait for that approval instead of opening a feature PR directly.
+## Reporting Issues
+
+When opening an issue, try to include:
+
+- operating system
+- command you ran
+- expected behavior
+- actual behavior
+- error output or logs
+- sample dataset shape if relevant
+
+If the bug is data-specific, describe the schema and workflow context without posting sensitive data.
+
+## Questions
+
+If you are unsure whether a change fits the project, open an issue first.
+
+That is not bureaucracy. That is just cheaper than rebuilding the same thing twice.

@@ -1,14 +1,35 @@
 # KillStata
 
+[![License](https://img.shields.io/github/license/dean-create/KillStata?label=license)](./LICENSE)
+[![Typecheck](https://img.shields.io/github/actions/workflow/status/dean-create/KillStata/typecheck.yml?branch=main&label=typecheck)](https://github.com/dean-create/KillStata/actions/workflows/typecheck.yml)
+![CLI](https://img.shields.io/badge/interface-CLI-111111)
+![TypeScript](https://img.shields.io/badge/language-TypeScript-3178C6)
+![Runtime](https://img.shields.io/badge/runtime-Bun-F9F1E1)
+![Platform](https://img.shields.io/badge/platform-Windows%20first-0078D4)
+
 KillStata is an AI-native CLI for econometric research workflows.
 
-It is built for people who work with panel data, policy evaluation, causal inference, and paper-ready outputs, but do not want to manually stitch together Stata, Python, spreadsheets, and reporting scripts every time.
+It is built for people doing empirical research with panel data, policy evaluation, causal inference, and paper-ready reporting, but who do not want to glue together spreadsheets, Stata scripts, Python notebooks, regression exports, and result summaries by hand every single time.
 
 This repository is the open-source CLI core. It focuses on reproducible data import, staged data processing, econometric estimation, and deliverable generation.
 
-## What KILLSTATA Does
+## Table of Contents
 
-KillStata is not just a chat interface and not just a regression wrapper.
+- [Why KillStata](#why-killstata)
+- [Core Features](#core-features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Repository Structure](#repository-structure)
+- [Development](#development)
+- [FAQ](#faq)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [Workflow Docs](#workflow-docs)
+- [License](#license)
+
+## Why KillStata
+
+KillStata is not just a chat box and not just a regression wrapper.
 
 It treats empirical analysis as a workflow:
 
@@ -17,12 +38,21 @@ It treats empirical analysis as a workflow:
 3. Execute econometric methods against the current stage.
 4. Save structured outputs that can be verified, exported, and reused.
 
-In practice, that means KillStata is designed to answer questions like:
+In practice, KillStata is built for tasks like:
 
 - "Import this Excel file and check whether the panel keys are duplicated."
 - "Run a panel fixed-effects regression on the cleaned stage."
 - "Generate a three-line table and a short interpretation."
 - "Do not read the raw file again; continue from the current analysis artifact."
+
+The core idea is simple:
+
+- raw files are entry points
+- artifacts are the working memory
+- stages are the audit trail
+- structured outputs are the source of truth
+
+That design is what keeps the CLI usable when the analysis gets long, multi-step, and data-heavy.
 
 ## Core Features
 
@@ -30,7 +60,7 @@ In practice, that means KillStata is designed to answer questions like:
 
 - Import `CSV`, `XLSX`, and `DTA` files
 - Convert raw input into a canonical internal working layer
-- Preserve `datasetId` and `stageId` so processing steps stay traceable
+- Preserve `datasetId` and `stageId` so each step stays traceable
 - Run QA, filtering, preprocessing, and rollback as explicit stages
 
 ### Econometric Analysis
@@ -47,24 +77,14 @@ In practice, that means KillStata is designed to answer questions like:
 - Regression outputs in structured JSON form
 - Human-readable summaries
 - Three-line tables for papers
-- Export-friendly files such as Markdown, LaTeX, CSV, XLSX, and DOCX
-- Analysis artifacts that can be reused in later steps instead of rerunning from raw files
-
-## Why The Architecture Matters
-
-KillStata follows three product principles:
-
-- `Artifact-first`: continue from saved analysis artifacts, not from raw files every time
-- `Stage-based`: every important data transformation creates a new stage instead of silently overwriting the old one
-- `Grounded reporting`: narrative outputs should come from structured result files, not from model memory alone
-
-This is the reason the CLI can stay usable even when tasks become long, multi-step, and data-heavy.
+- Export-friendly outputs such as Markdown, LaTeX, CSV, XLSX, and DOCX
+- Analysis artifacts that can be reused instead of rerunning from raw files
 
 ## Installation
 
 ### For Users
 
-If you are installing the CLI from npm:
+If you want the CLI from npm:
 
 ```bash
 npm install -g killstata
@@ -74,7 +94,7 @@ Current packaging is optimized for Windows-first CLI distribution.
 
 ### For Source Development
 
-If you are working on the repository itself:
+If you are working from source:
 
 ```bash
 bun install
@@ -88,7 +108,7 @@ Start the CLI:
 killstata
 ```
 
-Typical workflow:
+Typical flow:
 
 1. Open a project folder with your data files.
 2. Import a dataset.
@@ -114,7 +134,7 @@ packages/
   util/        shared utilities
 ```
 
-The main package is here:
+Main package:
 
 - [packages/killstata](./packages/killstata)
 
@@ -150,6 +170,68 @@ Windows-priority build:
 bun run --cwd packages/killstata build:windows-priority
 ```
 
+## FAQ
+
+### Do I need Stata installed?
+
+No. KillStata is designed as its own CLI workflow layer. It can import common research data formats and run its own analysis pipeline without requiring a local Stata installation.
+
+### Does it keep rereading the raw Excel file forever?
+
+No. Raw files are only the entry point. After import, KillStata is designed to continue from structured artifacts and tracked stages rather than repeatedly treating the original spreadsheet as the source of truth.
+
+### Why is the project Windows-first right now?
+
+Because the current npm packaging and release flow are optimized for Windows users first. Cross-platform distribution is still important, but Windows is the current stability target.
+
+### Can it handle large datasets or many tables?
+
+That is exactly why the project uses an artifact-first design. The goal is to avoid shoving raw tables into prompt context and instead continue from saved dataset stages, summaries, diagnostics, and result artifacts.
+
+### Is this repository the desktop app?
+
+No. This repository now focuses on the CLI core. If you are looking for a full desktop GUI experience, that is not the main target of this repo anymore.
+
+## Roadmap
+
+Near-term priorities:
+
+- stabilize the Windows-first npm distribution flow
+- improve cross-platform binary packaging
+- keep tightening the CLI-only repository structure
+- improve UTF-8 and Chinese text handling across outputs
+- make artifact-driven analysis paths more visible in the UX
+
+Medium-term priorities:
+
+- expand econometric workflow coverage
+- improve structured result grounding and delivery quality
+- strengthen regression-table and report-generation polish
+- improve contributor onboarding and test clarity
+
+## Contributing
+
+Contributions are welcome.
+
+Good contribution types:
+
+- bug fixes
+- workflow reliability improvements
+- better error handling and user-facing messages
+- documentation improvements
+- test coverage for CLI and runtime behavior
+- packaging and release improvements
+
+Before opening a PR:
+
+1. check whether an issue already exists
+2. keep the PR focused
+3. explain what changed and how you verified it
+
+Start here:
+
+- [CONTRIBUTING.md](./CONTRIBUTING.md)
+
 ## Workflow Docs
 
 If you want the lower-level architecture and runtime workflow details, start here:
@@ -158,12 +240,6 @@ If you want the lower-level architecture and runtime workflow details, start her
 - [FINAL_OUTPUT_CHAIN_AUDIT.md](./FINAL_OUTPUT_CHAIN_AUDIT.md)
 
 These documents explain how `datasetId`, `stageId`, runtime workflow state, and output artifacts fit together.
-
-## Project Status
-
-- This repository currently focuses on the CLI core
-- Desktop / GUI code is not the main target of this repository anymore
-- The codebase is actively being shaped around reproducible econometric workflows rather than generic chat UX
 
 ## License
 
