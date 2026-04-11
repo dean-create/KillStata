@@ -22,6 +22,16 @@ const PROVIDER_PRIORITY: Record<string, number> = {
   xai: 5,
   groq: 6,
   mistral: 7,
+  alibaba: 8,
+  "alibaba-cn": 9,
+  deepseek: 10,
+  zhipuai: 11,
+  "moonshotai-cn": 12,
+  minimax: 13,
+  "minimax-cn": 14,
+  zai: 15,
+  stepfun: 16,
+  "siliconflow-cn": 17,
 }
 
 function supportsApiKey(provider: { env?: string[]; id: string }, methods: Array<{ type: "oauth" | "api"; label: string }> = []) {
@@ -48,15 +58,7 @@ export function createDialogProviderOptions() {
         return {
           title: provider.name,
           value: provider.id,
-          description: {
-            anthropic: "(API key)",
-            openai: "(API key)",
-            google: "(API key)",
-            openrouter: "(API key)",
-            xai: "(API key)",
-            groq: "(API key)",
-            mistral: "(API key)",
-          }[provider.id],
+          description: "(API key)",
           category: provider.id in PROVIDER_PRIORITY ? "Popular" : "Other",
           footer: isConnected ? "Connected" : undefined,
           async onSelect() {
