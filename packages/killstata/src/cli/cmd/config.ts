@@ -3,7 +3,9 @@ import fs from "fs"
 import { cmd } from "./cmd"
 import { UI } from "../ui"
 import { Instance } from "../../project/instance"
+import { Auth } from "../../auth"
 import { Config } from "../../config/config"
+import { ModelsDev } from "../../provider/models"
 import { defaultSkillsRoot, ensureSkillDirectories, importedSkillsRoot, localSkillsRoot, userSkillsRoot } from "../../skill"
 import { createBuiltInStataMcpConfig, StataEdition } from "../../mcp/stata"
 import {
@@ -44,7 +46,54 @@ type Finding = {
   detail: string
 }
 
+type ProviderSetup = {
+  providerID: string
+  providerName: string
+  modelID: string
+  modelName: string
+  usedExistingKey: boolean
+}
+
 const REQUIRED_PYTHON_PACKAGES_TEXT = REQUIRED_PYTHON_PACKAGES.join(", ")
+
+function providerPriority(providerID: string) {
+  return (
+    {
+      anthropic: 1,
+      openai: 2,
+      google: 3,
+      openrouter: 4,
+      xai: 5,
+      groq: 6,
+      mistral: 7,
+      perplexity: 8,
+      cohere: 9,
+      togetherai: 10,
+      deepinfra: 11,
+      cerebras: 12,
+    }[providerID] ?? 99
+  )
+}
+
+function supportsApiKey(provider: { env?: string[] }) {
+  return (provider.env?.length ?? 0) > 0
+}
+
+function parseConfiguredModel(model?: string) {
+  if (!model) return
+  const slash = model.indexOf("/")
+  if (slash <= 0 || slash >= model.length - 1) return
+  return {
+    providerID: model.slice(0, slash),
+    modelID: model.slice(slash + 1),
+  }
+}
+
+function normalizeApiKey(value: string) {
+  const trimmed = value.trim()
+  const quoted = trimmed.match(/^(['"])(.*)\1$/)
+  return quoted ? quoted[2].trim() : trimmed
+}
 
 function projectRoot() {
   return Instance.project.vcs ? Instance.worktree : Instance.directory
@@ -352,6 +401,115 @@ async function configureWorkspace(existing: Awaited<ReturnType<typeof Config.get
   }
 }
 
+async function configureModelProvider(existing: Awaited<ReturnType<typeof Config.get>>) {
+  await ModelsDev.refresh().catch(() => {})
+  const configured = parseConfiguredModel(existing.model ?? existing.small_model)
+  const enabled = existing.enabled_providers ? new Set(existing.enabled_providers) : undefined
+  const disabled = new Set(existing.disabled_providers ?? [])
+  const providerMap = await ModelsDev.get()
+  const providers: ModelsDev.Provider[] = Object.values(providerMap)
+    .filter((provider) => (enabled ? enabled.has(provider.id) : true) && !disabled.has(provider.id))
+    .filter((provider) => provider.id !== "killstata")
+    .filter((provider) => supportsApiKey(provider))
+    .sort((a, b) => {
+      const priority = providerPriority(a.id) - providerPriority(b.id)
+      if (priority !== 0) return priority
+      return a.name.localeCompare(b.name)
+    })
+
+  if (providers.length === 0) {
+    prompts.log.warn("No API-key providers are available right now. Skipping model setup.")
+    return undefined
+  }
+
+  const shouldConfigure = await prompts.confirm({
+    message: "Configure a model provider now? You will choose a provider, a default model, and an API key.",
+    initialValue: true,
+  })
+  if (prompts.isCancel(shouldConfigure)) throw new UI.CancelledError()
+  if (!shouldConfigure) {
+    prompts.log.warn("Model provider setup skipped. You can rerun `killstata config` later.")
+    return undefined
+  }
+
+  const providerID = await prompts.select({
+    message: "Choose your model provider",
+    options: providers.map((provider) => ({
+      label: provider.name,
+      value: provider.id,
+      hint: provider.env?.[0] ? `API key via ${provider.env[0]}` : "API key",
+    })),
+    initialValue: configured?.providerID && providers.some((provider) => provider.id === configured.providerID) ? configured.providerID : providers[0]!.id,
+  })
+  if (prompts.isCancel(providerID)) throw new UI.CancelledError()
+
+  const provider = providers.find((item) => item.id === providerID)!
+  const models = Object.values(provider.models)
+    .filter((model) => model.status !== "deprecated")
+    .sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id))
+
+  if (models.length === 0) {
+    prompts.log.warn(`No visible models are available for ${provider.name}. Skipping model setup.`)
+    return undefined
+  }
+
+  const modelID = await prompts.select({
+    message: `Choose the default model for ${provider.name}`,
+    options: models.map((model) => ({
+      label: model.name ?? model.id,
+      value: model.id,
+      hint: model.id,
+    })),
+    initialValue:
+      configured?.providerID === provider.id && models.some((model) => model.id === configured.modelID)
+        ? configured.modelID
+        : models[0]!.id,
+  })
+  if (prompts.isCancel(modelID)) throw new UI.CancelledError()
+
+  const model = models.find((item) => item.id === modelID)!
+  const existingAuth = await Auth.get(provider.id)
+  let usedExistingKey = false
+
+  if (existingAuth?.type === "api") {
+    const replace = await prompts.confirm({
+      message: `Replace the stored ${provider.name} API key?`,
+      initialValue: false,
+    })
+    if (prompts.isCancel(replace)) throw new UI.CancelledError()
+    if (!replace) {
+      usedExistingKey = true
+      prompts.log.info(`Keeping the existing ${provider.name} API key.`)
+    }
+  }
+
+  if (!usedExistingKey) {
+    prompts.log.info(`${provider.name} in this build uses API key authentication only.`)
+    if (provider.env?.length) {
+      prompts.log.info(`You can also set ${provider.env.join(" or ")} in your environment.`)
+    }
+    const key = await prompts.password({
+      message: `Paste your ${provider.name} API key`,
+      validate: (value) => (normalizeApiKey(value ?? "").length > 0 ? undefined : "Required"),
+    })
+    if (prompts.isCancel(key)) throw new UI.CancelledError()
+    await Auth.set(provider.id, {
+      type: "api",
+      key: normalizeApiKey(key),
+    })
+    prompts.log.success(`${provider.name} API key saved.`)
+  }
+
+  prompts.log.success(`Default model set to ${provider.name} / ${model.name ?? model.id}`)
+  return {
+    providerID: provider.id,
+    providerName: provider.name,
+    modelID: model.id,
+    modelName: model.name ?? model.id,
+    usedExistingKey,
+  } satisfies ProviderSetup
+}
+
 function printFinalSummary(input: {
   python?: {
     executable: string
@@ -365,6 +523,7 @@ function printFinalSummary(input: {
     path: string
     edition: "mp" | "se" | "be"
   }
+  provider?: ProviderSetup
 }) {
   prompts.log.success(`User config written to ${userConfigPath()}`)
   prompts.log.info(
@@ -374,6 +533,14 @@ function printFinalSummary(input: {
   prompts.log.info(`Agent state root: ${userMainAgentStateRoot()}`)
   prompts.log.info(`Agent sessions root: ${userMainAgentSessionsRoot()}`)
   prompts.log.info(`Subagent index: ${userSubagentRunsPath()}`)
+
+  if (input.provider) {
+    prompts.log.info(`Model provider: ${input.provider.providerName}`)
+    prompts.log.info(`Default model: ${input.provider.providerID}/${input.provider.modelID}`)
+    prompts.log.info(`API key: ${input.provider.usedExistingKey ? "kept existing credential" : "saved during setup"}`)
+  } else {
+    prompts.log.warn("Model provider: not configured")
+  }
 
   if (input.python) {
     prompts.log.info(
@@ -401,11 +568,17 @@ export async function runKillstataConfigWizard(input?: { intro?: string }) {
   const existing = await Config.get()
   const paths = runtimePaths(projectRoot())
   const workspace = await configureWorkspace(existing)
+  const provider = await configureModelProvider(existing)
   const python = await configurePython(existing)
   const stata = await configureStata(existing)
 
   const patch: Config.Info = {
     $schema: "https://killstata.io/config.json",
+    ...(provider
+      ? {
+          model: `${provider.providerID}/${provider.modelID}`,
+        }
+      : {}),
     killstata: {
       home: {
         root: paths.user.root,
@@ -465,6 +638,7 @@ export async function runKillstataConfigWizard(input?: { intro?: string }) {
 
   await writeUserConfigPatch(patch)
   printFinalSummary({
+    provider,
     python,
     workspace,
     stata: stata
@@ -484,6 +658,8 @@ export async function runKillstataConfigDoctor() {
   const config = await Config.get()
   const findings: Finding[] = []
   const paths = runtimePaths(projectRoot())
+  const providers: Record<string, ModelsDev.Provider> = await ModelsDev.get().catch(() => ({}))
+  const configuredModel = parseConfiguredModel(config.model ?? config.small_model)
 
   const pythonStatus = await getRuntimePythonStatus()
   if (!pythonStatus.ok && !pythonStatus.version && pythonStatus.source === "default") {
@@ -575,6 +751,40 @@ export async function runKillstataConfigDoctor() {
     detail: userConfigPath(),
   })
 
+  if (!configuredModel) {
+    findings.push({
+      level: "warn",
+      label: "Default model",
+      detail: "Not configured. Run `killstata config` to choose a provider and default model.",
+    })
+  } else {
+    findings.push({
+      level: "ok",
+      label: "Default model",
+      detail: `${configuredModel.providerID}/${configuredModel.modelID}`,
+    })
+
+    const auth = await Auth.get(configuredModel.providerID)
+    const envVars = providers[configuredModel.providerID]?.env ?? []
+    const hasEnvKey = envVars.some((name: string) => !!process.env[name])
+    if (auth?.type === "api" || hasEnvKey) {
+      findings.push({
+        level: "ok",
+        label: "Model credential",
+        detail:
+          auth?.type === "api"
+            ? `Stored API key for ${configuredModel.providerID}`
+            : `Environment credential detected for ${configuredModel.providerID}`,
+      })
+    } else {
+      findings.push({
+        level: "warn",
+        label: "Model credential",
+        detail: `No API key found for ${configuredModel.providerID}. Re-run \`killstata config\` or set the provider environment variable.`,
+      })
+    }
+  }
+
   for (const check of [
     { label: "Skills root", target: paths.user.skillRoot },
     { label: "Default skills root", target: paths.user.defaultSkills },
@@ -630,7 +840,7 @@ const ConfigPathsCommand = cmd({
 
 export const ConfigCommand = cmd({
   command: "config",
-  describe: "guided setup for Python, Stata, and killstata storage paths",
+  describe: "guided setup for model provider, Python, Stata, and killstata storage paths",
   builder: (yargs) => yargs.command(ConfigDoctorCommand).command(ConfigPathsCommand),
   async handler() {
     await Instance.provide({

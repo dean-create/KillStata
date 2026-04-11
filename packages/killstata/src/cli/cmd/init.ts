@@ -5,7 +5,7 @@ import * as prompts from "@clack/prompts"
 
 export const InitCommand = cmd({
   command: "init",
-  describe: "launch the guided killstata setup wizard",
+  describe: "launch the guided killstata setup wizard for provider, Python, and Stata",
   async handler() {
     await Instance.provide({
       directory: process.cwd(),
