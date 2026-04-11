@@ -259,6 +259,20 @@ export class TurnAssembler {
   }
 
   async finalize(result: QueryRuntimeResult, error?: unknown) {
+    if (this.currentText) {
+      await this.finalizeText()
+    }
+
+    for (const [id, part] of Object.entries(this.reasoningMap)) {
+      part.text = part.text.trimEnd()
+      part.time = {
+        ...part.time,
+        end: Date.now(),
+      }
+      await Session.updatePart(part)
+      delete this.reasoningMap[id]
+    }
+
     if (this.snapshot) {
       const patch = await Snapshot.patch(this.snapshot)
       if (patch.files.length) {
