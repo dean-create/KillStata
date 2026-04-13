@@ -15,6 +15,7 @@ export interface DialogSelectProps<T> {
   title: string
   placeholder?: string
   options: DialogSelectOption<T>[]
+  scrollbarVisible?: boolean
   ref?: (ref: DialogSelectRef<T>) => void
   onMove?: (option: DialogSelectOption<T>) => void
   onFilter?: (query: string) => void
@@ -249,7 +250,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
         <scrollbox
           paddingLeft={1}
           paddingRight={1}
-          scrollbarOptions={{ visible: false }}
+          scrollbarOptions={{ visible: props.scrollbarVisible ?? false }}
           ref={(r: ScrollBoxRenderable) => (scroll = r)}
           maxHeight={height()}
         >

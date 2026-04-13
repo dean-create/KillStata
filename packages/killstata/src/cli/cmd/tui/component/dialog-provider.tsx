@@ -13,53 +13,40 @@ import { DialogModel } from "./dialog-model"
 import { useKeyboard } from "@opentui/solid"
 import { Clipboard } from "@tui/util/clipboard"
 import { useToast } from "../ui/toast"
-
-const PROVIDER_PRIORITY: Record<string, number> = {
-  anthropic: 1,
-  openai: 2,
-  google: 3,
-  openrouter: 4,
-  xai: 5,
-  groq: 6,
-  mistral: 7,
-  alibaba: 8,
-  "alibaba-cn": 9,
-  deepseek: 10,
-  zhipuai: 11,
-  "moonshotai-cn": 12,
-  minimax: 13,
-  "minimax-cn": 14,
-  zai: 15,
-  stepfun: 16,
-  "siliconflow-cn": 17,
-}
-
-function supportsApiKey(provider: { env?: string[]; id: string }, methods: Array<{ type: "oauth" | "api"; label: string }> = []) {
-  if (methods.some((method) => method.type === "api")) return true
-  if ((provider.env?.length ?? 0) > 0) return true
-  return methods.length === 0
-}
+import {
+  buildCustomProviderConfig,
+  isPopularProvider,
+  normalizeApiKey,
+  normalizeBaseURL,
+  normalizeProviderID,
+  providerPriority,
+  supportsApiKeyProvider,
+} from "../../../../provider/provider-catalog"
 
 export function createDialogProviderOptions() {
   const sync = useSync()
   const dialog = useDialog()
+  const sdk = useSDK()
   const connected = createMemo(() => new Set(sync.data.provider_next.connected))
   const options = createMemo(() => {
-    return pipe(
+    const listed = pipe(
       sync.data.provider_next.all,
       (providers) =>
         providers.filter((provider) => provider.id !== "killstata").filter((provider) => {
           const methods = sync.data.provider_auth[provider.id] ?? []
-          return supportsApiKey(provider, methods)
+          return supportsApiKeyProvider(provider, methods)
         }),
-      sortBy((x) => PROVIDER_PRIORITY[x.id] ?? 99),
+      sortBy(
+        (x) => providerPriority(x.id),
+        (x) => x.name,
+      ),
       map((provider) => {
         const isConnected = connected().has(provider.id)
         return {
           title: provider.name,
           value: provider.id,
           description: "(API key)",
-          category: provider.id in PROVIDER_PRIORITY ? "Popular" : "Other",
+          category: isPopularProvider(provider.id) ? "Popular" : "Other",
           footer: isConnected ? "Connected" : undefined,
           async onSelect() {
             const methods = (sync.data.provider_auth[provider.id] ?? []).filter((method) => method.type === "api")
@@ -98,13 +85,89 @@ export function createDialogProviderOptions() {
         }
       }),
     )
+    listed.push({
+      title: "Custom OpenAI-compatible provider",
+      value: "__custom__",
+      description: "(API key + base URL)",
+      category: "Other",
+      footer: undefined,
+      async onSelect() {
+        const providerName = await DialogPrompt.show(dialog, "Provider name", {
+          placeholder: "My Provider",
+        })
+        if (!providerName?.trim()) return
+
+        const providerID = await DialogPrompt.show(dialog, "Provider id", {
+          value: normalizeProviderID(providerName),
+          placeholder: "my-provider",
+          description: () => <text>Use lowercase letters, numbers, and hyphens.</text>,
+        })
+        const normalizedProviderID = normalizeProviderID(providerID ?? "")
+        if (!normalizedProviderID) return
+
+        const baseURL = await DialogPrompt.show(dialog, "Provider base URL", {
+          placeholder: "https://api.example.com/v1",
+          description: () => <text>Killstata treats this as an OpenAI-compatible API endpoint.</text>,
+        })
+        if (!baseURL?.trim()) return
+
+        try {
+          const url = new URL(normalizeBaseURL(baseURL))
+          if (!/^https?:$/.test(url.protocol)) return
+        } catch {
+          return
+        }
+
+        const modelID = await DialogPrompt.show(dialog, "Default model id", {
+          placeholder: "gpt-4.1-mini",
+          description: () => <text>Use the exact model id provided by this vendor.</text>,
+        })
+        if (!modelID?.trim()) return
+
+        const key = await DialogPrompt.show(dialog, "API key", {
+          placeholder: "sk-...",
+          description: () => <text>Subscription logins are disabled here. API key only.</text>,
+        })
+        const normalizedKey = normalizeApiKey(key ?? "")
+        if (!normalizedKey) return
+
+        await sdk.client.config.update({
+          config: {
+            provider: buildCustomProviderConfig({
+              providerID: normalizedProviderID,
+              providerName: providerName.trim(),
+              baseURL,
+              modelID: modelID.trim(),
+            }),
+          },
+        })
+        await sdk.client.auth.set({
+          providerID: normalizedProviderID,
+          auth: {
+            type: "api",
+            key: normalizedKey,
+          },
+        })
+        await sdk.client.instance.dispose()
+        await sync.bootstrap()
+        dialog.replace(() => <DialogModel providerID={normalizedProviderID} />)
+      },
+    })
+    return listed
   })
   return options
 }
 
 export function DialogProvider() {
   const options = createDialogProviderOptions()
-  return <DialogSelect title="Connect a provider (API key only)" options={options()} />
+  return (
+    <DialogSelect
+      title={`Connect a provider (API key only, ${options().length} options)`}
+      placeholder="Search all providers"
+      options={options()}
+      scrollbarVisible
+    />
+  )
 }
 
 interface AutoMethodProps {
@@ -222,7 +285,7 @@ function ApiMethod(props: ApiMethodProps) {
       placeholder="API key"
       description={() => <text>Paste your API key. Subscription logins are not supported in this build.</text>}
       onConfirm={async (value) => {
-        const key = value.trim().replace(/^(['"])(.*)\1$/, "$2").trim()
+        const key = normalizeApiKey(value)
         if (!key) return
         await sdk.client.auth.set({
           providerID: props.providerID,

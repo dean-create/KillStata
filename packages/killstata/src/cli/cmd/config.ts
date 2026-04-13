@@ -6,6 +6,14 @@ import { Instance } from "../../project/instance"
 import { Auth } from "../../auth"
 import { Config } from "../../config/config"
 import { ModelsDev } from "../../provider/models"
+import {
+  buildCustomProviderConfig,
+  normalizeApiKey,
+  normalizeBaseURL,
+  normalizeProviderID,
+  providerPriority,
+  supportsApiKeyProvider,
+} from "../../provider/provider-catalog"
 import { defaultSkillsRoot, ensureSkillDirectories, importedSkillsRoot, localSkillsRoot, userSkillsRoot } from "../../skill"
 import { createBuiltInStataMcpConfig, StataEdition } from "../../mcp/stata"
 import {
@@ -52,42 +60,10 @@ type ProviderSetup = {
   modelID: string
   modelName: string
   usedExistingKey: boolean
+  providerConfig?: NonNullable<Config.Info["provider"]>
 }
 
 const REQUIRED_PYTHON_PACKAGES_TEXT = REQUIRED_PYTHON_PACKAGES.join(", ")
-
-function providerPriority(providerID: string) {
-  return (
-    {
-      anthropic: 1,
-      openai: 2,
-      google: 3,
-      openrouter: 4,
-      xai: 5,
-      groq: 6,
-      mistral: 7,
-      alibaba: 8,
-      "alibaba-cn": 9,
-      deepseek: 10,
-      zhipuai: 11,
-      "moonshotai-cn": 12,
-      minimax: 13,
-      "minimax-cn": 14,
-      zai: 15,
-      stepfun: 16,
-      "siliconflow-cn": 17,
-      perplexity: 18,
-      cohere: 19,
-      togetherai: 20,
-      deepinfra: 21,
-      cerebras: 22,
-    }[providerID] ?? 99
-  )
-}
-
-function supportsApiKey(provider: { env?: string[] }) {
-  return (provider.env?.length ?? 0) > 0
-}
 
 function parseConfiguredModel(model?: string) {
   if (!model) return
@@ -97,12 +73,6 @@ function parseConfiguredModel(model?: string) {
     providerID: model.slice(0, slash),
     modelID: model.slice(slash + 1),
   }
-}
-
-function normalizeApiKey(value: string) {
-  const trimmed = value.trim()
-  const quoted = trimmed.match(/^(['"])(.*)\1$/)
-  return quoted ? quoted[2].trim() : trimmed
 }
 
 function projectRoot() {
@@ -420,7 +390,7 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
   const providers: ModelsDev.Provider[] = Object.values(providerMap)
     .filter((provider) => (enabled ? enabled.has(provider.id) : true) && !disabled.has(provider.id))
     .filter((provider) => provider.id !== "killstata")
-    .filter((provider) => supportsApiKey(provider))
+    .filter((provider) => supportsApiKeyProvider(provider))
     .sort((a, b) => {
       const priority = providerPriority(a.id) - providerPriority(b.id)
       if (priority !== 0) return priority
@@ -444,14 +414,103 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
 
   const providerID = await prompts.select({
     message: "Choose your model provider",
-    options: providers.map((provider) => ({
-      label: provider.name,
-      value: provider.id,
-      hint: provider.env?.[0] ? `API key via ${provider.env[0]}` : "API key",
-    })),
+    options: [
+      ...providers.map((provider) => ({
+        label: provider.name,
+        value: provider.id,
+        hint: provider.env?.[0] ? `API key via ${provider.env[0]}` : "API key",
+      })),
+      {
+        label: "Custom OpenAI-compatible provider",
+        value: "__custom__",
+        hint: "Use this for any API-key vendor not listed above",
+      },
+    ],
     initialValue: configured?.providerID && providers.some((provider) => provider.id === configured.providerID) ? configured.providerID : providers[0]!.id,
   })
   if (prompts.isCancel(providerID)) throw new UI.CancelledError()
+
+  if (providerID === "__custom__") {
+    const providerName = await prompts.text({
+      message: "Name this provider",
+      placeholder: "My Provider",
+      validate: (value) => (value?.trim() ? undefined : "Required"),
+    })
+    if (prompts.isCancel(providerName)) throw new UI.CancelledError()
+
+    const providerSlug = normalizeProviderID(providerName)
+    const customProviderID = await prompts.text({
+      message: "Provider id",
+      placeholder: providerSlug || "my-provider",
+      initialValue: providerSlug || undefined,
+      validate: (value) => (normalizeProviderID(value ?? "") ? undefined : "a-z, 0-9 and hyphens only"),
+    })
+    if (prompts.isCancel(customProviderID)) throw new UI.CancelledError()
+
+    const baseURL = await prompts.text({
+      message: "Provider base URL",
+      placeholder: "https://api.example.com/v1",
+      validate: (value) => {
+        try {
+          const url = new URL(normalizeBaseURL(value ?? ""))
+          return /^https?:$/.test(url.protocol) ? undefined : "Use http or https"
+        } catch {
+          return "Enter a valid URL"
+        }
+      },
+    })
+    if (prompts.isCancel(baseURL)) throw new UI.CancelledError()
+
+    const modelID = await prompts.text({
+      message: "Default model id",
+      placeholder: "gpt-4.1-mini",
+      validate: (value) => (value?.trim() ? undefined : "Required"),
+    })
+    if (prompts.isCancel(modelID)) throw new UI.CancelledError()
+
+    const normalizedProviderID = normalizeProviderID(customProviderID)
+    const existingAuth = await Auth.get(normalizedProviderID)
+    let usedExistingKey = false
+
+    if (existingAuth?.type === "api") {
+      const replace = await prompts.confirm({
+        message: `Replace the stored ${providerName.trim()} API key?`,
+        initialValue: false,
+      })
+      if (prompts.isCancel(replace)) throw new UI.CancelledError()
+      if (!replace) {
+        usedExistingKey = true
+        prompts.log.info(`Keeping the existing ${providerName.trim()} API key.`)
+      }
+    }
+
+    if (!usedExistingKey) {
+      const key = await prompts.password({
+        message: `Paste your ${providerName.trim()} API key`,
+        validate: (value) => (normalizeApiKey(value ?? "").length > 0 ? undefined : "Required"),
+      })
+      if (prompts.isCancel(key)) throw new UI.CancelledError()
+      await Auth.set(normalizedProviderID, {
+        type: "api",
+        key: normalizeApiKey(key),
+      })
+      prompts.log.success(`${providerName.trim()} API key saved.`)
+    }
+
+    return {
+      providerID: normalizedProviderID,
+      providerName: providerName.trim(),
+      modelID: modelID.trim(),
+      modelName: modelID.trim(),
+      usedExistingKey,
+      providerConfig: buildCustomProviderConfig({
+        providerID: normalizedProviderID,
+        providerName: providerName.trim(),
+        baseURL,
+        modelID: modelID.trim(),
+      }),
+    } satisfies ProviderSetup
+  }
 
   const provider = providers.find((item) => item.id === providerID)!
   const models = Object.values(provider.models)
@@ -587,6 +646,7 @@ export async function runKillstataConfigWizard(input?: { intro?: string }) {
     ...(provider
       ? {
           model: `${provider.providerID}/${provider.modelID}`,
+          provider: provider.providerConfig,
         }
       : {}),
     killstata: {

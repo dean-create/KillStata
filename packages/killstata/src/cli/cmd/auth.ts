@@ -9,15 +9,14 @@ import os from "os"
 import { Config } from "../../config/config"
 import { Global } from "../../global"
 import { Instance } from "../../project/instance"
-function supportsApiKey(provider: { env?: string[] }) {
-  return (provider.env?.length ?? 0) > 0
-}
-
-function normalizeApiKey(value: string) {
-  const trimmed = value.trim()
-  const quoted = trimmed.match(/^(['"])(.*)\1$/)
-  return quoted ? quoted[2].trim() : trimmed
-}
+import {
+  buildCustomProviderConfig,
+  normalizeApiKey,
+  normalizeBaseURL,
+  normalizeProviderID,
+  providerPriority,
+  supportsApiKeyProvider,
+} from "../../provider/provider-catalog"
 
 export const AuthCommand = cmd({
   command: "auth",
@@ -121,24 +120,12 @@ export const AuthLoginCommand = cmd({
         const providers = await ModelsDev.get().then((x) => {
           const filtered: Record<string, (typeof x)[string]> = {}
           for (const [key, value] of Object.entries(x)) {
-            if ((enabled ? enabled.has(key) : true) && !disabled.has(key) && supportsApiKey(value)) {
+            if ((enabled ? enabled.has(key) : true) && !disabled.has(key) && supportsApiKeyProvider(value)) {
               filtered[key] = value
             }
           }
           return filtered
         })
-
-        const priority: Record<string, number> = {
-          killstata: 0,
-          anthropic: 1,
-          openai: 2,
-          google: 3,
-          openrouter: 4,
-          xai: 5,
-          groq: 6,
-          mistral: 7,
-          vercel: 8,
-        }
         let provider = await prompts.autocomplete({
           message: "Select provider",
           maxItems: 8,
@@ -147,26 +134,19 @@ export const AuthLoginCommand = cmd({
               providers,
               values(),
               sortBy(
-                (x) => priority[x.id] ?? 99,
+                (x) => providerPriority(x.id),
                 (x) => x.name ?? x.id,
               ),
               map((x) => ({
                 label: x.name,
                 value: x.id,
-                hint: {
-                  anthropic: "API key",
-                  openai: "API key",
-                  google: "API key",
-                  openrouter: "API key",
-                  xai: "API key",
-                  groq: "API key",
-                  mistral: "API key",
-                }[x.id],
+                hint: "API key",
               })),
             ),
             {
               value: "other",
-              label: "Other",
+              label: "Custom OpenAI-compatible",
+              hint: "Any API-key provider with an OpenAI-style endpoint",
             },
           ],
         })
@@ -174,16 +154,55 @@ export const AuthLoginCommand = cmd({
         if (prompts.isCancel(provider)) throw new UI.CancelledError()
 
         if (provider === "other") {
+          const providerName = await prompts.text({
+            message: "Enter provider name",
+            placeholder: "My Provider",
+            validate: (x) => (x?.trim() ? undefined : "Required"),
+          })
+          if (prompts.isCancel(providerName)) throw new UI.CancelledError()
+
+          const suggestedID = normalizeProviderID(providerName)
           provider = await prompts.text({
             message: "Enter provider id",
-            validate: (x) => (x && x.match(/^[0-9a-z-]+$/) ? undefined : "a-z, 0-9 and hyphens only"),
+            placeholder: suggestedID || "my-provider",
+            initialValue: suggestedID || undefined,
+            validate: (x) => (normalizeProviderID(x ?? "") ? undefined : "a-z, 0-9 and hyphens only"),
           })
           if (prompts.isCancel(provider)) throw new UI.CancelledError()
-          provider = provider.replace(/^@ai-sdk\//, "")
-          if (prompts.isCancel(provider)) throw new UI.CancelledError()
+          provider = normalizeProviderID(provider)
 
-          prompts.log.warn(
-            `This only stores a credential for ${provider} - you will need configure it in killstata.json, check the docs for examples.`,
+          const baseURL = await prompts.text({
+            message: "Enter provider base URL",
+            placeholder: "https://api.example.com/v1",
+            validate: (x) => {
+              try {
+                const url = new URL(normalizeBaseURL(x ?? ""))
+                return /^https?:$/.test(url.protocol) ? undefined : "Use http or https"
+              } catch {
+                return "Enter a valid URL"
+              }
+            },
+          })
+          if (prompts.isCancel(baseURL)) throw new UI.CancelledError()
+
+          const modelID = await prompts.text({
+            message: "Enter a default model id",
+            placeholder: "gpt-4.1-mini",
+            validate: (x) => (x?.trim() ? undefined : "Required"),
+          })
+          if (prompts.isCancel(modelID)) throw new UI.CancelledError()
+
+          await Config.update({
+            provider: buildCustomProviderConfig({
+              providerID: provider,
+              providerName: providerName.trim(),
+              baseURL,
+              modelID: modelID.trim(),
+            }),
+          })
+
+          prompts.log.info(
+            `Configured ${providerName.trim()} as ${provider}. You can now use its API key like any other provider.`,
           )
         }
 
