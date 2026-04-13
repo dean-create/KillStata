@@ -102,7 +102,7 @@ That design is what keeps the CLI usable when the analysis gets long, multi-step
 npm i -g killstata@latest
 ```
 
-This is the recommended install path right now. Windows users should get the bundled native binary and be able to run the CLI out of the box.
+This is the recommended install path right now. Windows users should usually get the bundled native binary and be able to start the CLI without installing Bun first. For data import and econometrics features, complete `killstata config` after installation.
 
 ### Source Development
 
@@ -133,7 +133,7 @@ Recommended local prerequisites:
 ```bash
 killstata
 killstata --version
-killstata init
+killstata config
 killstata skills list
 ```
 
@@ -141,8 +141,12 @@ What they do:
 
 - `killstata`: start the interactive CLI
 - `killstata --version`: verify the installed version
-- `killstata init`: set up the local Python econometrics environment
+- `killstata config`: launch the guided setup for provider, Python, Stata, and storage paths
 - `killstata skills list`: inspect built-in and local skills
+
+Compatibility note:
+
+- `killstata init` still works and currently delegates to `killstata config`
 
 ## Prompt Examples
 
@@ -268,7 +272,7 @@ What the release script does:
 ### Do I need Stata installed?
 
 No. KillStata is designed as its own CLI workflow layer. It can import common research data formats and run its own analysis pipeline without requiring a local Stata installation.
-If you already have Stata 17 or newer, you can also use Stata through MCP integration.
+If you already have a local Stata installation, you can also connect it through MCP. The current Windows setup flow is oriented around Stata 17+.
 
 ### Does it keep rereading the raw Excel file forever?
 
@@ -294,6 +298,12 @@ If the CLI still cannot find a native binary, reinstall the package and then che
 
 ```bash
 killstata --version
+```
+
+If the CLI starts but Python, Stata, or MCP integration still looks off, run:
+
+```bash
+killstata config doctor
 ```
 
 For source-mode development on unsupported platforms, install Bun:
@@ -355,4 +365,4 @@ These documents explain how `datasetId`, `stageId`, runtime workflow state, and 
 
 ## License
 
-This project is licensed under the Apache License 2.0. See the LICENSE file for details.
+This project is licensed under the MIT License. See the LICENSE file for details.
