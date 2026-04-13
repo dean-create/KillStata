@@ -112,7 +112,7 @@ If you are working from source:
 bun install
 ```
 
-### 新手引导
+### Getting Started
 
 If this is your first time installing KillStata, run the basic setup before starting real work:
 
