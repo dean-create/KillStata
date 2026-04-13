@@ -11,7 +11,6 @@ import {
   normalizeApiKey,
   normalizeBaseURL,
   normalizeProviderID,
-  providerPriority,
   supportsApiKeyProvider,
 } from "../../provider/provider-catalog"
 import { defaultSkillsRoot, ensureSkillDirectories, importedSkillsRoot, localSkillsRoot, userSkillsRoot } from "../../skill"
@@ -64,6 +63,17 @@ type ProviderSetup = {
 }
 
 const REQUIRED_PYTHON_PACKAGES_TEXT = REQUIRED_PYTHON_PACKAGES.join(", ")
+const providerNameCollator = new Intl.Collator("en", {
+  sensitivity: "base",
+  numeric: true,
+})
+
+function providerDisplaySortKey(provider: ModelsDev.Provider) {
+  return (provider.name || provider.id)
+    .replace(/\s+\((china|cn)\)$/i, "")
+    .replace(/^(the)\s+/i, "")
+    .trim()
+}
 
 function parseConfiguredModel(model?: string) {
   if (!model) return
@@ -392,9 +402,7 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
     .filter((provider) => provider.id !== "killstata")
     .filter((provider) => supportsApiKeyProvider(provider))
     .sort((a, b) => {
-      const priority = providerPriority(a.id) - providerPriority(b.id)
-      if (priority !== 0) return priority
-      return a.name.localeCompare(b.name)
+      return providerNameCollator.compare(providerDisplaySortKey(a), providerDisplaySortKey(b))
     })
 
   if (providers.length === 0) {
@@ -413,7 +421,7 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
   }
 
   const providerID = await prompts.select({
-    message: "Choose your model provider",
+    message: "Choose your model provider (A-Z order)",
     options: [
       ...providers.map((provider) => ({
         label: provider.name,
