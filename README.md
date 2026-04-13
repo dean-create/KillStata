@@ -112,6 +112,22 @@ If you are working from source:
 bun install
 ```
 
+### 新手引导
+
+If this is your first time installing KillStata, run the basic setup before starting real work:
+
+```bash
+killstata config
+```
+
+This command helps you complete the initial configuration so the CLI is ready to use.
+
+Recommended local prerequisites:
+
+- Python should already be installed and available in `PATH`
+- A normal terminal environment should be available for running CLI commands
+- If you are working from source, keep `bun` installed as well
+
 ## Common Commands
 
 ```bash
@@ -252,6 +268,7 @@ What the release script does:
 ### Do I need Stata installed?
 
 No. KillStata is designed as its own CLI workflow layer. It can import common research data formats and run its own analysis pipeline without requiring a local Stata installation.
+If you already have Stata 17 or newer, you can also use Stata through MCP integration.
 
 ### Does it keep rereading the raw Excel file forever?
 
