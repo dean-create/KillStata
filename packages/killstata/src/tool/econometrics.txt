@@ -160,7 +160,7 @@ Two-way fixed-effects baseline regression on a canonical Parquet stage:
 
 - Before spreadsheet-heavy or table-heavy workflows, load `workflow-orchestrator` first, then the most relevant specialist skill.
 - Prefer project-local skills under `.killstata/skills` when the same skill exists at multiple tiers.
-- If no project-local override exists, prefer curated `default` skills before `builtin`.
+- If no project-local override exists, prefer user-installed skills before `builtin`.
 - Prefer installed skill aliases rather than inventing names:
   - Excel/XLSX processing -> `xlsx-processor`
   - Descriptive profiling -> `descriptive-analysis`

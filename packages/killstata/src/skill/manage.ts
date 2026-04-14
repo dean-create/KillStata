@@ -6,16 +6,12 @@ import { NamedError } from "@killstata/util/error"
 import { Instance } from "@/project/instance"
 import z from "zod"
 import {
-  defaultSkillsRoot as runtimeDefaultSkillsRoot,
-  defaultSkillsManifestPath as runtimeDefaultSkillsManifestPath,
   ensureKillstataHomeDirectories,
-  importedSkillsRoot as runtimeImportedSkillsRoot,
   legacyUserSkillRoot,
-  localSkillsRoot as runtimeLocalSkillsRoot,
   userSkillRoot as runtimeUserSkillRoot,
 } from "@/killstata/runtime-config"
 
-export const SkillSource = z.enum(["builtin", "default", "user", "project", "imported"])
+export const SkillSource = z.enum(["builtin", "user", "project"])
 export type SkillSource = z.infer<typeof SkillSource>
 
 export const DoctorFinding = z.object({
@@ -53,19 +49,19 @@ export function userSkillsRoot() {
 }
 
 export function importedSkillsRoot() {
-  return runtimeImportedSkillsRoot()
+  return path.join(userSkillsRoot(), "imported")
 }
 
 export function defaultSkillsRoot() {
-  return runtimeDefaultSkillsRoot()
+  return path.join(userSkillsRoot(), "default")
 }
 
 export function defaultSkillsManifestPath() {
-  return runtimeDefaultSkillsManifestPath()
+  return path.join(defaultSkillsRoot(), ".managed.json")
 }
 
 export function localSkillsRoot() {
-  return runtimeLocalSkillsRoot()
+  return path.join(userSkillsRoot(), "local")
 }
 
 export function projectSkillsRoot() {
@@ -244,21 +240,6 @@ export async function doctorSkillFile(filePath: string) {
     })
   }
 
-  const requiredAgentConfig =
-    pathWithin(defaultSkillsRoot(), filePath) || pathWithin(path.resolve(import.meta.dir, "../../skills/default"), filePath)
-  if (requiredAgentConfig) {
-    const openaiYamlPath = path.join(root, "agents", "openai.yaml")
-    if (!(await Filesystem.exists(openaiYamlPath))) {
-      findings.push({
-        level: "error",
-        path: filePath,
-        skill: parsed.data.name,
-        code: "missing_agent_metadata",
-        message: "Default skills must include agents/openai.yaml",
-      })
-    }
-  }
-
   const expectedName = path.basename(root)
   if (parsed.data.name && parsed.data.name !== expectedName) {
     findings.push({
@@ -306,10 +287,8 @@ export async function uninstallSkillDirectory(skillDir: string) {
   const allowedRoots = [
     projectSkillsRoot(),
     userSkillsRoot(),
-    defaultSkillsRoot(),
-    path.join(userSkillsRoot(), "imported"),
-    path.join(userSkillsRoot(), "local"),
     legacyUserSkillRoot(),
+    path.join(legacyUserSkillRoot(), "default"),
     path.join(legacyUserSkillRoot(), "imported"),
     path.join(legacyUserSkillRoot(), "local"),
   ]

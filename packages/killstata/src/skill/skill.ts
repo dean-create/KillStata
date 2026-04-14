@@ -9,7 +9,7 @@ import { Filesystem } from "@/util/filesystem"
 import { Flag } from "@/flag/flag"
 import { Bus } from "@/bus"
 import { Session } from "@/session"
-import { builtinSkillsRoot, defaultSkillsRoot, doctorSkillFile, importedSkillsRoot, pathWithin, SkillSource } from "./manage"
+import { builtinSkillsRoot, doctorSkillFile, pathWithin, SkillSource } from "./manage"
 import { legacyUserSkillRoot } from "@/killstata/runtime-config"
 
 export namespace Skill {
@@ -45,16 +45,12 @@ export namespace Skill {
   const BUILTIN_SKILL_GLOB = new Bun.Glob("**/SKILL.md")
   const SKILL_SOURCE_PRIORITY: Record<SkillSource, number> = {
     builtin: 0,
-    default: 1,
-    imported: 2,
-    user: 3,
-    project: 4,
+    user: 1,
+    project: 2,
   }
 
   function classifyKillstataSource(root: string, match: string): SkillSource {
     if (pathWithin(builtinSkillsRoot(), match)) return "builtin"
-    if (pathWithin(defaultSkillsRoot(), match)) return "default"
-    if (pathWithin(importedSkillsRoot(), match)) return "imported"
     if (pathWithin(path.join(Global.Path.home, ".killstata"), root)) return "user"
     return "project"
   }
@@ -131,13 +127,7 @@ export namespace Skill {
       })
 
       for (const match of matches) {
-        const source: SkillSource =
-          pathWithin(defaultSkillsRoot(), match) || pathWithin(path.join(legacyUserSkillRoot(), "default"), match)
-            ? "default"
-            : pathWithin(importedSkillsRoot(), match) || pathWithin(path.join(legacyUserSkillRoot(), "imported"), match)
-              ? "imported"
-              : "user"
-        await addSkill(match, source)
+        await addSkill(match, "user")
       }
     }
 

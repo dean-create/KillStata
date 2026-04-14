@@ -142,7 +142,7 @@ When user describes a research question, determine the appropriate method:
   - Post-baseline heterogeneity or mechanism work -> prefer heterogeneity-analysis
   - Paper drafting -> prefer paper-drafting
   - Academic seminar deck generation -> prefer slide-generator
-- Prefer default skills first, then fall back to builtin skills with the same name.
+- Prefer project-local skills first, then user-installed skills, then builtin skills with the same name.
 - Save every intermediate dataset and audit file when cleaning data
 - Intermediate datasets should be Parquet stages; inspection files should be CSV/XLSX
 - Treat inspection CSV/XLSX as user-facing audit artifacts, not default read targets for the analysis agent.

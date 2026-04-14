@@ -15,7 +15,7 @@ function formatSkillLine(skill: Awaited<ReturnType<typeof Skill.all>>[number]) {
 
 export const SkillsCommand = cmd({
   command: "skills",
-  describe: "manage built-in and custom killstata skills",
+  describe: "manage built-in and custom killstata skills from a single skills directory",
   builder: (yargs: Argv) =>
     yargs
       .command(SkillsListCommand)
@@ -29,7 +29,7 @@ export const SkillsCommand = cmd({
 
 export const SkillsListCommand = cmd({
   command: "list",
-  describe: "list available skills and their source tiers",
+  describe: "list available skills and their effective source",
   async handler() {
     await bootstrap(process.cwd(), async () => {
       const skills = await Skill.all()
@@ -141,7 +141,7 @@ export const SkillsUninstallCommand = cmd({
         UI.error(`Skill not found: ${args.name}`)
         return
       }
-      if (skill.source === "builtin" || skill.source === "default") {
+      if (skill.source === "builtin") {
         UI.error(`Cannot uninstall ${skill.source} skill "${skill.name}"`)
         return
       }

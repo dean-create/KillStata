@@ -13,7 +13,7 @@ import {
   normalizeProviderID,
   supportsApiKeyProvider,
 } from "../../provider/provider-catalog"
-import { defaultSkillsRoot, ensureSkillDirectories, importedSkillsRoot, localSkillsRoot, userSkillsRoot } from "../../skill"
+import { ensureSkillDirectories, userSkillsRoot } from "../../skill"
 import { createBuiltInStataMcpConfig, StataEdition } from "../../mcp/stata"
 import {
   checkPythonPackages,
@@ -62,6 +62,11 @@ type ProviderSetup = {
   providerConfig?: NonNullable<Config.Info["provider"]>
 }
 
+type ApiKeyValidationResult = {
+  discoveredModelIDs: string[]
+  validated: boolean
+}
+
 const REQUIRED_PYTHON_PACKAGES_TEXT = REQUIRED_PYTHON_PACKAGES.join(", ")
 const providerNameCollator = new Intl.Collator("en", {
   sensitivity: "base",
@@ -89,6 +94,236 @@ function projectRoot() {
   return Instance.project.vcs ? Instance.worktree : Instance.directory
 }
 
+function joinApiPath(baseURL: string, pathname: string) {
+  return `${normalizeBaseURL(baseURL)}${pathname.startsWith("/") ? pathname : `/${pathname}`}`
+}
+
+function normalizeValidationError(providerName: string, detail: string, status?: number) {
+  const lowered = detail.toLowerCase()
+  if (
+    lowered.includes("incorrect api key provided") ||
+    lowered.includes("apikeyerror") ||
+    lowered.includes("invalid_api_key") ||
+    lowered.includes("invalid api key") ||
+    lowered.includes("unauthorized") ||
+    lowered.includes("authentication") ||
+    status === 401 ||
+    status === 403
+  ) {
+    return `${providerName} API key is invalid or not active. Paste the full API key and try again.`
+  }
+
+  return `${providerName} API key validation failed: ${detail}`
+}
+
+async function validateApiKeyWithModelsEndpoint(input: {
+  providerName: string
+  url: string
+  headers: Record<string, string>
+  parseModels: (payload: any) => string[]
+}) {
+  const response = await fetch(input.url, {
+    method: "GET",
+    headers: input.headers,
+    signal: AbortSignal.timeout(15_000),
+  })
+
+  const raw = await response.text()
+  let payload: any = undefined
+  try {
+    payload = raw ? JSON.parse(raw) : undefined
+  } catch {
+    payload = undefined
+  }
+
+  if (!response.ok) {
+    const detail =
+      payload?.error?.message ||
+      payload?.message ||
+      payload?.error ||
+      raw ||
+      `${response.status} ${response.statusText}`
+    throw new Error(normalizeValidationError(input.providerName, String(detail), response.status))
+  }
+
+  return input.parseModels(payload)
+}
+
+async function validateProviderApiKey(input: {
+  provider: ModelsDev.Provider
+  apiKey: string
+  baseURL?: string
+}): Promise<ApiKeyValidationResult> {
+  const baseURL = input.baseURL || input.provider.api
+  const providerName = input.provider.name
+
+  if (input.provider.id === "google") {
+    const models = await validateApiKeyWithModelsEndpoint({
+      providerName,
+      url: `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(input.apiKey)}`,
+      headers: {},
+      parseModels: (payload) =>
+        (payload?.models ?? [])
+          .map((item: { name?: string }) => item.name?.replace(/^models\//, "").trim())
+          .filter((item: string | undefined): item is string => !!item),
+    })
+    return { validated: true, discoveredModelIDs: models }
+  }
+
+  if ((input.provider.npm ?? "").includes("@ai-sdk/anthropic")) {
+    if (!baseURL) return { validated: false, discoveredModelIDs: [] }
+    const models = await validateApiKeyWithModelsEndpoint({
+      providerName,
+      url: joinApiPath(baseURL, "/models"),
+      headers: {
+        "x-api-key": input.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      parseModels: (payload) =>
+        (payload?.data ?? [])
+          .map((item: { id?: string }) => item.id?.trim())
+          .filter((item: string | undefined): item is string => !!item),
+    })
+    return { validated: true, discoveredModelIDs: models }
+  }
+
+  if (baseURL && (input.provider.npm ?? "").includes("@ai-sdk/openai-compatible")) {
+    const models = await validateApiKeyWithModelsEndpoint({
+      providerName,
+      url: joinApiPath(baseURL, "/models"),
+      headers: {
+        Authorization: `Bearer ${input.apiKey}`,
+      },
+      parseModels: (payload) =>
+        (payload?.data ?? [])
+          .map((item: { id?: string }) => item.id?.trim())
+          .filter((item: string | undefined): item is string => !!item),
+    })
+    return { validated: true, discoveredModelIDs: models }
+  }
+
+  if (input.provider.id === "openai") {
+    const models = await validateApiKeyWithModelsEndpoint({
+      providerName,
+      url: "https://api.openai.com/v1/models",
+      headers: {
+        Authorization: `Bearer ${input.apiKey}`,
+      },
+      parseModels: (payload) =>
+        (payload?.data ?? [])
+          .map((item: { id?: string }) => item.id?.trim())
+          .filter((item: string | undefined): item is string => !!item),
+    })
+    return { validated: true, discoveredModelIDs: models }
+  }
+
+  if (input.provider.id === "anthropic") {
+    const models = await validateApiKeyWithModelsEndpoint({
+      providerName,
+      url: "https://api.anthropic.com/v1/models",
+      headers: {
+        "x-api-key": input.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      parseModels: (payload) =>
+        (payload?.data ?? [])
+          .map((item: { id?: string }) => item.id?.trim())
+          .filter((item: string | undefined): item is string => !!item),
+    })
+    return { validated: true, discoveredModelIDs: models }
+  }
+
+  return { validated: false, discoveredModelIDs: [] }
+}
+
+async function promptAndValidateApiKey(input: {
+  provider: ModelsDev.Provider
+  existingAuth?: Awaited<ReturnType<typeof Auth.get>>
+  baseURL?: string
+}): Promise<{ key: string; usedExistingKey: boolean; discoveredModelIDs: string[] }> {
+  if (input.existingAuth?.type === "api") {
+    const keepExisting = await prompts.confirm({
+      message: `Use the existing ${input.provider.name} API key and validate it now?`,
+      initialValue: true,
+    })
+    if (prompts.isCancel(keepExisting)) throw new UI.CancelledError()
+    if (keepExisting) {
+      try {
+        const result = await validateProviderApiKey({
+          provider: input.provider,
+          apiKey: input.existingAuth.key,
+          baseURL: input.baseURL,
+        })
+        prompts.log.success(`${input.provider.name} API key verified.`)
+        return {
+          key: input.existingAuth.key,
+          usedExistingKey: true,
+          discoveredModelIDs: result.discoveredModelIDs,
+        }
+      } catch (error) {
+        prompts.log.warn(error instanceof Error ? error.message : String(error))
+        prompts.log.warn(`The saved ${input.provider.name} API key did not verify. Please paste a new one.`)
+      }
+    }
+  }
+
+  while (true) {
+    const key = await prompts.password({
+      message: `Paste your ${input.provider.name} API key`,
+      validate: (value) => (normalizeApiKey(value ?? "").length > 0 ? undefined : "Required"),
+    })
+    if (prompts.isCancel(key)) throw new UI.CancelledError()
+
+    const normalizedKey = normalizeApiKey(key)
+    try {
+      const result = await validateProviderApiKey({
+        provider: input.provider,
+        apiKey: normalizedKey,
+        baseURL: input.baseURL,
+      })
+      if (result.validated) {
+        prompts.log.success(`${input.provider.name} API key verified.`)
+      } else {
+        prompts.log.warn(
+          `${input.provider.name} API key was saved, but this provider does not support pre-model verification yet.`,
+        )
+      }
+      return {
+        key: normalizedKey,
+        usedExistingKey: false,
+        discoveredModelIDs: result.discoveredModelIDs,
+      }
+    } catch (error) {
+      prompts.log.error(error instanceof Error ? error.message : String(error))
+      prompts.log.warn("Try again with a valid API key.")
+    }
+  }
+}
+
+function resolveModelChoices(provider: ModelsDev.Provider, discoveredModelIDs: string[]) {
+  const knownModels = Object.values(provider.models)
+    .filter((model) => model.status !== "deprecated")
+    .sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id))
+
+  if (discoveredModelIDs.length === 0) {
+    return knownModels.map((model) => ({
+      id: model.id,
+      name: model.name ?? model.id,
+    }))
+  }
+
+  const unique = Array.from(new Set(discoveredModelIDs))
+  return unique
+    .map((modelID) => {
+      const known = provider.models[modelID]
+      return {
+        id: modelID,
+        name: known?.name ?? modelID,
+      }
+    })
+    .sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id))
+}
+
 function logFindings(findings: Finding[]) {
   for (const item of findings) {
     const line = `${item.label}: ${item.detail}`
@@ -113,7 +348,6 @@ function printPathSummary() {
   prompts.log.info(`  managed econometrics venv: ${paths.user.managedPythonVenv}`)
   prompts.log.info(`  managed Stata MCP home: ${paths.user.stataMcpRoot}`)
   prompts.log.info(`  skills: ${paths.user.skillRoot}`)
-  prompts.log.info(`  default skills: ${paths.user.defaultSkills}`)
   prompts.log.info(`  agents: ${paths.user.agents}`)
   prompts.log.info(`  main agent state: ${paths.user.mainAgentState}`)
   prompts.log.info(`  main agent sessions: ${paths.user.mainAgentSessions}`)
@@ -469,62 +703,83 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
     })
     if (prompts.isCancel(baseURL)) throw new UI.CancelledError()
 
-    const modelID = await prompts.text({
-      message: "Default model id",
-      placeholder: "gpt-4.1-mini",
-      validate: (value) => (value?.trim() ? undefined : "Required"),
-    })
-    if (prompts.isCancel(modelID)) throw new UI.CancelledError()
-
     const normalizedProviderID = normalizeProviderID(customProviderID)
-    const existingAuth = await Auth.get(normalizedProviderID)
-    let usedExistingKey = false
-
-    if (existingAuth?.type === "api") {
-      const replace = await prompts.confirm({
-        message: `Replace the stored ${providerName.trim()} API key?`,
-        initialValue: false,
-      })
-      if (prompts.isCancel(replace)) throw new UI.CancelledError()
-      if (!replace) {
-        usedExistingKey = true
-        prompts.log.info(`Keeping the existing ${providerName.trim()} API key.`)
-      }
+    const customProvider: ModelsDev.Provider = {
+      id: normalizedProviderID,
+      name: providerName.trim(),
+      env: [],
+      api: normalizeBaseURL(baseURL),
+      npm: "@ai-sdk/openai-compatible",
+      models: {},
     }
+    const validated = await promptAndValidateApiKey({
+      provider: customProvider,
+      existingAuth: await Auth.get(normalizedProviderID),
+      baseURL,
+    })
+    await Auth.set(normalizedProviderID, {
+      type: "api",
+      key: validated.key,
+    })
+    prompts.log.success(`${providerName.trim()} API key saved.`)
 
-    if (!usedExistingKey) {
-      const key = await prompts.password({
-        message: `Paste your ${providerName.trim()} API key`,
-        validate: (value) => (normalizeApiKey(value ?? "").length > 0 ? undefined : "Required"),
+    const modelChoices = resolveModelChoices(customProvider, validated.discoveredModelIDs)
+    let modelID: string
+
+    if (modelChoices.length > 0) {
+      const selectedModelID = await prompts.select({
+        message: `Choose the default model for ${providerName.trim()}`,
+        options: modelChoices.map((model) => ({
+          label: model.name,
+          value: model.id,
+          hint: model.id,
+        })),
+        initialValue: modelChoices[0]!.id,
       })
-      if (prompts.isCancel(key)) throw new UI.CancelledError()
-      await Auth.set(normalizedProviderID, {
-        type: "api",
-        key: normalizeApiKey(key),
+      if (prompts.isCancel(selectedModelID)) throw new UI.CancelledError()
+      modelID = selectedModelID
+    } else {
+      const enteredModelID = await prompts.text({
+        message: "Default model id",
+        placeholder: "gpt-4.1-mini",
+        validate: (value) => (value?.trim() ? undefined : "Required"),
       })
-      prompts.log.success(`${providerName.trim()} API key saved.`)
+      if (prompts.isCancel(enteredModelID)) throw new UI.CancelledError()
+      modelID = enteredModelID.trim()
     }
 
     return {
       providerID: normalizedProviderID,
       providerName: providerName.trim(),
-      modelID: modelID.trim(),
-      modelName: modelID.trim(),
-      usedExistingKey,
+      modelID,
+      modelName: modelChoices.find((item) => item.id === modelID)?.name ?? modelID,
+      usedExistingKey: validated.usedExistingKey,
       providerConfig: buildCustomProviderConfig({
         providerID: normalizedProviderID,
         providerName: providerName.trim(),
         baseURL,
-        modelID: modelID.trim(),
+        modelID,
       }),
     } satisfies ProviderSetup
   }
 
   const provider = providers.find((item) => item.id === providerID)!
-  const models = Object.values(provider.models)
-    .filter((model) => model.status !== "deprecated")
-    .sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id))
+  prompts.log.info(`${provider.name} in this build uses API key authentication only.`)
+  if (provider.env?.length) {
+    prompts.log.info(`You can also set ${provider.env.join(" or ")} in your environment.`)
+  }
 
+  const validated = await promptAndValidateApiKey({
+    provider,
+    existingAuth: await Auth.get(provider.id),
+  })
+  await Auth.set(provider.id, {
+    type: "api",
+    key: validated.key,
+  })
+  prompts.log.success(`${provider.name} API key saved.`)
+
+  const models = resolveModelChoices(provider, validated.discoveredModelIDs)
   if (models.length === 0) {
     prompts.log.warn(`No visible models are available for ${provider.name}. Skipping model setup.`)
     return undefined
@@ -533,7 +788,7 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
   const modelID = await prompts.select({
     message: `Choose the default model for ${provider.name}`,
     options: models.map((model) => ({
-      label: model.name ?? model.id,
+      label: model.name,
       value: model.id,
       hint: model.id,
     })),
@@ -545,37 +800,6 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
   if (prompts.isCancel(modelID)) throw new UI.CancelledError()
 
   const model = models.find((item) => item.id === modelID)!
-  const existingAuth = await Auth.get(provider.id)
-  let usedExistingKey = false
-
-  if (existingAuth?.type === "api") {
-    const replace = await prompts.confirm({
-      message: `Replace the stored ${provider.name} API key?`,
-      initialValue: false,
-    })
-    if (prompts.isCancel(replace)) throw new UI.CancelledError()
-    if (!replace) {
-      usedExistingKey = true
-      prompts.log.info(`Keeping the existing ${provider.name} API key.`)
-    }
-  }
-
-  if (!usedExistingKey) {
-    prompts.log.info(`${provider.name} in this build uses API key authentication only.`)
-    if (provider.env?.length) {
-      prompts.log.info(`You can also set ${provider.env.join(" or ")} in your environment.`)
-    }
-    const key = await prompts.password({
-      message: `Paste your ${provider.name} API key`,
-      validate: (value) => (normalizeApiKey(value ?? "").length > 0 ? undefined : "Required"),
-    })
-    if (prompts.isCancel(key)) throw new UI.CancelledError()
-    await Auth.set(provider.id, {
-      type: "api",
-      key: normalizeApiKey(key),
-    })
-    prompts.log.success(`${provider.name} API key saved.`)
-  }
 
   prompts.log.success(`Default model set to ${provider.name} / ${model.name ?? model.id}`)
   return {
@@ -583,7 +807,7 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
     providerName: provider.name,
     modelID: model.id,
     modelName: model.name ?? model.id,
-    usedExistingKey,
+    usedExistingKey: validated.usedExistingKey,
   } satisfies ProviderSetup
 }
 
@@ -603,9 +827,7 @@ function printFinalSummary(input: {
   provider?: ProviderSetup
 }) {
   prompts.log.success(`User config written to ${userConfigPath()}`)
-  prompts.log.info(
-    `Skill directories ready: ${userSkillsRoot()}, ${defaultSkillsRoot()}, ${importedSkillsRoot()}, ${localSkillsRoot()}`,
-  )
+  prompts.log.info(`Skill directory ready: ${userSkillsRoot()}`)
   prompts.log.info(`Global workspace: ${input.workspace.enabled ? input.workspace.root : "disabled"}`)
   prompts.log.info(`Agent state root: ${userMainAgentStateRoot()}`)
   prompts.log.info(`Agent sessions root: ${userMainAgentSessionsRoot()}`)
@@ -865,7 +1087,6 @@ export async function runKillstataConfigDoctor() {
 
   for (const check of [
     { label: "Skills root", target: paths.user.skillRoot },
-    { label: "Default skills root", target: paths.user.defaultSkills },
     { label: "Workspace root", target: paths.user.workspace },
     { label: "Agent state root", target: paths.user.mainAgentState },
     { label: "Agent sessions root", target: paths.user.mainAgentSessions },

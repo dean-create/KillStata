@@ -101,7 +101,7 @@ Every action returns a structured artifact trail when applicable:
 
 - Before spreadsheet-heavy or CSV/XLSX-oriented tasks, load `workflow-orchestrator` first, then the most relevant specialist skill.
 - Prefer project-local skills under `.killstata/skills` when the same skill exists at multiple tiers.
-- If no project-local override exists, prefer curated `default` skills before `builtin`.
+- If no project-local override exists, prefer user-installed skills before `builtin`.
 - Prefer skill aliases rather than hallucinating unavailable names:
   - Excel/XLSX processing -> `xlsx-processor`
   - Raw file intake -> `tabular-ingest`

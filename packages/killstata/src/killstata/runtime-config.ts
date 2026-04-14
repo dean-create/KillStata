@@ -660,13 +660,39 @@ export async function ensureKillstataHomeDirectories() {
     fs.renameSync(paths.legacySkillRoot, paths.skillRoot)
   }
 
+  if (fs.existsSync(paths.legacySkillRoot) && fs.existsSync(paths.skillRoot)) {
+    for (const entry of fs.readdirSync(paths.legacySkillRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const source = path.join(paths.legacySkillRoot, entry.name)
+      const target = path.join(paths.skillRoot, entry.name)
+      if (fs.existsSync(target)) continue
+      fs.renameSync(source, target)
+    }
+    if (fs.readdirSync(paths.legacySkillRoot).length === 0) {
+      fs.rmSync(paths.legacySkillRoot, { recursive: true, force: true })
+    }
+  }
+
+  const legacySkillRoots = [paths.defaultSkills, paths.importedSkills, paths.localSkills]
+  for (const legacyRoot of legacySkillRoots) {
+    if (!fs.existsSync(legacyRoot)) continue
+    for (const entry of fs.readdirSync(legacyRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const source = path.join(legacyRoot, entry.name)
+      const target = path.join(paths.skillRoot, entry.name)
+      if (fs.existsSync(target)) continue
+      fs.renameSync(source, target)
+    }
+    const leftovers = fs.readdirSync(legacyRoot)
+    if (leftovers.length === 0) {
+      fs.rmSync(legacyRoot, { recursive: true, force: true })
+    }
+  }
+
   const directories = [
     paths.managedPythonVenv,
     paths.stataMcpRoot,
     paths.skillRoot,
-    paths.defaultSkills,
-    paths.importedSkills,
-    paths.localSkills,
     paths.cachedSkills,
     paths.workspace,
     paths.agents,
