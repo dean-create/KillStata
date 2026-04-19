@@ -68,14 +68,23 @@ For panel_fe_regression and baseline_regression, the tool saves:
 - `results.json`
 - `coefficient_table.csv`
 - `coefficient_table.xlsx`
+- `three_line_table.md`
+- `three_line_table.tex`
+- `three_line_table.xlsx`
+- `three_line_table.docx`
 - `diagnostics.json`
 - `model_metadata.json`
 - `narrative.md`
 - `model_summary.txt`
 - `numeric_snapshot.json`
+- `delivery_result_summary.md`
+- `result_report.docx` for the baseline panel FE delivery path
 
 For other regression-capable methods, the tool also saves:
 - `results.json`
+- `coefficient_table.csv` when coefficient output exists
+- `coefficient_table.xlsx` when coefficient output exists
+- `three_line_table.md` / `.tex` / `.xlsx` / `.docx` when a non-empty coefficient table is available
 - `diagnostics.json`
 - `model_metadata.json`
 - `narrative.md`

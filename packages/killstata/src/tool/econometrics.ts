@@ -3909,13 +3909,15 @@ except Exception as e:
           columnSubtitles: [regressionTableSubtitle(params.methodName)],
           variables: result.table_variables,
           notes: undefined,
-          formats: ["latex", "docx"],
+          formats: ["markdown", "latex", "xlsx", "docx"],
           outputDir,
           branch,
           runId: effectiveRunId,
         }, ctx)
         if (tableResult.success) {
+          result.academic_table_markdown_path = tableResult.markdown_path
           result.academic_table_latex_path = tableResult.latex_path
+          result.academic_table_workbook_path = tableResult.workbook_path
           result.academic_table_docx_path = tableResult.docx_path
         }
       } catch (error) {
@@ -4049,6 +4051,18 @@ except Exception as e:
       }
 
       publish(
+        `${params.methodName}_coefficient_workbook`,
+        `${params.methodName}_coefficient_workbook`,
+        result.workbook_path,
+        `coefficient_table_${sanitizeDeliveryFilePart(params.methodName)}.xlsx`,
+      )
+      publish(
+        `${params.methodName}_academic_markdown`,
+        `${params.methodName}_table_markdown`,
+        result.academic_table_markdown_path,
+        `three_line_table_${sanitizeDeliveryFilePart(params.methodName)}.md`,
+      )
+      publish(
         `${params.methodName}_delivery_summary`,
         `${params.methodName}_delivery_summary`,
         conciseResultPath,
@@ -4071,6 +4085,12 @@ except Exception as e:
         `${params.methodName}_report_docx`,
         result.delivery_report_docx_path,
         "结果汇报.docx",
+      )
+      publish(
+        `${params.methodName}_academic_xlsx`,
+        `${params.methodName}_table_xlsx`,
+        result.academic_table_workbook_path,
+        `three_line_table_${sanitizeDeliveryFilePart(params.methodName)}.xlsx`,
       )
     }
 
@@ -4127,11 +4147,20 @@ except Exception as e:
       output += `- Post-estimation gates: ${triggeredPostEstimationGates.map((gate) => `${gate.gate}=${gate.severity}`).join(" | ")}\n`
     }
     if (result.decision_trace?.length) output += `- Decision trace: ${result.decision_trace.map((item) => item.message).join(" | ")}\n`
+    if (result.coefficients_path) output += `- Coefficients CSV: ${relativeWithinProject(result.coefficients_path)}\n`
+    if (result.workbook_path) output += `- Coefficients workbook: ${relativeWithinProject(result.workbook_path)}\n`
+    if (result.diagnostics_path) output += `- Diagnostics JSON: ${relativeWithinProject(result.diagnostics_path)}\n`
+    if (result.metadata_path) output += `- Model metadata: ${relativeWithinProject(result.metadata_path)}\n`
+    if (result.summary_path) output += `- Model summary: ${relativeWithinProject(result.summary_path)}\n`
+    if (result.narrative_path) output += `- Narrative summary: ${relativeWithinProject(result.narrative_path)}\n`
     if (result.numeric_snapshot_path) output += `- Numeric snapshot: ${relativeWithinProject(result.numeric_snapshot_path)}\n`
+    if (result.academic_table_markdown_path) output += `- Three-line table Markdown: ${relativeWithinProject(result.academic_table_markdown_path)}\n`
     if (result.academic_table_latex_path) output += `- Three-line table LaTeX: ${relativeWithinProject(result.academic_table_latex_path)}\n`
+    if (result.academic_table_workbook_path) output += `- Three-line table Excel: ${relativeWithinProject(result.academic_table_workbook_path)}\n`
     if (result.academic_table_docx_path) output += `- Three-line table Word: ${relativeWithinProject(result.academic_table_docx_path)}\n`
     if (result.delivery_report_docx_path) output += `- Result report Word: ${relativeWithinProject(result.delivery_report_docx_path)}\n`
     output += `- Concise result summary: ${relativeWithinProject(conciseResultPath)}\n`
+    if (result.output_path) output += `- Result JSON: ${relativeWithinProject(result.output_path)}\n`
     if (result.resolved_python_executable) output += `- Python interpreter: ${result.resolved_python_executable}\n`
     if (deliveryBundlePath && publishedFiles.length) output += `Delivery bundle: ${relativeWithinProject(deliveryBundlePath)}\n`
     if (publishedFiles.length) {
