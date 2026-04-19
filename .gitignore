@@ -16,7 +16,7 @@ ts-dist
 /result
 refs
 Session.vim
-killstata.json
+/killstata.json
 a.out
 target
 .scripts
