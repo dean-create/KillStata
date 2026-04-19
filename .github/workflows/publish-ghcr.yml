@@ -59,7 +59,7 @@ jobs:
       - name: Build and push container package
         uses: docker/build-push-action@v6
         with:
-          context: ./packages/killstata
+          context: .
           file: ./packages/killstata/Dockerfile.ghcr
           push: true
           build-args: |

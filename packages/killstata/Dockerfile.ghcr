@@ -1,13 +1,23 @@
 FROM oven/bun:1.3.6-alpine
 
-ARG KILLSTATA_VERSION=latest
+ARG KILLSTATA_VERSION=dev
 
-RUN apk add --no-cache libgcc libstdc++ ripgrep python3 git nodejs npm
+WORKDIR /app
 
-# Install the published npm package. On Linux this uses bun-backed source mode,
-# which is enough for a usable GHCR package and keeps the GitHub Packages panel populated.
-RUN npm install -g killstata@${KILLSTATA_VERSION}
+RUN apk add --no-cache libgcc libstdc++ ripgrep python3 git
 
-RUN bun /usr/local/lib/node_modules/killstata/src/index.ts --version
+# Build the container from repo source instead of the published npm wrapper.
+# The npm package is intentionally thin and relies on platform-specific binaries,
+# which is not a good fit for a Linux GHCR image.
+COPY package.json bun.lock turbo.json tsconfig.json ./
+COPY packages ./packages
 
-ENTRYPOINT ["bun", "/usr/local/lib/node_modules/killstata/src/index.ts"]
+RUN bun install --frozen-lockfile
+
+WORKDIR /app/packages/killstata
+
+RUN bun ./src/index.ts --version
+
+LABEL org.opencontainers.image.version="${KILLSTATA_VERSION}"
+
+ENTRYPOINT ["bun", "./src/index.ts"]
