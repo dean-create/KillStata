@@ -2,7 +2,7 @@ FROM oven/bun:1.3.6-alpine
 
 ARG KILLSTATA_VERSION=latest
 
-RUN apk add --no-cache libgcc libstdc++ ripgrep python3 git
+RUN apk add --no-cache libgcc libstdc++ ripgrep python3 git nodejs npm
 
 # Install the published npm package. On Linux this uses bun-backed source mode,
 # which is enough for a usable GHCR package and keeps the GitHub Packages panel populated.
