@@ -8,6 +8,6 @@ RUN apk add --no-cache libgcc libstdc++ ripgrep python3 git nodejs npm
 # which is enough for a usable GHCR package and keeps the GitHub Packages panel populated.
 RUN npm install -g killstata@${KILLSTATA_VERSION}
 
-RUN killstata --version
+RUN bun /usr/local/lib/node_modules/killstata/src/index.ts --version
 
-ENTRYPOINT ["killstata"]
+ENTRYPOINT ["bun", "/usr/local/lib/node_modules/killstata/src/index.ts"]
