@@ -8,6 +8,7 @@ import { Plugin } from "@/plugin"
 import type { Provider } from "@/provider/provider"
 import type { QueryEvent, QueryRuntimeResult } from "./types"
 import { maybeBuildAnalysisUserViewText } from "./analysis-user-view"
+import { isAnalysisTurn } from "./analysis-user-view"
 import {
   collectTrustedArtifactPathsFromToolMetadata,
   collectNumericSnapshotsFromToolMetadata,
@@ -15,7 +16,7 @@ import {
   rewriteGroundedText,
   validateNumericGrounding,
 } from "@/tool/analysis-grounding"
-import { sanitizeAnalysisAssistantText, type AnalysisToolPartLike } from "./analysis-text-sanitizer"
+import { containsEngineInternalData, sanitizeAnalysisAssistantText, type AnalysisToolPartLike } from "./analysis-text-sanitizer"
 
 const FINAL_ANALYSIS_RESULT_TOOLS = new Set([
   "econometrics",
@@ -359,6 +360,7 @@ export class TurnAssembler {
   private async finalizeText(providerMetadata?: Record<string, unknown>) {
     if (!this.currentText) return
     this.currentText.text = this.currentText.text.trimEnd()
+    const rawStreamedText = this.currentText.text.trim()
     const textOutput = await Plugin.trigger(
       "experimental.text.complete",
       {
@@ -373,6 +375,7 @@ export class TurnAssembler {
     const analysisWindow = await this.collectAnalysisWindow()
     const currentTurnTools = analysisWindow.tools
     const latestUserText = analysisWindow.latestUserText
+    const analysisTurn = isAnalysisTurn(currentTurnTools, latestUserText)
     const sanitized = sanitizeAnalysisAssistantText({
       text: this.currentText.text,
       tools: currentTurnTools,
@@ -380,33 +383,55 @@ export class TurnAssembler {
     })
     this.currentText.text = sanitized.text
 
-    const evidence = await this.collectTurnNumericEvidence(analysisWindow.tools)
-    const recovery = await recoverNumericSnapshots({
-      snapshots: evidence.snapshots,
-      trustedArtifactPaths: evidence.trustedArtifactPaths,
-      explicitReadPaths: evidence.explicitReadPaths,
-    })
-    let grounding = validateNumericGrounding({
-      text: this.currentText.text,
-      snapshots: recovery.snapshots,
-    })
-    grounding = {
-      ...grounding,
-      trustedSourcePaths: recovery.trustedSourcePaths,
-      recovered: recovery.recovered,
-    }
-    if (grounding.status !== "pass" && grounding.status !== "not_applicable") {
-      this.currentText.text = rewriteGroundedText({
-        text: this.currentText.text,
-        grounding,
+    let grounding = {
+      status: "not_applicable",
+      issues: [],
+      snapshotPaths: [],
+      trustedSourcePaths: [],
+      redactions: [],
+      unverifiedMetrics: [],
+      recovered: false,
+    } as ReturnType<typeof validateNumericGrounding>
+
+    if (analysisTurn) {
+      const evidence = await this.collectTurnNumericEvidence(analysisWindow.tools)
+      const recovery = await recoverNumericSnapshots({
+        snapshots: evidence.snapshots,
+        trustedArtifactPaths: evidence.trustedArtifactPaths,
+        explicitReadPaths: evidence.explicitReadPaths,
       })
-      const postGroundingSanitized = sanitizeAnalysisAssistantText({
+      grounding = validateNumericGrounding({
         text: this.currentText.text,
-        tools: currentTurnTools,
-        latestUserText,
+        snapshots: recovery.snapshots,
       })
-      this.currentText.text = postGroundingSanitized.text
+      grounding = {
+        ...grounding,
+        trustedSourcePaths: recovery.trustedSourcePaths,
+        recovered: recovery.recovered,
+      }
+      if (grounding.status !== "pass" && grounding.status !== "not_applicable") {
+        this.currentText.text = rewriteGroundedText({
+          text: this.currentText.text,
+          grounding,
+        })
+        const postGroundingSanitized = sanitizeAnalysisAssistantText({
+          text: this.currentText.text,
+          tools: currentTurnTools,
+          latestUserText,
+        })
+        this.currentText.text = postGroundingSanitized.text
+      }
     }
+
+    const finalText = this.currentText.text.trim()
+    if (!analysisTurn && !finalText && rawStreamedText && !containsEngineInternalData(rawStreamedText)) {
+      this.currentText.text = rawStreamedText
+      this.currentText.metadata = {
+        ...(this.currentText.metadata ?? {}),
+        finalizeFallback: "preserve_non_analysis_stream_text",
+      }
+    }
+
     this.currentText.time = {
       start: this.currentText.time?.start ?? Date.now(),
       end: Date.now(),

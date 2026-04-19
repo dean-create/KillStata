@@ -271,6 +271,7 @@ export function sanitizeAnalysisAssistantText(input: {
   }
 
   const hasInternalData = containsEngineInternalData(normalized)
+  const analysisTurn = isAnalysisTurn(input.tools, input.latestUserText)
   const hasNoise =
     hasInternalData ||
     /workflow \[action=.*\]/i.test(normalized) ||
@@ -278,9 +279,10 @@ export function sanitizeAnalysisAssistantText(input: {
     normalized.length > 800 ||
     normalized.split(/\r?\n/).length > 16
 
-  const needsSanitization = isAnalysisTurn(input.tools, input.latestUserText) || hasInternalData
+  const needsSanitization = analysisTurn || hasInternalData
 
-  if (!needsSanitization && !hasNoise) {
+  // Non-analysis answers should not be sanitized just because they are long.
+  if (!needsSanitization) {
     return {
       text: input.text,
       sanitized: false,
@@ -291,6 +293,27 @@ export function sanitizeAnalysisAssistantText(input: {
     stripNoiseLines(stripRawJsonBlocks(stripFileBodies(stripVerifierBlocks(normalized)))),
   )
   const fallbackMessages = userFacingAnalysisErrorText(normalized)?.split("\n") ?? []
+
+  if (!analysisTurn) {
+    if (stripped && !containsEngineInternalData(stripped)) {
+      return {
+        text: stripped,
+        sanitized: stripped !== normalized,
+      }
+    }
+
+    if (fallbackMessages.length > 0) {
+      return {
+        text: fallbackMessages.join("\n"),
+        sanitized: true,
+      }
+    }
+
+    return {
+      text: input.text,
+      sanitized: false,
+    }
+  }
 
   if (stripped && !containsEngineInternalData(stripped)) {
     return {
