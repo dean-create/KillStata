@@ -239,10 +239,16 @@ export namespace PermissionNext {
 
   const EDIT_TOOLS = ["edit", "write", "patch", "multiedit"]
 
+  function permissionForTool(tool: string) {
+    if (EDIT_TOOLS.includes(tool)) return "edit"
+    if (tool === "shell") return "bash"
+    return tool
+  }
+
   export function disabled(tools: string[], ruleset: Ruleset): Set<string> {
     const result = new Set<string>()
     for (const tool of tools) {
-      const permission = EDIT_TOOLS.includes(tool) ? "edit" : tool
+      const permission = permissionForTool(tool)
 
       const rule = ruleset.findLast((r) => Wildcard.match(permission, r.permission))
       if (!rule) continue

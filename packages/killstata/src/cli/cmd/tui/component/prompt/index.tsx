@@ -1,5 +1,5 @@
 import { BoxRenderable, TextareaRenderable, MouseEvent, PasteEvent, t, dim, fg } from "@opentui/core"
-import { createEffect, createMemo, type JSX, onMount, createSignal, onCleanup, Show, Switch, Match } from "solid-js"
+import { createEffect, createMemo, type JSX, onMount, createSignal, onCleanup, Show, Switch, Match, on } from "solid-js"
 import "opentui-spinner/solid"
 import { useLocal } from "@tui/context/local"
 import { useTheme } from "@tui/context/theme"
@@ -31,15 +31,27 @@ import { DialogAlert } from "../../ui/dialog-alert"
 import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv"
 import { useTextareaKeybindings } from "../textarea-keybindings"
+import {
+  attachmentLabel,
+  normalizePastedText,
+  pastedTextLabel,
+  resolvePastedFilePath,
+  shouldSummarizePaste,
+} from "./paste"
 
 export type PromptProps = {
   sessionID?: string
   visible?: boolean
   disabled?: boolean
   onSubmit?: () => void
-  ref?: (ref: PromptRef) => void
+  ref?: (ref: PromptRef | undefined) => void
   hint?: JSX.Element
+  right?: JSX.Element
   showPlaceholder?: boolean
+  placeholders?: {
+    normal?: string[]
+    shell?: string[]
+  }
 }
 
 export type PromptRef = {
@@ -52,7 +64,31 @@ export type PromptRef = {
   submit(): void
 }
 
-const PLACEHOLDERS = ["Fix a TODO in the codebase", "What is the tech stack of this project?", "Fix broken tests"]
+const PLACEHOLDERS = [
+  "导入 dta 并生成 canonical parquet",
+  "检查 panel key 和变量类型",
+  "做双向固定效应基准回归",
+]
+const SHELL_PLACEHOLDERS = ["bun x tsc -p packages/killstata/tsconfig.json --noEmit", "git status --short"]
+
+let stashed: { prompt: PromptInfo; cursor: number } | undefined
+
+function commandCapabilityDescription(command: {
+  description?: string
+  availability?: string[]
+  queueBehavior?: "queued" | "immediate"
+  workflowAware?: boolean
+  immediate?: boolean
+  remoteSafe?: boolean
+}) {
+  const tags = [
+    command.workflowAware ? "workflow" : undefined,
+    ...(command.availability ?? []),
+    command.queueBehavior ?? (command.immediate ? "immediate" : undefined),
+    command.remoteSafe ? "remote-safe" : undefined,
+  ].filter((item, index, arr): item is string => typeof item === "string" && arr.indexOf(item) === index)
+  return [command.description, tags.length ? `[${tags.join("] [")}]` : undefined].filter(Boolean).join(" ")
+}
 
 export function Prompt(props: PromptProps) {
   let input: TextareaRenderable
@@ -73,6 +109,9 @@ export function Prompt(props: PromptProps) {
   const renderer = useRenderer()
   const { theme, syntax } = useTheme()
   const kv = useKV()
+  const list = createMemo(() => props.placeholders?.normal ?? PLACEHOLDERS)
+  const shell = createMemo(() => props.placeholders?.shell ?? SHELL_PLACEHOLDERS)
+  const hasRightContent = createMemo(() => Boolean(props.right))
 
   function promptModelWarning() {
     toast.show({
@@ -93,8 +132,10 @@ export function Prompt(props: PromptProps) {
   let promptPartTypeId = 0
 
   sdk.event.on(TuiEvent.PromptAppend.type, (evt) => {
+    if (!input || input.isDestroyed) return
     input.insertText(evt.properties.text)
     setTimeout(() => {
+      if (!input || input.isDestroyed) return
       input.getLayoutNode().markDirty()
       input.gotoBufferEnd()
       renderer.requestRender()
@@ -102,6 +143,7 @@ export function Prompt(props: PromptProps) {
   })
 
   createEffect(() => {
+    if (!input || input.isDestroyed) return
     if (props.disabled) input.cursorColor = theme.backgroundElement
     if (!props.disabled) input.cursorColor = theme.text
   })
@@ -120,7 +162,7 @@ export function Prompt(props: PromptProps) {
     interrupt: number
     placeholder: number
   }>({
-    placeholder: Math.floor(Math.random() * PLACEHOLDERS.length),
+    placeholder: Math.floor(Math.random() * list().length),
     prompt: {
       input: "",
       parts: [],
@@ -129,6 +171,16 @@ export function Prompt(props: PromptProps) {
     extmarkToPartIndex: new Map(),
     interrupt: 0,
   })
+
+  createEffect(
+    on(
+      () => props.sessionID,
+      () => {
+        setStore("placeholder", Math.floor(Math.random() * list().length))
+      },
+      { defer: true },
+    ),
+  )
 
   // Initialize agent/model/variant from last user message when session changes
   let syncedSessionID: string | undefined
@@ -170,9 +222,10 @@ export function Prompt(props: PromptProps) {
         keybind: "input_submit",
         category: "Prompt",
         hidden: true,
-        onSelect: (dialog) => {
+        onSelect: async (dialog) => {
           if (!input.focused) return
-          submit()
+          const handled = await submit()
+          if (!handled) return
           dialog.clear()
         },
       },
@@ -185,7 +238,7 @@ export function Prompt(props: PromptProps) {
         onSelect: async () => {
           const content = await Clipboard.read()
           if (content?.mime.startsWith("image/")) {
-            await pasteImage({
+            await pasteAttachment({
               filename: "clipboard",
               mime: content.mime,
               content: content.data,
@@ -344,13 +397,50 @@ export function Prompt(props: PromptProps) {
       setStore("extmarkToPartIndex", new Map())
     },
     submit() {
-      submit()
+      void submit()
     },
   }
 
+  onMount(() => {
+    const saved = stashed
+    stashed = undefined
+    if (store.prompt.input) return
+    if (saved && saved.prompt.input) {
+      input.setText(saved.prompt.input)
+      setStore("prompt", saved.prompt)
+      restoreExtmarksFromParts(saved.prompt.parts)
+      input.cursorOffset = saved.cursor
+    }
+  })
+
+  onCleanup(() => {
+    if (store.prompt.input) {
+      stashed = { prompt: { input: store.prompt.input, parts: [...store.prompt.parts] }, cursor: input.cursorOffset }
+    }
+    props.ref?.(undefined)
+  })
+
   createEffect(() => {
-    if (props.visible !== false) input?.focus()
-    if (props.visible === false) input?.blur()
+    if (!input || input.isDestroyed) return
+    if (props.visible === false || dialog.stack.length > 0) {
+      if (input.focused) input.blur()
+      return
+    }
+    if (!input.focused) input.focus()
+  })
+
+  createEffect(() => {
+    if (!input || input.isDestroyed) return
+    ;(input as any).traits = {
+      capture:
+        store.mode === "normal"
+          ? autocomplete?.visible
+            ? (["escape", "navigate", "submit", "tab"] as const)
+            : (["tab"] as const)
+          : undefined,
+      suspend: !!props.disabled || store.mode === "shell",
+      status: store.mode === "shell" ? "SHELL" : undefined,
+    }
   })
 
   function restoreExtmarksFromParts(parts: PromptInfo["parts"]) {
@@ -431,6 +521,28 @@ export function Prompt(props: PromptProps) {
     )
   }
 
+  command.register(() =>
+    sync.data.command.map((serverCommand) => ({
+      title: `/${serverCommand.name}`,
+      value: `server.command.${serverCommand.name}`,
+      category: serverCommand.workflowAware ? "Workflow" : serverCommand.mcp ? "MCP Commands" : "Commands",
+      description: commandCapabilityDescription(serverCommand),
+      suggested: Boolean(serverCommand.workflowAware && props.sessionID),
+      slash: {
+        name: serverCommand.name,
+      },
+      onSelect: (dialog) => {
+        const text = `/${serverCommand.name} `
+        input.extmarks.clear()
+        input.setText(text)
+        input.cursorOffset = Bun.stringWidth(text)
+        setStore("prompt", { input: text, parts: [] })
+        setStore("extmarkToPartIndex", new Map())
+        dialog.clear()
+      },
+    })),
+  )
+
   command.register(() => [
     {
       title: "Stash prompt",
@@ -487,18 +599,24 @@ export function Prompt(props: PromptProps) {
   ])
 
   async function submit() {
-    if (props.disabled) return
-    if (autocomplete?.visible) return
-    if (!store.prompt.input) return
+    if (input && !input.isDestroyed && input.plainText !== store.prompt.input) {
+      setStore("prompt", "input", input.plainText)
+      syncExtmarksWithPromptParts()
+    }
+    if (props.disabled) return false
+    if (autocomplete?.visible) return false
+    if (!store.prompt.input) return false
     const trimmed = store.prompt.input.trim()
     if (trimmed === "exit" || trimmed === "quit" || trimmed === ":q") {
-      exit()
-      return
+      void exit()
+      return true
     }
+    const agent = local.agent.current()
+    if (!agent) return false
     const selectedModel = local.model.current()
     if (!selectedModel) {
       promptModelWarning()
-      return
+      return false
     }
     const sessionID = props.sessionID
       ? props.sessionID
@@ -533,9 +651,9 @@ export function Prompt(props: PromptProps) {
     const variant = local.model.variant.current()
 
     if (store.mode === "shell") {
-      sdk.client.session.shell({
+      void sdk.client.session.shell({
         sessionID,
-        agent: local.agent.current().name,
+        agent: agent.name,
         model: {
           providerID: selectedModel.providerID,
           modelID: selectedModel.modelID,
@@ -555,14 +673,15 @@ export function Prompt(props: PromptProps) {
       const firstLineEnd = inputText.indexOf("\n")
       const firstLine = firstLineEnd === -1 ? inputText : inputText.slice(0, firstLineEnd)
       const [command, ...firstLineArgs] = firstLine.split(" ")
+      const commandInfo = sync.data.command.find((item) => item.name === command.slice(1))
       const restOfInput = firstLineEnd === -1 ? "" : inputText.slice(firstLineEnd + 1)
       const args = firstLineArgs.join(" ") + (restOfInput ? "\n" + restOfInput : "")
 
-      sdk.client.session.command({
+      void sdk.client.session.command({
         sessionID,
         command: command.slice(1),
         arguments: args,
-        agent: local.agent.current().name,
+        agent: agent.name,
         model: `${selectedModel.providerID}/${selectedModel.modelID}`,
         messageID,
         variant,
@@ -573,13 +692,20 @@ export function Prompt(props: PromptProps) {
             ...x,
           })),
       })
+      if (commandInfo?.queueBehavior === "queued" || (!commandInfo?.immediate && commandInfo?.workflowAware)) {
+        toast.show({
+          variant: "info",
+          message: `/${commandInfo.name} 已进入 runtime 队列`,
+          duration: 2500,
+        })
+      }
     } else {
-      sdk.client.session
+      void sdk.client.session
         .prompt({
           sessionID,
           ...selectedModel,
           messageID,
-          agent: local.agent.current().name,
+          agent: agent.name,
           model: selectedModel,
           variant,
           parts: [
@@ -617,6 +743,7 @@ export function Prompt(props: PromptProps) {
         })
       }, 50)
     input.clear()
+    return true
   }
   const exit = useExit()
 
@@ -654,11 +781,15 @@ export function Prompt(props: PromptProps) {
     )
   }
 
-  async function pasteImage(file: { filename?: string; content: string; mime: string }) {
+  async function pasteAttachment(file: { filename?: string; filepath?: string; content: string; mime: string }) {
     const currentOffset = input.visualCursor.offset
     const extmarkStart = currentOffset
-    const count = store.prompt.parts.filter((x) => x.type === "file").length
-    const virtualText = `[Image ${count + 1}]`
+    const count = store.prompt.parts.filter((x) => {
+      if (x.type !== "file") return false
+      if (file.mime === "application/pdf") return x.mime === "application/pdf"
+      return x.mime.startsWith("image/")
+    }).length
+    const virtualText = attachmentLabel({ mime: file.mime, count })
     const extmarkEnd = extmarkStart + virtualText.length
     const textToInsert = virtualText + " "
 
@@ -679,7 +810,7 @@ export function Prompt(props: PromptProps) {
       url: `data:${file.mime};base64,${file.content}`,
       source: {
         type: "file",
-        path: file.filename ?? "",
+        path: file.filepath ?? file.filename ?? "",
         text: {
           start: extmarkStart,
           end: extmarkEnd,
@@ -700,7 +831,9 @@ export function Prompt(props: PromptProps) {
   const highlight = createMemo(() => {
     if (keybind.leader) return theme.border
     if (store.mode === "shell") return theme.primary
-    return local.agent.color(local.agent.current().name)
+    const agent = local.agent.current()
+    if (!agent) return theme.border
+    return local.agent.color(agent.name)
   })
 
   const showVariant = createMemo(() => {
@@ -711,7 +844,8 @@ export function Prompt(props: PromptProps) {
   })
 
   const spinnerDef = createMemo(() => {
-    const color = local.agent.color(local.agent.current().name)
+    const agent = local.agent.current()
+    const color = agent ? local.agent.color(agent.name) : theme.border
     return {
       frames: createFrames({
         color,
@@ -771,7 +905,15 @@ export function Prompt(props: PromptProps) {
             flexGrow={1}
           >
             <textarea
-              placeholder={props.sessionID ? undefined : `Ask anything... "${PLACEHOLDERS[store.placeholder]}"`}
+              placeholder={
+                props.showPlaceholder === false
+                  ? undefined
+                  : store.mode === "shell"
+                    ? `Run a command... "${shell()[store.placeholder % shell().length]}"`
+                    : props.sessionID
+                      ? undefined
+                      : `Ask anything... "${list()[store.placeholder % list().length]}"`
+              }
               textColor={keybind.leader ? theme.textMuted : theme.text}
               focusedTextColor={keybind.leader ? theme.textMuted : theme.text}
               minHeight={1}
@@ -796,7 +938,7 @@ export function Prompt(props: PromptProps) {
                   const content = await Clipboard.read()
                   if (content?.mime.startsWith("image/")) {
                     e.preventDefault()
-                    await pasteImage({
+                    await pasteAttachment({
                       filename: "clipboard",
                       mime: content.mime,
                       content: content.data,
@@ -824,6 +966,7 @@ export function Prompt(props: PromptProps) {
                   }
                 }
                 if (e.name === "!" && input.visualCursor.offset === 0) {
+                  setStore("placeholder", Math.floor(Math.random() * shell().length))
                   setStore("mode", "shell")
                   e.preventDefault()
                   return
@@ -861,49 +1004,51 @@ export function Prompt(props: PromptProps) {
                     input.cursorOffset = input.plainText.length
                 }
               }}
-              onSubmit={submit}
+              onSubmit={() => {
+                setTimeout(() => setTimeout(() => void submit(), 0), 0)
+              }}
               onPaste={async (event: PasteEvent) => {
                 if (props.disabled) {
                   event.preventDefault()
                   return
                 }
 
-                // Normalize line endings at the boundary
-                // Windows ConPTY/Terminal often sends CR-only newlines in bracketed paste
-                // Replace CRLF first, then any remaining CR
-                const normalizedText = event.text.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+                const normalizedText = normalizePastedText(event as PasteEvent & { bytes?: Uint8Array })
                 const pastedContent = normalizedText.trim()
                 if (!pastedContent) {
                   command.trigger("prompt.paste")
                   return
                 }
+                event.preventDefault()
 
-                // trim ' from the beginning and end of the pasted content. just
-                // ' and nothing else
-                const filepath = pastedContent.replace(/^'+|'+$/g, "").replace(/\\ /g, " ")
+                const filepath = resolvePastedFilePath(pastedContent)
                 const isUrl = /^(https?):\/\//.test(filepath)
                 if (!isUrl) {
                   try {
                     const file = Bun.file(filepath)
+                    const filename = filepath.split(/[\\/]/).at(-1) ?? file.name
+                    const lower = filepath.toLowerCase()
+                    const mime =
+                      file.type ||
+                      (lower.endsWith(".pdf") ? "application/pdf" : lower.endsWith(".svg") ? "image/svg+xml" : "")
                     // Handle SVG as raw text content, not as base64 image
-                    if (file.type === "image/svg+xml") {
-                      event.preventDefault()
+                    if (mime === "image/svg+xml") {
                       const content = await file.text().catch(() => {})
                       if (content) {
-                        pasteText(content, `[SVG: ${file.name ?? "image"}]`)
+                        pasteText(content, `[SVG: ${filename ?? "image"}]`)
                         return
                       }
                     }
-                    if (file.type.startsWith("image/")) {
-                      event.preventDefault()
+                    if (mime.startsWith("image/") || mime === "application/pdf") {
                       const content = await file
                         .arrayBuffer()
                         .then((buffer) => Buffer.from(buffer).toString("base64"))
                         .catch(() => {})
                       if (content) {
-                        await pasteImage({
-                          filename: file.name,
-                          mime: file.type,
+                        await pasteAttachment({
+                          filename,
+                          filepath,
+                          mime,
                           content,
                         })
                         return
@@ -912,18 +1057,16 @@ export function Prompt(props: PromptProps) {
                   } catch {}
                 }
 
-                const lineCount = (pastedContent.match(/\n/g)?.length ?? 0) + 1
-                if (
-                  (lineCount >= 3 || pastedContent.length > 150) &&
-                  !sync.data.config.experimental?.disable_paste_summary
-                ) {
-                  event.preventDefault()
-                  pasteText(pastedContent, `[Pasted ~${lineCount} lines]`)
+                if (shouldSummarizePaste(pastedContent, sync.data.config.experimental?.disable_paste_summary)) {
+                  pasteText(pastedContent, pastedTextLabel(pastedContent))
                   return
                 }
 
+                input.insertText(normalizedText)
+
                 // Force layout update and render for the pasted content
                 setTimeout(() => {
+                  if (!input || input.isDestroyed) return
                   input.getLayoutNode().markDirty()
                   renderer.requestRender()
                 }, 0)
@@ -935,6 +1078,7 @@ export function Prompt(props: PromptProps) {
                 }
                 props.ref?.(ref)
                 setTimeout(() => {
+                  if (!input || input.isDestroyed) return
                   input.cursorColor = theme.text
                 }, 0)
               }}
@@ -943,9 +1087,9 @@ export function Prompt(props: PromptProps) {
               cursorColor={theme.text}
               syntaxStyle={syntax()}
             />
-            <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1}>
+            <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
               <text fg={highlight()}>
-                {store.mode === "shell" ? "Shell" : Locale.titlecase(local.agent.current().name)}{" "}
+                {store.mode === "shell" ? "Shell" : Locale.titlecase(local.agent.current()?.name ?? "agent")}{" "}
               </text>
               <Show when={store.mode === "normal"}>
                 <box flexDirection="row" gap={1}>
@@ -959,6 +1103,11 @@ export function Prompt(props: PromptProps) {
                       <span style={{ fg: theme.warning, bold: true }}>{local.model.variant.current()}</span>
                     </text>
                   </Show>
+                </box>
+              </Show>
+              <Show when={hasRightContent()}>
+                <box flexDirection="row" gap={1}>
+                  {props.right}
                 </box>
               </Show>
             </box>
@@ -991,7 +1140,7 @@ export function Prompt(props: PromptProps) {
           />
         </box>
         <box flexDirection="row" justifyContent="space-between">
-          <Show when={status().type !== "idle"} fallback={<text />}>
+          <Show when={status().type !== "idle"} fallback={props.hint ?? <text />}>
             <box
               flexDirection="row"
               gap={1}

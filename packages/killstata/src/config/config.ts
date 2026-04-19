@@ -584,12 +584,18 @@ export namespace Config {
     agent: z.string().optional(),
     model: z.string().optional(),
     subtask: z.boolean().optional(),
+    availability: z.array(z.string()).optional(),
+    queueBehavior: z.enum(["queued", "immediate"]).optional(),
+    workflowAware: z.boolean().optional(),
+    immediate: z.boolean().optional(),
+    remoteSafe: z.boolean().optional(),
   })
   export type Command = z.infer<typeof Command>
 
   export const Agent = z
     .object({
       model: z.string().optional(),
+      variant: z.string().optional(),
       temperature: z.number().optional(),
       top_p: z.number().optional(),
       prompt: z.string().optional(),
@@ -621,6 +627,7 @@ export namespace Config {
       const knownKeys = new Set([
         "name",
         "model",
+        "variant",
         "prompt",
         "description",
         "temperature",

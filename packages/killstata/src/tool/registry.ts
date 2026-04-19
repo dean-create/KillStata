@@ -1,5 +1,5 @@
 ﻿import { QuestionTool } from "./question"
-import { BashTool } from "./bash"
+import { BashTool, ShellTool } from "./bash"
 import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
@@ -108,6 +108,7 @@ export namespace ToolRegistry {
       InvalidTool,
       ...(["app", "cli", "desktop"].includes(Flag.KILLSTATA_CLIENT) ? [QuestionTool] : []),
       BashTool,
+      ShellTool,
       ReadTool,
       GlobTool,
       GrepTool,

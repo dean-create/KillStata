@@ -105,8 +105,8 @@ export namespace LLM {
       system.push(...promptHook.appendSystem)
     }
 
-    const variant =
-      !input.small && input.model.variants && input.user.variant ? input.model.variants[input.user.variant] : {}
+    const variantID = input.user.variant ?? input.agent.variant
+    const variant = !input.small && input.model.variants && variantID ? input.model.variants[variantID] : {}
     const base = input.small
       ? ProviderTransform.smallOptions(input.model)
       : ProviderTransform.options({
@@ -287,8 +287,14 @@ export namespace LLM {
 
   async function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "user">) {
     const disabled = PermissionNext.disabled(Object.keys(input.tools), input.agent.permission)
+    const isToolDisabledByUser = (tool: string) => {
+      if (input.user.tools?.[tool] === false) return true
+      if (tool === "shell" && input.user.tools?.bash === false) return true
+      if (tool === "bash" && input.user.tools?.shell === false) return true
+      return false
+    }
     for (const tool of Object.keys(input.tools)) {
-      if (input.user.tools?.[tool] === false || disabled.has(tool)) {
+      if (isToolDisabledByUser(tool) || disabled.has(tool)) {
         delete input.tools[tool]
       }
     }

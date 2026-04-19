@@ -99,6 +99,7 @@ export function Home() {
         <box width="100%" maxWidth={75} zIndex={1000} paddingTop={1}>
           <Prompt
             ref={(r) => {
+              if (!r) return
               prompt = r
               promptRef.set(r)
             }}

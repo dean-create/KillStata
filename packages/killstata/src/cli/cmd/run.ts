@@ -18,6 +18,7 @@ const TOOL: Record<string, [string, string]> = {
   todowrite: ["Todo", UI.Style.TEXT_WARNING_BOLD],
   todoread: ["Todo", UI.Style.TEXT_WARNING_BOLD],
   bash: ["Bash", UI.Style.TEXT_DANGER_BOLD],
+  shell: ["Shell", UI.Style.TEXT_DANGER_BOLD],
   edit: ["Edit", UI.Style.TEXT_SUCCESS_BOLD],
   glob: ["Glob", UI.Style.TEXT_INFO_BOLD],
   grep: ["Grep", UI.Style.TEXT_INFO_BOLD],
@@ -222,7 +223,7 @@ export const RunCommand = cmd({
               if (signature === lastToolSignature) continue
               lastToolSignature = signature
               printEvent(color, tool, title)
-              if (part.tool === "bash" && part.state.output?.trim()) {
+              if ((part.tool === "bash" || part.tool === "shell") && part.state.output?.trim()) {
                 UI.println()
                 UI.println(part.state.output)
               }

@@ -5,6 +5,7 @@ import { useDirectory } from "../../context/directory"
 import { useConnected } from "../../component/dialog-model"
 import { createStore } from "solid-js/store"
 import { useRoute } from "../../context/route"
+import { workflowStatusLabel } from "../../context/runtime-state"
 
 export function Footer() {
   const { theme } = useTheme()
@@ -17,6 +18,19 @@ export function Footer() {
     if (route.data.type !== "session") return []
     return sync.data.permission[route.data.sessionID] ?? []
   })
+  const runtimeQuery = createMemo(() => {
+    if (route.data.type !== "session") return
+    return sync.data.runtimeQuery[route.data.sessionID]
+  })
+  const runtimeQueue = createMemo(() => {
+    if (route.data.type !== "session") return
+    return sync.data.runtimeQueue[route.data.sessionID]
+  })
+  const workflow = createMemo(() => {
+    if (route.data.type !== "session") return
+    return sync.data.workflow[route.data.sessionID]
+  })
+  const workflowLabel = createMemo(() => workflowStatusLabel(workflow()))
   const directory = useDirectory()
   const connected = useConnected()
 
@@ -60,6 +74,34 @@ export function Footer() {
             </text>
           </Match>
           <Match when={connected()}>
+            <Show when={workflowLabel()}>
+              <text
+                fg={
+                  workflowLabel() === "verifier-pass"
+                    ? theme.success
+                    : workflowLabel() === "verifier-warn"
+                      ? theme.warning
+                      : theme.error
+                }
+              >
+                {workflowLabel()}
+              </text>
+            </Show>
+            <Show when={workflow()?.activeStage}>
+              <text fg={theme.textMuted}>stage {workflow()?.activeStage}</text>
+            </Show>
+            <Show when={workflow()?.activeCoordinatorAgent}>
+              <text fg={theme.textMuted}>agent {workflow()?.activeCoordinatorAgent}</text>
+            </Show>
+            <Show when={runtimeQuery() && runtimeQuery()?.phase !== "idle"}>
+              <text fg={theme.textMuted}>
+                {runtimeQuery()?.phase}
+                {runtimeQuery()?.action ? `:${runtimeQuery()?.action}` : ""}
+              </text>
+            </Show>
+            <Show when={(runtimeQueue()?.pending ?? 0) > 0}>
+              <text fg={theme.warning}>queue {runtimeQueue()?.pending}</text>
+            </Show>
             <Show when={permissions().length > 0}>
               <text fg={theme.warning}>
                 <span style={{ fg: theme.warning }}>△</span> {permissions().length} Permission

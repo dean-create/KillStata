@@ -81,6 +81,17 @@ type DatasetIndex = {
   entries: Record<string, DatasetIndexEntry>
 }
 
+type DeliveryRunManifest = {
+  version: 1
+  runId: string
+  bundleName?: string
+  bundleDir?: string
+  datasetId?: string
+  sourcePath?: string
+  generatedAt: string
+  outputs: FinalOutputRecord[]
+}
+
 function nowIso() {
   return new Date().toISOString()
 }
@@ -216,13 +227,14 @@ function runIdDeliveryStamp(runId: string) {
   const normalized = normalizeRunId(runId)
   const match = /^run_(\d{8})-(\d{6})/.exec(normalized)
   if (match) {
-    return `${match[1]}${match[2].slice(0, 4)}`
+    return `${match[1]}_${match[2].slice(0, 4)}`
   }
   const now = new Date()
   return [
     now.getFullYear().toString(),
     (now.getMonth() + 1).toString().padStart(2, "0"),
     now.getDate().toString().padStart(2, "0"),
+  ].join("") + "_" + [
     now.getHours().toString().padStart(2, "0"),
     now.getMinutes().toString().padStart(2, "0"),
   ].join("")
@@ -231,16 +243,95 @@ function runIdDeliveryStamp(runId: string) {
 const DELIVERY_BUNDLE_PREFIX = "killstata_output_"
 const LEGACY_DELIVERY_BUNDLE_PREFIX = "killstata_ouput_"
 
-export function deliveryBundleName(runId: string) {
+function baseDeliveryBundleName(runId: string) {
   return `${DELIVERY_BUNDLE_PREFIX}${runIdDeliveryStamp(runId)}`
 }
 
+function legacyDeliveryBundleNames(runId: string) {
+  const stamp = runIdDeliveryStamp(runId)
+  const compactStamp = stamp.replace("_", "")
+  return [
+    `${DELIVERY_BUNDLE_PREFIX}${compactStamp}`,
+    `${LEGACY_DELIVERY_BUNDLE_PREFIX}${compactStamp}`,
+  ]
+}
+
+export function deliveryBundleName(runId: string) {
+  return baseDeliveryBundleName(runId)
+}
+
 export function deliveryBundleDir(runId: string) {
-  return path.join(projectRoot(), deliveryBundleName(runId))
+  const existing = readDeliveryRunManifest(runId)
+  return existing?.bundleDir ?? path.join(projectRoot(), existing?.bundleName ?? deliveryBundleName(runId))
 }
 
 function deliveryManifestRoot(runId: string) {
-  return path.join(deliveryStateRoot(), "manifests", deliveryBundleName(runId))
+  return path.join(deliveryStateRoot(), "manifests", normalizeRunId(runId))
+}
+
+function deliveryManifestPath(runId: string) {
+  return path.join(deliveryManifestRoot(runId), "final_outputs.json")
+}
+
+function legacyDeliveryManifestPaths(runId: string) {
+  return legacyDeliveryBundleNames(runId).map((name) => path.join(deliveryStateRoot(), "manifests", name, "final_outputs.json"))
+}
+
+function readDeliveryRunManifest(runId: string): DeliveryRunManifest | undefined {
+  const normalizedRunId = normalizeRunId(runId)
+  const primaryPath = deliveryManifestPath(normalizedRunId)
+  for (const manifestPath of [primaryPath, ...legacyDeliveryManifestPaths(normalizedRunId)]) {
+    if (!fs.existsSync(manifestPath)) continue
+    const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as Partial<DeliveryRunManifest> & { outputs?: FinalOutputRecord[] }
+    const bundleName =
+      parsed.bundleName ?? (manifestPath === primaryPath ? baseDeliveryBundleName(normalizedRunId) : path.basename(path.dirname(manifestPath)))
+    return {
+      version: 1,
+      runId: normalizedRunId,
+      bundleName,
+      bundleDir: parsed.bundleDir ?? path.join(projectRoot(), bundleName),
+      datasetId: parsed.datasetId,
+      sourcePath: parsed.sourcePath,
+      generatedAt: parsed.generatedAt ?? nowIso(),
+      outputs: parsed.outputs ?? [],
+    }
+  }
+  return undefined
+}
+
+function writeDeliveryRunManifest(manifest: DeliveryRunManifest) {
+  const outputPath = deliveryManifestPath(manifest.runId)
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true })
+  fs.writeFileSync(outputPath, JSON.stringify(manifest, null, 2), "utf-8")
+}
+
+function deliveryBundleParentDir(sourcePath?: string) {
+  if (!sourcePath) return projectRoot()
+  const resolved = path.isAbsolute(sourcePath) ? sourcePath : path.resolve(projectRoot(), sourcePath)
+  return path.dirname(resolved)
+}
+
+function ensureDeliveryBundleAllocation(runId: string, parentDir: string) {
+  const normalizedRunId = normalizeRunId(runId)
+  const existing = readDeliveryRunManifest(normalizedRunId)
+  if (existing?.bundleName) {
+    return {
+      bundleName: existing.bundleName,
+      bundleDir: existing.bundleDir ?? path.join(parentDir, existing.bundleName),
+    }
+  }
+
+  const baseName = baseDeliveryBundleName(normalizedRunId)
+  let candidate = baseName
+  let index = 2
+  while (fs.existsSync(path.join(parentDir, candidate))) {
+    candidate = `${baseName}_${index.toString().padStart(2, "0")}`
+    index += 1
+  }
+  return {
+    bundleName: candidate,
+    bundleDir: path.join(parentDir, candidate),
+  }
 }
 
 function ensureUniqueFilePath(dir: string, fileName: string) {
@@ -623,7 +714,7 @@ export function visibleOutputPath(input: {
 }
 
 export function finalOutputsPath(sourcePath: string, runId: string) {
-  return path.join(deliveryManifestRoot(runId), "final_outputs.json")
+  return deliveryManifestPath(runId)
 }
 
 function userFacingRunIndexPath(sourcePath: string, runId: string) {
@@ -797,6 +888,9 @@ export function resolveFinalOutputsPath(sourcePath: string, runId?: string): str
   if (normalizedRunId) {
     const currentPath = finalOutputsPath(sourcePath, normalizedRunId)
     if (fs.existsSync(currentPath)) return currentPath
+    for (const legacyPath of legacyDeliveryManifestPaths(normalizedRunId)) {
+      if (fs.existsSync(legacyPath)) return legacyPath
+    }
   }
 
   const legacyPath = path.join(legacySourceOutputsRoot(sourcePath), "final_outputs.json")
@@ -834,9 +928,12 @@ export function upsertFinalOutput(manifest: DatasetManifest, output: FinalOutput
     outputPath,
     JSON.stringify(
       {
+        version: 1,
         datasetId: manifest.datasetId,
         runId: normalizedRunId,
         sourcePath: manifest.sourcePath,
+        bundleName: readDeliveryRunManifest(normalizedRunId)?.bundleName,
+        bundleDir: readDeliveryRunManifest(normalizedRunId)?.bundleDir,
         generatedAt: nowIso(),
         outputs: runOutputs,
       },
@@ -918,11 +1015,53 @@ export function publishVisibleOutput(input: {
   return outputPath
 }
 
+function finalOutputMatches(existing: FinalOutputRecord | undefined, candidate: FinalOutputRecord) {
+  return Boolean(
+    existing &&
+    existing.path === candidate.path &&
+    existing.sourcePath === candidate.sourcePath &&
+    existing.stageId === candidate.stageId &&
+    existing.branch === candidate.branch &&
+    JSON.stringify(existing.metadata ?? {}) === JSON.stringify(candidate.metadata ?? {}),
+  )
+}
+
+function upsertDeliveryRunOutput(input: {
+  runId: string
+  bundleName: string
+  bundleDir: string
+  datasetId?: string
+  sourcePath?: string
+  output: FinalOutputRecord
+}) {
+  const existing = readDeliveryRunManifest(input.runId)
+  const manifest: DeliveryRunManifest = {
+    version: 1,
+    runId: input.runId,
+    bundleName: input.bundleName,
+    bundleDir: input.bundleDir,
+    datasetId: input.datasetId ?? existing?.datasetId,
+    sourcePath: input.sourcePath ?? existing?.sourcePath,
+    generatedAt: nowIso(),
+    outputs: existing?.outputs ?? [],
+  }
+  const idx = manifest.outputs.findIndex((item) => item.key === input.output.key && item.runId === input.output.runId)
+  if (idx >= 0) manifest.outputs.splice(idx, 1, input.output)
+  else manifest.outputs.push(input.output)
+  writeDeliveryRunManifest(manifest)
+
+  if (manifest.sourcePath) {
+    writeUserFacingRunGuide(manifest.sourcePath, input.runId, manifest.outputs)
+  }
+}
+
 export function publishDeliveryOutput(input: {
-  manifest: DatasetManifest
+  manifest?: DatasetManifest
   key: string
   label: string
   sourcePath: string
+  contextSourcePath?: string
+  datasetId?: string
   runId?: string
   branch?: string
   stageId?: string
@@ -934,12 +1073,15 @@ export function publishDeliveryOutput(input: {
   }
 
   const runId = normalizeRunId(input.runId ?? createRunId())
-  const bundleDir = deliveryBundleDir(runId)
+  const contextSourcePath = input.manifest?.sourcePath ?? input.contextSourcePath
+  const { bundleName, bundleDir } = ensureDeliveryBundleAllocation(runId, deliveryBundleParentDir(contextSourcePath))
   fs.mkdirSync(bundleDir, { recursive: true })
   const branch = input.branch ?? "delivery"
 
   const fingerprint = fingerprintSourceFile(input.sourcePath)
-  const existing = input.manifest.finalOutputs.find((item) => item.key === input.key && item.runId === runId)
+  const existing =
+    input.manifest?.finalOutputs.find((item) => item.key === input.key && item.runId === runId) ??
+    readDeliveryRunManifest(runId)?.outputs.find((item) => item.key === input.key && item.runId === runId)
   const existingPath =
     existing &&
     existing.stageId === input.stageId &&
@@ -953,25 +1095,7 @@ export function publishDeliveryOutput(input: {
     sourceFingerprint: fingerprint.key,
     deliveryBundleDir: bundleDir,
   }
-
-  const unchanged =
-    existing &&
-    existing.path === outputPath &&
-    existing.sourcePath === input.sourcePath &&
-    existing.stageId === input.stageId &&
-    existing.branch === branch &&
-    JSON.stringify(existing.metadata ?? {}) === JSON.stringify(metadata) &&
-    fs.existsSync(existing.path)
-
-  if (!unchanged) {
-    fs.copyFileSync(input.sourcePath, outputPath)
-  }
-
-  if (unchanged) {
-    return outputPath
-  }
-
-  upsertFinalOutput(input.manifest, {
+  const nextRecord: FinalOutputRecord = {
     key: input.key,
     label: input.label,
     path: outputPath,
@@ -981,6 +1105,26 @@ export function publishDeliveryOutput(input: {
     sourcePath: input.sourcePath,
     createdAt: nowIso(),
     metadata,
+  }
+
+  const unchanged =
+    finalOutputMatches(existing, nextRecord) && fs.existsSync(nextRecord.path)
+
+  if (!unchanged) {
+    fs.copyFileSync(input.sourcePath, outputPath)
+  }
+
+  if (input.manifest && !finalOutputMatches(input.manifest.finalOutputs.find((item) => item.key === input.key && item.runId === runId), nextRecord)) {
+    upsertFinalOutput(input.manifest, nextRecord)
+  }
+
+  upsertDeliveryRunOutput({
+    runId,
+    bundleName,
+    bundleDir,
+    datasetId: input.manifest?.datasetId ?? input.datasetId,
+    sourcePath: contextSourcePath,
+    output: nextRecord,
   })
 
   return outputPath

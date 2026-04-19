@@ -375,11 +375,12 @@ export function Autocomplete(props: {
       })
     }
 
-    results.sort((a, b) => a.display.localeCompare(b.display))
+    const unique = Array.from(new Map(results.map((item) => [item.display, item])).values())
+    unique.sort((a, b) => a.display.localeCompare(b.display))
 
-    const max = firstBy(results, [(x) => x.display.length, "desc"])?.display.length
-    if (!max) return results
-    return results.map((item) => ({
+    const max = firstBy(unique, [(x) => x.display.length, "desc"])?.display.length
+    if (!max) return unique
+    return unique.map((item) => ({
       ...item,
       display: item.display.padEnd(max + 2),
     }))

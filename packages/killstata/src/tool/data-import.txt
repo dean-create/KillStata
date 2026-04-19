@@ -15,6 +15,8 @@ Internal format policy:
 - Internal working layer: Parquet + metadata sidecar
 - User inspection/export layer: CSV / XLSX
 - Compatibility export layer: DTA
+- `.killstata/` stores canonical internal stages, inspection files, runtime state, and audit metadata
+- Cleaning-stage inspection files stay in `.killstata`; the final user-facing econometric delivery bundle is produced by the econometrics tool after a complete estimation run
 
 ## Supported Actions
 
@@ -96,6 +98,9 @@ Every action returns a structured artifact trail when applicable:
   - qaGateStatus
   - qaGateReason
   - qaSource
+
+Front-end delivery rule:
+- Do not add cleaning-stage artifacts directly to `killstata_output_YYYYMMDD_HHMM`; that folder is reserved for the five-file econometric delivery bundle after a complete estimation run
 
 ## Planning And Skill Guidance
 

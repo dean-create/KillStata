@@ -4,7 +4,9 @@ import {
   createContext,
   createMemo,
   createSignal,
+  getOwner,
   onCleanup,
+  runWithOwner,
   useContext,
   type Accessor,
   type ParentProps,
@@ -30,6 +32,7 @@ export type CommandOption = DialogSelectOption<string> & {
 }
 
 function init() {
+  const root = getOwner()
   const [registrations, setRegistrations] = createSignal<Accessor<CommandOption[]>[]>([])
   const [suspendCount, setSuspendCount] = createSignal(0)
   const dialog = useDialog()
@@ -101,11 +104,28 @@ function init() {
       dialog.replace(() => <DialogCommand options={visibleOptions()} suggestedOptions={suggestedOptions()} />)
     },
     register(cb: () => CommandOption[]) {
-      const results = createMemo(cb)
-      setRegistrations((arr) => [results, ...arr])
-      onCleanup(() => {
-        setRegistrations((arr) => arr.filter((x) => x !== results))
+      const owner = getOwner() ?? root
+      if (!owner) return () => {}
+
+      let results: Accessor<CommandOption[]> | undefined
+      runWithOwner(owner, () => {
+        results = createMemo(cb)
+        const ref = results
+        if (!ref) return
+        setRegistrations((arr) => [ref, ...arr])
+        onCleanup(() => {
+          setRegistrations((arr) => arr.filter((x) => x !== ref))
+        })
       })
+      if (!results) return () => {}
+      let done = false
+      return () => {
+        if (done) return
+        done = true
+        const ref = results
+        if (!ref) return
+        setRegistrations((arr) => arr.filter((x) => x !== ref))
+      }
     },
   }
   return result

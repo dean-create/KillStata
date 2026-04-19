@@ -27,6 +27,7 @@ import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { ToastProvider, useToast } from "./ui/toast"
+import { StartupLoading } from "./component/startup-loading"
 import { ExitProvider, useExit } from "./context/exit"
 import { Session as SessionApi } from "@/session"
 import { TuiEvent } from "./event"
@@ -244,10 +245,6 @@ function App() {
     renderer.clearSelection()
   }
   const [terminalTitleEnabled, setTerminalTitleEnabled] = createSignal(kv.get("terminal_title_enabled", true))
-
-  createEffect(() => {
-    console.log(JSON.stringify(route.data))
-  })
 
   // Update terminal window title based on current route and session
   createEffect(() => {
@@ -707,6 +704,7 @@ function App() {
           <Session />
         </Match>
       </Switch>
+      <StartupLoading ready={() => sync.ready} />
     </box>
   )
 }

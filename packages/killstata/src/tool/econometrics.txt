@@ -18,6 +18,9 @@ Working-format policy:
 - Read canonical dataset stages through datasetId/stageId whenever available
 - Canonical working datasets are Parquet stages
 - Excel / CSV / DTA are source or delivery formats, not the primary estimation layer
+- `.killstata/` is the internal project workspace; it is not the main user-facing delivery folder
+- Successful econometric runs publish user-facing files into `killstata_output_YYYYMMDD_HHMM` in the source data file's directory, with `_02`, `_03`, ... added automatically for same-minute collisions
+- The delivery bundle rule applies to both canonical `datasetId/stageId` runs and direct `dataPath` runs
 
 ## Supported Methods
 
@@ -98,6 +101,17 @@ For `auto_recommend`, the tool saves:
 - `narrative.md`
 
 For `smart_baseline`, the tool saves the recommendation artifacts above and then continues to save the executed baseline regression artifacts in the same run folder.
+
+Front-end delivery rule:
+- `auto_recommend` does not have to create a `killstata_output_*` bundle when it only emits recommendations
+- Any successful estimation run with formal result artifacts must create a `killstata_output_*` delivery bundle
+- A completed econometric analysis delivery bundle must contain exactly five user-facing files:
+  - `回归结果_<method>.md`
+  - `三线表_<method>.tex`
+  - `三线表_<method>.docx`
+  - `计量分析数据_<method>.xlsx`
+  - `期刊小论文_<method>.docx`
+- Extra diagnostics, metadata, snapshots, CSV files, raw result JSON, and auxiliary tables stay in `.killstata`
 
 The `auto_recommend` path should:
 - infer whether the dataset is closer to cross-section, time series, panel, or repeated cross-section

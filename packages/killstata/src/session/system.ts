@@ -1,14 +1,8 @@
 ﻿import { Ripgrep } from "../file/ripgrep"
-import { Global } from "../global"
-import { Filesystem } from "../util/filesystem"
-import { Config } from "../config/config"
-import { Log } from "../util/log"
 import { formatSkillAliasXml, resolveSkillAliasAvailability } from "../skill"
-import { userWorkspaceAgentsPath, userWorkspaceMemoryPath, userWorkspaceUserPath } from "../killstata/runtime-config"
 
 import { Instance } from "../project/instance"
 import path from "path"
-import os from "os"
 import type { MessageV2 } from "./message-v2"
 import { getStage, readDatasetManifest } from "../tool/analysis-state"
 import { relativeWithinProject } from "../tool/analysis-path"
@@ -23,6 +17,7 @@ import PROMPT_CODEX from "./prompt/codex_header.txt"
 import type { Provider } from "@/provider/provider"
 import { Flag } from "@/flag/flag"
 import type { Agent } from "@/agent/agent"
+import { SessionInstruction } from "./instruction"
 
 const ECONOMETRICS_CONTEXT = `
 # Econometric Analysis Context
@@ -91,6 +86,11 @@ You are operating as an econometric analysis assistant. When working with data:
    - If the user explicitly asks for raw content, complete logs, full schema, or all output paths, you may switch to detailed mode for that request only.
 9. Reproducibility:
    - Save outputs under analysis/<method>/ or analysis/datasets/<datasetId>/ and report file paths clearly.
+10. Econometric delivery bundle:
+   - After one complete econometric analysis run, the user-facing killstata_output_YYYYMMDD_HHMM folder must contain exactly five files.
+   - The required five files are: 回归结果_<method>.md, 三线表_<method>.tex, 三线表_<method>.docx, 计量分析数据_<method>.xlsx, and 期刊小论文_<method>.docx.
+   - Do not add diagnostics JSON, metadata JSON, numeric snapshots, coefficient CSV/XLSX, raw results JSON, or auxiliary tables to the user-facing delivery bundle; keep those in .killstata.
+   - Prefer reporting the delivery bundle path and these five files to the user after econometric completion.
 
 ## Method Selection Protocol
 When user describes a research question, determine the appropriate method:
@@ -181,24 +181,9 @@ When user describes a research question, determine the appropriate method:
 - Robustness requests -> load robustness-check.
 `
 
-const log = Log.create({ service: "system-prompt" })
-
 async function buildSkillAliasSummary() {
   const aliases = await resolveSkillAliasAvailability().catch(() => [])
   return formatSkillAliasXml(aliases)
-}
-
-async function resolveRelativeInstruction(instruction: string): Promise<string[]> {
-  if (!Flag.KILLSTATA_DISABLE_PROJECT_CONFIG) {
-    return Filesystem.globUp(instruction, Instance.directory, Instance.worktree).catch(() => [])
-  }
-  if (!Flag.KILLSTATA_CONFIG_DIR) {
-    log.warn(
-      `Skipping relative instruction "${instruction}" - no KILLSTATA_CONFIG_DIR set while project config is disabled`,
-    )
-    return []
-  }
-  return Filesystem.globUp(instruction, Flag.KILLSTATA_CONFIG_DIR, Flag.KILLSTATA_CONFIG_DIR).catch(() => [])
 }
 
 export namespace SystemPrompt {
@@ -400,84 +385,7 @@ export namespace SystemPrompt {
     ].join("\n")
   }
 
-  const LOCAL_RULE_FILES = ["AGENTS.md", "CLAUDE.md", "CONTEXT.md"]
-  const GLOBAL_RULE_FILES = [path.join(Global.Path.config, "AGENTS.md")]
-  const USER_WORKSPACE_RULE_FILES = [userWorkspaceAgentsPath(), userWorkspaceMemoryPath(), userWorkspaceUserPath()]
-  if (!Flag.KILLSTATA_DISABLE_CLAUDE_CODE_PROMPT) {
-    GLOBAL_RULE_FILES.push(path.join(os.homedir(), ".claude", "CLAUDE.md"))
-  }
-
-  if (Flag.KILLSTATA_CONFIG_DIR) {
-    GLOBAL_RULE_FILES.push(path.join(Flag.KILLSTATA_CONFIG_DIR, "AGENTS.md"))
-  }
-
   export async function custom() {
-    const config = await Config.get()
-    const paths: string[] = []
-    const appendPath = (item: string) => {
-      if (!paths.includes(item)) paths.push(item)
-    }
-
-    for (const globalRuleFile of GLOBAL_RULE_FILES) {
-      if (await Bun.file(globalRuleFile).exists()) {
-        appendPath(globalRuleFile)
-      }
-    }
-
-    for (const workspaceRuleFile of USER_WORKSPACE_RULE_FILES) {
-      if (await Bun.file(workspaceRuleFile).exists()) {
-        appendPath(workspaceRuleFile)
-      }
-    }
-
-    if (!Flag.KILLSTATA_DISABLE_PROJECT_CONFIG) {
-      for (const localRuleFile of LOCAL_RULE_FILES) {
-        const matches = await Filesystem.findUp(localRuleFile, Instance.directory, Instance.worktree)
-        if (matches.length > 0) {
-          matches.forEach((item) => appendPath(item))
-          break
-        }
-      }
-    }
-
-    const urls: string[] = []
-    if (config.instructions) {
-      for (let instruction of config.instructions) {
-        if (instruction.startsWith("https://") || instruction.startsWith("http://")) {
-          urls.push(instruction)
-          continue
-        }
-        if (instruction.startsWith("~/")) {
-          instruction = path.join(os.homedir(), instruction.slice(2))
-        }
-        let matches: string[] = []
-        if (path.isAbsolute(instruction)) {
-          matches = await Array.fromAsync(
-            new Bun.Glob(path.basename(instruction)).scan({
-              cwd: path.dirname(instruction),
-              absolute: true,
-              onlyFiles: true,
-            }),
-          ).catch(() => [])
-        } else {
-          matches = await resolveRelativeInstruction(instruction)
-        }
-        matches.forEach((item) => appendPath(item))
-      }
-    }
-
-    const foundFiles = paths.map((item) =>
-      Bun.file(item)
-        .text()
-        .catch(() => "")
-        .then((text) => "Instructions from: " + item + "\n" + text),
-    )
-    const foundUrls = urls.map((url) =>
-      fetch(url, { signal: AbortSignal.timeout(5000) })
-        .then((res) => (res.ok ? res.text() : ""))
-        .catch(() => "")
-        .then((text) => (text ? "Instructions from: " + url + "\n" + text : "")),
-    )
-    return Promise.all([...foundFiles, ...foundUrls]).then((result) => result.filter(Boolean))
+    return SessionInstruction.system()
   }
 }

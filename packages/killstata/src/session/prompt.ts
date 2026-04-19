@@ -45,11 +45,10 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
-import { QueryGuard } from "@/runtime/query-guard"
-import { RuntimeEvents } from "@/runtime/events"
 import type { QueuedSessionAction, ToolAvailabilityPolicy, WorkflowInputIntent } from "@/runtime/types"
 import { RuntimeHooks } from "@/runtime/hooks"
 import { allowMcpToolForWorkflow } from "@/runtime/workflow"
+import { SessionRunCoordinator } from "./run-state"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -58,84 +57,17 @@ export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
   export const OUTPUT_TOKEN_MAX = Flag.KILLSTATA_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
 
-  const state = Instance.state(
-    () => {
-      const data: Record<
-        string,
-        {
-          guard: QueryGuard
-          abort?: AbortController
-          queue: QueuedSessionAction[]
-          callbacks: {
-            actionID?: string
-            resolve(input: MessageV2.WithParts): void
-            reject(error?: unknown): void
-          }[]
-        }
-      > = {}
-      return data
-    },
-    async (current) => {
-      for (const item of Object.values(current)) {
-        item.abort?.abort()
-        for (const callback of item.callbacks) {
-          callback.reject(new Error("Session prompt runtime disposed"))
-        }
-      }
-    },
-  )
-
-  function ensureRuntime(sessionID: string) {
-    const current = state()
-    current[sessionID] ??= {
-      guard: new QueryGuard(),
-      queue: [],
-      callbacks: [],
-    }
-    return current[sessionID]
-  }
-
-  function publishQueue(sessionID: string) {
-    const runtime = ensureRuntime(sessionID)
-    Bus.publish(RuntimeEvents.QueueUpdated, {
-      sessionID,
-      pending: runtime.queue.length,
-      actions: runtime.queue.map((action) => ({
-        id: action.id,
-        type: action.type,
-        priority: action.priority,
-        createdAt: action.createdAt,
-      })),
-    })
-  }
-
-  function publishQueryState(sessionID: string, action?: QueuedSessionAction["type"]) {
-    const runtime = ensureRuntime(sessionID)
-    const snapshot = runtime.guard.snapshot(runtime.queue.length, action ?? runtime.queue[0]?.type)
-    Bus.publish(RuntimeEvents.QueryState, {
-      sessionID,
-      phase: !runtime.guard.active && runtime.queue.length > 0 ? "accepted" : snapshot.phase,
-      generation: snapshot.generation,
-      pending: snapshot.pending,
-      action: snapshot.action,
-    })
-  }
-
   async function enqueueAction(
     sessionID: string,
     action: Omit<QueuedSessionAction, "id" | "sessionID" | "createdAt"> & { metadata?: Record<string, unknown> },
   ) {
-    const runtime = ensureRuntime(sessionID)
     const queued = {
       id: ulid(),
       sessionID,
       createdAt: Date.now(),
       ...action,
     } satisfies QueuedSessionAction
-    runtime.queue.push(queued)
-    runtime.queue.sort((a, b) => b.priority - a.priority || a.createdAt - b.createdAt)
-    publishQueue(sessionID)
-    publishQueryState(sessionID, action.type)
+    SessionRunCoordinator.enqueue(queued)
     await RuntimeHooks.inputAccepted({
       sessionID,
       action: action.type,
@@ -145,57 +77,22 @@ export namespace SessionPrompt {
   }
 
   function waitForAction(sessionID: string, actionID?: string) {
-    const runtime = ensureRuntime(sessionID)
-    return new Promise<MessageV2.WithParts>((resolve, reject) => {
-      runtime.callbacks.push({ actionID, resolve, reject })
-    })
+    return SessionRunCoordinator.waitForAction(sessionID, actionID)
   }
 
   function resolveCallbacks(sessionID: string, message: MessageV2.WithParts, actionID?: string) {
-    const runtime = ensureRuntime(sessionID)
-    let genericResolved = false
-    runtime.callbacks = runtime.callbacks.filter((callback) => {
-      if (actionID && callback.actionID === actionID) {
-        callback.resolve(message)
-        return false
-      }
-      if (!callback.actionID && !genericResolved) {
-        genericResolved = true
-        callback.resolve(message)
-        return false
-      }
-      return true
-    })
-  }
-
-  function rejectCallbacks(sessionID: string, error?: unknown) {
-    const runtime = ensureRuntime(sessionID)
-    for (const callback of runtime.callbacks) {
-      callback.reject(error)
-    }
-    runtime.callbacks = []
+    SessionRunCoordinator.resolveAction(sessionID, message, actionID)
   }
 
   function startDispatch(sessionID: string) {
     void dispatch(sessionID).catch((error) => {
       log.error("dispatch failed", { sessionID, error })
-      rejectCallbacks(sessionID, error)
-      const runtime = ensureRuntime(sessionID)
-      runtime.abort = undefined
-      runtime.queue = []
-      runtime.guard = new QueryGuard()
-      publishQueue(sessionID)
-      publishQueryState(sessionID)
-      SessionStatus.set(sessionID, { type: "idle" })
+      SessionRunCoordinator.fail(sessionID, error)
     })
   }
 
   function nextQueuedAction(sessionID: string) {
-    const runtime = ensureRuntime(sessionID)
-    const next = runtime.queue.shift()
-    publishQueue(sessionID)
-    publishQueryState(sessionID, next?.type)
-    return next
+    return SessionRunCoordinator.next(sessionID)
   }
 
   function completedReplyForAction(
@@ -214,8 +111,16 @@ export namespace SessionPrompt {
     )
   }
 
+  function start(sessionID: string) {
+    const runtime = SessionRunCoordinator.ensure(sessionID)
+    if (runtime.abort) return
+    const controller = new AbortController()
+    runtime.abort = controller
+    return controller.signal
+  }
+
   export function assertNotBusy(sessionID: string) {
-    if (ensureRuntime(sessionID).guard.active) throw new Session.BusyError(sessionID)
+    if (SessionRunCoordinator.active(sessionID)) throw new Session.BusyError(sessionID)
   }
 
   export const PromptInput = z.object({
@@ -402,25 +307,9 @@ export namespace SessionPrompt {
     return parts
   }
 
-  function start(sessionID: string) {
-    const runtime = ensureRuntime(sessionID)
-    if (runtime.abort) return
-    const controller = new AbortController()
-    runtime.abort = controller
-    return controller.signal
-  }
-
   export function cancel(sessionID: string) {
     log.info("cancel", { sessionID })
-    const runtime = ensureRuntime(sessionID)
-    runtime.abort?.abort()
-    runtime.abort = undefined
-    runtime.queue = []
-    runtime.guard = new QueryGuard()
-    rejectCallbacks(sessionID, new Error("Session prompt cancelled"))
-    publishQueue(sessionID)
-    publishQueryState(sessionID)
-    SessionStatus.set(sessionID, { type: "idle" })
+    SessionRunCoordinator.cancel(sessionID, new Error("Session prompt cancelled"))
     return
   }
 
@@ -431,30 +320,20 @@ export namespace SessionPrompt {
   })
 
   async function dispatch(sessionID: string) {
-    const runtime = ensureRuntime(sessionID)
-    const generation = runtime.guard.tryDispatch()
-    if (generation === undefined) {
+    const begun = SessionRunCoordinator.tryBeginDispatch(sessionID)
+    if (!begun) {
       return
     }
-
-    publishQueryState(sessionID, runtime.queue[0]?.type)
-    const abort = start(sessionID)
-    if (!abort) {
-      runtime.guard.cancelDispatch(generation)
-      publishQueryState(sessionID)
+    const { generation, abort } = begun
+    if (!SessionRunCoordinator.startDispatch(sessionID, generation)) {
+      SessionRunCoordinator.cancelDispatch(sessionID, generation)
       return
     }
-    runtime.guard.start(generation)
-    publishQueryState(sessionID, runtime.queue[0]?.type)
     let activeAction: QueuedSessionAction | undefined
 
     using _ = defer(() => {
-      runtime.abort = undefined
-      runtime.guard.finish(generation)
-      publishQueue(sessionID)
-      publishQueryState(sessionID)
-      SessionStatus.set(sessionID, { type: "idle" })
-      if (runtime.queue.length > 0) {
+      SessionRunCoordinator.finishDispatch(sessionID, generation)
+      if (SessionRunCoordinator.pending(sessionID) > 0) {
         queueMicrotask(() => startDispatch(sessionID))
       }
     })
@@ -466,7 +345,7 @@ export namespace SessionPrompt {
       SessionStatus.set(sessionID, { type: "busy" })
       log.info("loop", { step, sessionID })
       if (abort.aborted) break
-      if (!activeAction && runtime.queue.length > 0) {
+      if (!activeAction && SessionRunCoordinator.pending(sessionID) > 0) {
         activeAction = nextQueuedAction(sessionID)
       }
       let msgs = await MessageV2.filterCompacted(MessageV2.stream(sessionID))
@@ -492,7 +371,7 @@ export namespace SessionPrompt {
       if (completedAction) {
         resolveCallbacks(sessionID, completedAction, activeAction?.id)
         activeAction = undefined
-        if (runtime.queue.length > 0) continue
+        if (SessionRunCoordinator.pending(sessionID) > 0) continue
       }
 
       if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
@@ -915,8 +794,10 @@ export namespace SessionPrompt {
       return match[1].trim().replace(/^['"]|['"]$/g, "").replace(/[},]+$/g, "").trim()
     }
 
+    const isShellCommandTool = (toolName: string) => toolName === "bash" || toolName === "shell"
+
     const mapStringToolInput = (toolName: string, value: string): Record<string, unknown> | undefined => {
-      if (toolName === "bash") {
+      if (isShellCommandTool(toolName)) {
         const extracted = extractKeyedValue(value, "command")
         if (extracted) return { command: extracted }
         return { command: value.trim() }
@@ -943,7 +824,7 @@ export namespace SessionPrompt {
       } catch {
         // fall through to raw string mapping
       }
-      if (toolName === "bash") {
+      if (isShellCommandTool(toolName)) {
         const command = extractKeyedValue(args, "command")
         const workdir = extractKeyedValue(args, "workdir")
         const description = extractKeyedValue(args, "description")

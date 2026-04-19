@@ -18,6 +18,7 @@ const READ_ONLY_TOOLS = new Set([
 const SESSION_TOOLS = new Set(["todowrite", "question", "plan_enter", "plan_exit"])
 const FILESYSTEM_TOOLS = new Set([
   "bash",
+  "shell",
   "edit",
   "write",
   "apply_patch",

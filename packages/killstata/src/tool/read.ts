@@ -12,6 +12,8 @@ import { resolveWorkspacePath } from "./analysis-path"
 import { createToolDisplay, displayPath } from "./analysis-display"
 import { numericSnapshotPreview } from "./analysis-tool-metadata"
 import type { NumericSnapshotDocument } from "./analysis-grounding"
+import { MessageV2 } from "@/session/message-v2"
+import { SessionInstruction } from "@/session/instruction"
 
 const DEFAULT_READ_LIMIT = 2000
 const NUMERIC_SNAPSHOT_READ_LIMIT = 300
@@ -135,7 +137,8 @@ export const ReadTool = Tool.define("read", {
         metadata: {
           preview: msg,
           truncated: false,
-          numericSnapshotPreview: undefined,
+          loaded: [] as string[],
+          numericSnapshotPreview: undefined as ReturnType<typeof numericSnapshotPreview> | undefined,
           display: createToolDisplay({
             summary: `Read ${displayPath(filepath, "name")}`,
             details: [`Source: ${displayPath(filepath)}`],
@@ -165,6 +168,9 @@ export const ReadTool = Tool.define("read", {
 
     const isBinary = await isBinaryFile(filepath, file)
     if (isBinary) throw new Error(`Cannot read binary file: ${filepath}`)
+
+    const sessionMessages = await MessageV2.filterCompacted(MessageV2.stream(ctx.sessionID)).catch(() => [])
+    const loaded = await SessionInstruction.resolve(sessionMessages, filepath, ctx.messageID).catch(() => [])
 
     const numericSnapshot = isNumericSnapshotPath(filepath)
     const limit = params.limit ?? (numericSnapshot ? NUMERIC_SNAPSHOT_READ_LIMIT : DEFAULT_READ_LIMIT)
@@ -213,6 +219,10 @@ export const ReadTool = Tool.define("read", {
     }
     output += "\n</file>"
 
+    if (loaded.length > 0) {
+      output += `\n\n<system-reminder>\n${loaded.map((item) => item.content).join("\n\n")}\n</system-reminder>`
+    }
+
     // just warms the lsp client
     LSP.touchFile(filepath, false)
     FileTime.read(ctx.sessionID, filepath)
@@ -223,6 +233,7 @@ export const ReadTool = Tool.define("read", {
       metadata: {
         preview,
         truncated,
+        loaded: loaded.map((item) => item.filepath),
         numericSnapshotPreview: parsedNumericSnapshot ? numericSnapshotPreview(parsedNumericSnapshot) : undefined,
         display: createToolDisplay({
           summary: `Read ${displayPath(filepath, "name")}`,

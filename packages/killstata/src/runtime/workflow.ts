@@ -2425,7 +2425,7 @@ export function resolveToolAvailability(input: {
   }
 
   if (input.policy.platformCapabilities?.remote) {
-    bundle = bundle.filter((tool) => !["bash", "edit", "write", "apply_patch"].includes(tool))
+    bundle = bundle.filter((tool) => !["bash", "shell", "edit", "write", "apply_patch"].includes(tool))
   }
 
   return {

@@ -13,7 +13,6 @@ import {
   buildFileStamp,
   createDatasetId,
   createDatasetManifest,
-  deliveryBundleDir,
   finalOutputsPath,
   findDatasetForSource,
   fingerprintSourceFile,
@@ -24,7 +23,6 @@ import {
   projectErrorsRoot,
   projectHealthRoot,
   projectTempRoot,
-  publishDeliveryOutput,
   readDatasetManifest,
   reportOutputPath,
   resolveArtifactInput,
@@ -1820,7 +1818,7 @@ except Exception as exc:
     }
 
     const publishedFiles: Array<{ label: string; relativePath: string }> = []
-    const deliveryBundlePath = datasetManifest ? deliveryBundleDir(effectiveRunId) : undefined
+    const deliveryBundlePath: string | undefined = undefined
 
     if (datasetManifest) {
       if (params.action === "import" || params.action === "filter" || params.action === "preprocess" || params.action === "rollback") {
@@ -1875,57 +1873,7 @@ except Exception as exc:
         })
       }
 
-      if (
-        deliveryBundlePath &&
-        (params.action === "filter" || params.action === "preprocess" || params.action === "rollback") &&
-        result.output_path &&
-        fs.existsSync(result.output_path)
-      ) {
-        const sourceName = path.basename(datasetManifest.sourcePath, path.extname(datasetManifest.sourcePath))
-        const description = stageDeliveryDescription({
-          action: params.action,
-          stageLabel: params.stageLabel,
-          filters: params.filters,
-          operations: params.operations,
-          rollbackStageId: params.stageId ?? sourceStage?.stageId,
-        })
-        const tempWorkbookPath = path.join(
-          projectTempRoot(),
-          `delivery_${params.action}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.xlsx`,
-        )
-        await writeDeliveryWorkbook({
-          sourcePath: result.output_path,
-          outputPath: tempWorkbookPath,
-          pythonCommand,
-        })
-        try {
-          const deliveryKey = `${params.action}_${result.stage_id ?? params.stageId ?? sourceStage?.stageId ?? Date.now()}_delivery_workbook`
-          const deliveryPath = publishDeliveryOutput({
-            manifest: datasetManifest,
-            key: deliveryKey,
-            label: deliveryKey,
-            sourcePath: tempWorkbookPath,
-            runId: effectiveRunId,
-            branch: "delivery",
-            stageId: result.stage_id ?? params.stageId ?? sourceStage?.stageId,
-            fileName: `${sanitizeDeliveryFilePart(sourceName)}_${description}.xlsx`,
-            metadata: {
-              action: params.action,
-              rows_after: result.rows_after,
-              columns_after: result.columns_after,
-              deliveryKind: "cleaned_workbook",
-            },
-          })
-          publishedFiles.push({
-            label: `${params.action}_delivery_workbook`,
-            relativePath: relativeWithinProject(deliveryPath),
-          })
-        } finally {
-          fs.rmSync(tempWorkbookPath, { force: true })
-        }
-      }
     }
-
     let output = `## Data ${params.action} completed\n\n`
     if (result.dataset_id) output += `Dataset: ${result.dataset_id}\n`
     if (datasetManifest || result.dataset_id || params.runId) output += `Run ID: ${effectiveRunId}\n`
@@ -2026,9 +1974,9 @@ except Exception as exc:
         deliveryBundleDir: deliveryBundlePath ? relativeWithinProject(deliveryBundlePath) : undefined,
         publishedFiles,
         finalOutputsPath:
-          datasetManifest && publishedFiles.length ? relativeWithinProject(finalOutputsPath(datasetManifest.sourcePath, effectiveRunId)) : undefined,
+          publishedFiles.length ? relativeWithinProject(finalOutputsPath(result.input_path ?? params.inputPath ?? outputPath, effectiveRunId)) : undefined,
         internalFinalOutputsPath:
-          datasetManifest && publishedFiles.length ? relativeWithinProject(finalOutputsPath(datasetManifest.sourcePath, effectiveRunId)) : undefined,
+          publishedFiles.length ? relativeWithinProject(finalOutputsPath(result.input_path ?? params.inputPath ?? outputPath, effectiveRunId)) : undefined,
         presentation: buildDataImportPresentation({
           action: params.action,
           result,

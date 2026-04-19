@@ -228,6 +228,11 @@ export namespace Command {
         agent: command.agent,
         model: command.model,
         description: command.description,
+        availability: command.availability,
+        queueBehavior: command.queueBehavior,
+        workflowAware: command.workflowAware,
+        immediate: command.immediate,
+        remoteSafe: command.remoteSafe,
         get template() {
           return command.template
         },

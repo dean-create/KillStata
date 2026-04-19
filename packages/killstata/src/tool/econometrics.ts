@@ -10,7 +10,6 @@ import { Question } from "../question"
 import {
   buildFileStamp,
   appendArtifact,
-  deliveryBundleDir,
   finalOutputsPath,
   inferRunId,
   projectErrorsRoot,
@@ -291,6 +290,8 @@ type PythonResult = {
   academic_table_workbook_path?: string
   academic_table_docx_path?: string
   delivery_report_docx_path?: string
+  final_analysis_workbook_path?: string
+  journal_paper_docx_path?: string
   profile_path?: string
   recommendation_path?: string
   effective_method?: string
@@ -946,6 +947,16 @@ type BaselineReportDocxResult = {
   error_log_path?: string
 }
 
+type WorkbookExportResult = {
+  success: boolean
+  output_path?: string
+  rows?: number
+  columns?: number
+  error?: string
+  traceback?: string
+  error_log_path?: string
+}
+
 function readClusterCountFromResult(result: PythonResult) {
   const gateCount = result.post_estimation_gates?.find(
     (gate) => gate.gate === "cluster_count" && typeof gate.diagnosticValue === "number",
@@ -1214,6 +1225,256 @@ async function generateBaselineReportDocx(input: {
   execution.cleanup()
   if (!result.success || !result.output_path) {
     throw new Error(`Failed to build report docx: ${result.error ?? "unknown error"}\n${result.traceback ?? ""}`)
+  }
+  return result.output_path
+}
+
+function buildJournalPaperDocxPayload(input: {
+  methodName: MethodName
+  outputPath: string
+  result: PythonResult
+  dependentVar?: string
+  treatmentVar?: string
+  covariates?: string[]
+  entityVar?: string
+  timeVar?: string
+  clusterVar?: string
+  qaGateReason?: string
+}) {
+  const dependentVar = input.dependentVar ?? "被解释变量"
+  const treatmentVar = input.treatmentVar ?? "核心解释变量"
+  const entityVar = input.entityVar ?? "个体"
+  const timeVar = input.timeVar ?? "时间"
+  const clusterVar = input.clusterVar ?? input.result.cluster_var ?? entityVar
+  const methodLabel = input.methodName === "panel_fe_regression" ? "双向固定效应模型" : input.methodName
+  const controls =
+    input.covariates?.length && input.covariates.length > 0
+      ? `控制变量包括${input.covariates.join("、")}。`
+      : "本次设定未额外加入控制变量。"
+  const sampleText = input.result.rows_used !== undefined ? `估计样本量为 ${input.result.rows_used}。` : "估计样本量见随附审计材料。"
+  const coefficientText =
+    input.result.coefficient !== undefined
+      ? `核心估计系数为 ${input.result.coefficient.toFixed(4)}`
+      : "核心估计系数见随附回归结果"
+  const stdErrorText = input.result.std_error !== undefined ? `，标准误为 ${input.result.std_error.toFixed(4)}` : ""
+  const pValueText = input.result.p_value !== undefined ? `，p 值为 ${input.result.p_value.toFixed(4)}` : ""
+  const r2Text = input.result.r_squared !== undefined ? `，模型 R2 为 ${input.result.r_squared.toFixed(4)}` : ""
+  const significanceText = input.result.p_value !== undefined ? `，统计显著性为${significanceDescription(input.result.p_value)}` : ""
+  const warnings = [...(input.result.warnings ?? [])]
+  if (input.qaGateReason && !warnings.includes(input.qaGateReason)) warnings.push(input.qaGateReason)
+
+  const sections: BaselineReportSection[] = [
+    {
+      heading: "摘要",
+      body:
+        `本文基于当前清洗后的分析样本，考察${treatmentVar}对${dependentVar}的影响。` +
+        `研究采用${methodLabel}进行估计，${sampleText}结果显示，${coefficientText}${stdErrorText}${pValueText}${r2Text}${significanceText}。`,
+    },
+    {
+      heading: "模型设定",
+      body:
+        `本文以${dependentVar}作为被解释变量，以${treatmentVar}作为核心解释变量。${controls}` +
+        `在面板设定下，模型控制${entityVar}固定效应和${timeVar}固定效应，并按${clusterVar}聚类计算标准误。`,
+    },
+    {
+      heading: "实证结果",
+      body:
+        `基准回归结果见随附三线表。${coefficientText}${stdErrorText}${pValueText}。` +
+        `该结果用于描述当前模型设定下核心变量与结果变量之间的统计关系，正式论文写作中仍应结合研究设计、识别假设和稳健性检验进行解释。`,
+    },
+    {
+      heading: "结论与讨论",
+      body:
+        `总体来看，本次估计为研究问题提供了可复核的基准证据。` +
+        `后续写作应进一步补充机制检验、异质性分析或稳健性检验，以增强结论的学术说服力。`,
+    },
+  ]
+
+  if (warnings.length) {
+    sections.push({
+      heading: "研究限制",
+      body: `需要说明的是，本次分析存在以下提示：${warnings.join("；")}。这些信息应在正式论文中如实披露。`,
+    })
+  }
+
+  return {
+    title: `期刊格式实证小论文：${methodLabel}`,
+    output_path: input.outputPath,
+    sections,
+    closing_note: "本文为基于本次回归结果自动生成的期刊格式小论文初稿，具体理论阐释和文献对话仍需人工补充。",
+  } satisfies BaselineReportDocxPayload
+}
+
+async function generateJournalPaperDocx(input: {
+  methodName: MethodName
+  outputDir: string
+  pythonCommand: string
+  result: PythonResult
+  dependentVar?: string
+  treatmentVar?: string
+  covariates?: string[]
+  entityVar?: string
+  timeVar?: string
+  clusterVar?: string
+  qaGateReason?: string
+}) {
+  const outputPath = path.join(input.outputDir, "journal_paper.docx")
+  const payload = buildJournalPaperDocxPayload({
+    methodName: input.methodName,
+    outputPath,
+    result: input.result,
+    dependentVar: input.dependentVar,
+    treatmentVar: input.treatmentVar,
+    covariates: input.covariates,
+    entityVar: input.entityVar,
+    timeVar: input.timeVar,
+    clusterVar: input.clusterVar,
+    qaGateReason: input.qaGateReason,
+  })
+
+  const execution = await runInlinePython({
+    command: input.pythonCommand,
+    script: buildBaselineReportDocxPythonScript(encodePythonPayload(payload)),
+    cwd: Instance.directory,
+  })
+  const { code, stdout } = execution
+  if (code !== 0) {
+    const failureArtifacts = persistPythonFailureArtifacts({
+      label: `${input.methodName}_journal_paper_docx_nonzero_exit`,
+      command: input.pythonCommand,
+      cwd: Instance.directory,
+      execution,
+      context: {
+        methodName: input.methodName,
+        outputDir: input.outputDir,
+      },
+    })
+    throw new Error(
+      `Failed to build journal paper docx with Python ${input.pythonCommand} (exit code ${code})` +
+        `\nCrash script: ${relativeWithinProject(failureArtifacts.scriptCopyPath)}` +
+        `\nStdout log: ${relativeWithinProject(failureArtifacts.stdoutPath)}` +
+        `\nStderr log: ${relativeWithinProject(failureArtifacts.stderrPath)}` +
+        `\nContext: ${relativeWithinProject(failureArtifacts.contextPath)}`,
+    )
+  }
+
+  const result = parsePythonResult<BaselineReportDocxResult>(stdout)
+  execution.cleanup()
+  if (!result.success || !result.output_path) {
+    throw new Error(`Failed to build journal paper docx: ${result.error ?? "unknown error"}\n${result.traceback ?? ""}`)
+  }
+  return result.output_path
+}
+
+function buildAnalysisWorkbookPythonScript(payloadB64: string) {
+  return `
+import base64
+import json
+import traceback
+from pathlib import Path
+
+import pandas as pd
+
+RESULT_PREFIX = "${PYTHON_RESULT_PREFIX}"
+ERRORS_DIR = r"${projectErrorsRoot().replace(/\\/g, "\\\\")}"
+
+def emit(result):
+    print(RESULT_PREFIX + json.dumps(result, ensure_ascii=False))
+
+def save_json(path, payload):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+
+def safe_error_path():
+    error_dir = Path(ERRORS_DIR)
+    error_dir.mkdir(parents=True, exist_ok=True)
+    return str(error_dir / "econometrics_analysis_workbook_error.json")
+
+def read_table(file_path):
+    path = Path(file_path)
+    suffix = path.suffix.lower()
+    if suffix in [".xlsx", ".xls"]:
+        return pd.read_excel(path)
+    if suffix == ".csv":
+        try:
+            return pd.read_csv(path, encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            return pd.read_csv(path, encoding="gbk")
+    if suffix == ".dta":
+        return pd.read_stata(path, convert_categoricals=False)
+    if suffix == ".parquet":
+        return pd.read_parquet(path)
+    raise ValueError(f"Unsupported analysis data format: {suffix}")
+
+try:
+    payload = json.loads(base64.b64decode("${payloadB64}").decode("utf-8"))
+    input_path = Path(payload["input_path"])
+    output_path = Path(payload["output_path"])
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df = read_table(input_path)
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="analysis_data", index=False)
+    emit({
+        "success": True,
+        "output_path": str(output_path),
+        "rows": int(len(df)),
+        "columns": int(len(df.columns)),
+    })
+except Exception as exc:
+    result = {
+        "success": False,
+        "error": str(exc),
+        "traceback": traceback.format_exc(),
+    }
+    error_path = safe_error_path()
+    result["error_log_path"] = error_path
+    save_json(error_path, result)
+    emit(result)
+`
+}
+
+async function generateFinalAnalysisWorkbook(input: {
+  dataPath: string
+  outputDir: string
+  pythonCommand: string
+  methodName: MethodName
+}) {
+  const outputPath = path.join(input.outputDir, "final_analysis_data.xlsx")
+  const execution = await runInlinePython({
+    command: input.pythonCommand,
+    script: buildAnalysisWorkbookPythonScript(encodePythonPayload({
+      input_path: input.dataPath,
+      output_path: outputPath,
+    })),
+    cwd: Instance.directory,
+  })
+  const { code, stdout } = execution
+  if (code !== 0) {
+    const failureArtifacts = persistPythonFailureArtifacts({
+      label: `${input.methodName}_analysis_workbook_nonzero_exit`,
+      command: input.pythonCommand,
+      cwd: Instance.directory,
+      execution,
+      context: {
+        methodName: input.methodName,
+        dataPath: input.dataPath,
+        outputDir: input.outputDir,
+      },
+    })
+    throw new Error(
+      `Failed to build final analysis workbook with Python ${input.pythonCommand} (exit code ${code})` +
+        `\nCrash script: ${relativeWithinProject(failureArtifacts.scriptCopyPath)}` +
+        `\nStdout log: ${relativeWithinProject(failureArtifacts.stdoutPath)}` +
+        `\nStderr log: ${relativeWithinProject(failureArtifacts.stderrPath)}` +
+        `\nContext: ${relativeWithinProject(failureArtifacts.contextPath)}`,
+    )
+  }
+
+  const result = parsePythonResult<WorkbookExportResult>(stdout)
+  execution.cleanup()
+  if (!result.success || !result.output_path) {
+    throw new Error(`Failed to build final analysis workbook: ${result.error ?? "unknown error"}\n${result.traceback ?? ""}`)
   }
   return result.output_path
 }
@@ -3898,7 +4159,7 @@ except Exception as e:
     }
 
     const publishedFiles: EconometricsPublishedFile[] = []
-    const deliveryBundlePath = datasetManifest ? deliveryBundleDir(effectiveRunId) : undefined
+    let deliveryBundlePath: string | undefined
 
     if (hasNonEmptyCoefficientTable(result.coefficients_path)) {
       try {
@@ -3981,6 +4242,13 @@ except Exception as e:
       "utf-8",
     )
 
+    result.final_analysis_workbook_path = await generateFinalAnalysisWorkbook({
+      dataPath,
+      outputDir,
+      pythonCommand,
+      methodName: params.methodName,
+    })
+
     if (params.methodName === "panel_fe_regression") {
       try {
         result.delivery_report_docx_path = await generateBaselineReportDocx({
@@ -4004,6 +4272,20 @@ except Exception as e:
       }
     }
 
+    result.journal_paper_docx_path = await generateJournalPaperDocx({
+      methodName: params.methodName,
+      outputDir,
+      pythonCommand,
+      result,
+      dependentVar: params.dependentVar,
+      treatmentVar: params.treatmentVar,
+      covariates: params.covariates,
+      entityVar: params.entityVar,
+      timeVar: params.timeVar,
+      clusterVar: params.clusterVar,
+      qaGateReason: qaGate.qaGateReason,
+    })
+
     if (datasetManifest) {
       appendArtifact(datasetManifest, {
         artifactId: `${params.methodName}_${Date.now()}`,
@@ -4026,73 +4308,64 @@ except Exception as e:
           suggested_repairs: result.suggested_repairs,
         },
       })
-
-      const stageKey = params.stageId ?? sourceStage?.stageId ?? result.stage_id ?? "stage"
-      const publish = (key: string, label: string, sourcePath: string | undefined, fileName: string) => {
-        if (!sourcePath) return
-        const visiblePath = publishDeliveryOutput({
-          manifest: datasetManifest,
-          key: `${key}_${stageKey}`,
-          label,
-          sourcePath,
-          runId: effectiveRunId,
-          branch: "delivery",
-          stageId: params.stageId ?? sourceStage?.stageId,
-          fileName,
-          metadata: {
-            method: params.methodName,
-            deliveryKind: label,
-          },
-        })
-        publishedFiles.push({
-          label,
-          relativePath: relativeWithinProject(visiblePath),
-        })
-      }
-
-      publish(
-        `${params.methodName}_coefficient_workbook`,
-        `${params.methodName}_coefficient_workbook`,
-        result.workbook_path,
-        `coefficient_table_${sanitizeDeliveryFilePart(params.methodName)}.xlsx`,
-      )
-      publish(
-        `${params.methodName}_academic_markdown`,
-        `${params.methodName}_table_markdown`,
-        result.academic_table_markdown_path,
-        `three_line_table_${sanitizeDeliveryFilePart(params.methodName)}.md`,
-      )
-      publish(
-        `${params.methodName}_delivery_summary`,
-        `${params.methodName}_delivery_summary`,
-        conciseResultPath,
-        `回归结果_${sanitizeDeliveryFilePart(params.methodName)}.md`,
-      )
-      publish(
-        `${params.methodName}_academic_latex`,
-        `${params.methodName}_table_latex`,
-        result.academic_table_latex_path,
-        `三线表_${sanitizeDeliveryFilePart(params.methodName)}.tex`,
-      )
-      publish(
-        `${params.methodName}_academic_docx`,
-        `${params.methodName}_table_docx`,
-        result.academic_table_docx_path,
-        `三线表_${sanitizeDeliveryFilePart(params.methodName)}.docx`,
-      )
-      publish(
-        `${params.methodName}_report_docx`,
-        `${params.methodName}_report_docx`,
-        result.delivery_report_docx_path,
-        "结果汇报.docx",
-      )
-      publish(
-        `${params.methodName}_academic_xlsx`,
-        `${params.methodName}_table_xlsx`,
-        result.academic_table_workbook_path,
-        `three_line_table_${sanitizeDeliveryFilePart(params.methodName)}.xlsx`,
-      )
     }
+
+    const stageKey = params.stageId ?? sourceStage?.stageId ?? result.stage_id ?? "stage"
+    const publish = (key: string, label: string, sourcePath: string | undefined, fileName: string) => {
+      if (!sourcePath) return
+      const visiblePath = publishDeliveryOutput({
+        manifest: datasetManifest,
+        contextSourcePath: dataPath,
+        datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
+        key: `${key}_${stageKey}`,
+        label,
+        sourcePath,
+        runId: effectiveRunId,
+        branch: "delivery",
+        stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
+        fileName,
+        metadata: {
+          method: params.methodName,
+          deliveryKind: label,
+        },
+      })
+      deliveryBundlePath ??= path.dirname(visiblePath)
+      publishedFiles.push({
+        label,
+        relativePath: relativeWithinProject(visiblePath),
+      })
+    }
+
+    publish(
+      `${params.methodName}_delivery_summary`,
+      `${params.methodName}_delivery_summary`,
+      conciseResultPath,
+      `回归结果_${sanitizeDeliveryFilePart(params.methodName)}.md`,
+    )
+    publish(
+      `${params.methodName}_analysis_workbook`,
+      `${params.methodName}_analysis_workbook`,
+      result.final_analysis_workbook_path,
+      `计量分析数据_${sanitizeDeliveryFilePart(params.methodName)}.xlsx`,
+    )
+    publish(
+      `${params.methodName}_academic_latex`,
+      `${params.methodName}_table_latex`,
+      result.academic_table_latex_path,
+      `三线表_${sanitizeDeliveryFilePart(params.methodName)}.tex`,
+    )
+    publish(
+      `${params.methodName}_academic_docx`,
+      `${params.methodName}_table_docx`,
+      result.academic_table_docx_path,
+      `三线表_${sanitizeDeliveryFilePart(params.methodName)}.docx`,
+    )
+    publish(
+      `${params.methodName}_journal_paper`,
+      `${params.methodName}_journal_paper`,
+      result.journal_paper_docx_path,
+      `期刊小论文_${sanitizeDeliveryFilePart(params.methodName)}.docx`,
+    )
 
     if (result.output_path) {
       fs.writeFileSync(result.output_path, JSON.stringify(result, null, 2), "utf-8")
@@ -4154,11 +4427,13 @@ except Exception as e:
     if (result.summary_path) output += `- Model summary: ${relativeWithinProject(result.summary_path)}\n`
     if (result.narrative_path) output += `- Narrative summary: ${relativeWithinProject(result.narrative_path)}\n`
     if (result.numeric_snapshot_path) output += `- Numeric snapshot: ${relativeWithinProject(result.numeric_snapshot_path)}\n`
+    if (result.final_analysis_workbook_path) output += `- Final analysis Excel: ${relativeWithinProject(result.final_analysis_workbook_path)}\n`
     if (result.academic_table_markdown_path) output += `- Three-line table Markdown: ${relativeWithinProject(result.academic_table_markdown_path)}\n`
     if (result.academic_table_latex_path) output += `- Three-line table LaTeX: ${relativeWithinProject(result.academic_table_latex_path)}\n`
     if (result.academic_table_workbook_path) output += `- Three-line table Excel: ${relativeWithinProject(result.academic_table_workbook_path)}\n`
     if (result.academic_table_docx_path) output += `- Three-line table Word: ${relativeWithinProject(result.academic_table_docx_path)}\n`
     if (result.delivery_report_docx_path) output += `- Result report Word: ${relativeWithinProject(result.delivery_report_docx_path)}\n`
+    if (result.journal_paper_docx_path) output += `- Journal-style paper Word: ${relativeWithinProject(result.journal_paper_docx_path)}\n`
     output += `- Concise result summary: ${relativeWithinProject(conciseResultPath)}\n`
     if (result.output_path) output += `- Result JSON: ${relativeWithinProject(result.output_path)}\n`
     if (result.resolved_python_executable) output += `- Python interpreter: ${result.resolved_python_executable}\n`
@@ -4187,9 +4462,9 @@ except Exception as e:
       deliveryBundleDir: deliveryBundlePath ? relativeWithinProject(deliveryBundlePath) : undefined,
       publishedFiles,
       finalOutputsPath:
-        datasetManifest && publishedFiles.length ? relativeWithinProject(finalOutputsPath(datasetManifest.sourcePath, effectiveRunId)) : undefined,
+        publishedFiles.length ? relativeWithinProject(finalOutputsPath(dataPath, effectiveRunId)) : undefined,
       internalFinalOutputsPath:
-        datasetManifest && publishedFiles.length ? relativeWithinProject(finalOutputsPath(datasetManifest.sourcePath, effectiveRunId)) : undefined,
+        publishedFiles.length ? relativeWithinProject(finalOutputsPath(dataPath, effectiveRunId)) : undefined,
       presentation: buildEconometricsPresentation({
         params,
         result,

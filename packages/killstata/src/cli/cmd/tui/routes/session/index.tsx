@@ -66,6 +66,7 @@ import { useKV } from "../../context/kv.tsx"
 import { Editor } from "../../util/editor"
 import stripAnsi from "strip-ansi"
 import { Footer } from "./footer.tsx"
+import { SubagentFooter } from "./subagent-footer.tsx"
 import { usePromptRef } from "../../context/prompt"
 import { useExit } from "../../context/exit"
 import { Filesystem } from "@/util/filesystem"
@@ -131,6 +132,7 @@ const context = createContext<{
   showThinking: () => boolean
   showTimestamps: () => boolean
   showDetails: () => boolean
+  showGenericToolOutput: () => boolean
   diffWrapMode: () => "word" | "none"
   sync: ReturnType<typeof useSync>
 }>()
@@ -180,6 +182,7 @@ export function Session() {
   const [showThinking, setShowThinking] = kv.signal("thinking_visibility", false)
   const [timestamps, setTimestamps] = kv.signal<"hide" | "show">("timestamps", "hide")
   const [showDetails, setShowDetails] = kv.signal("tool_details_visibility", false)
+  const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
   const [showAssistantMetadata, setShowAssistantMetadata] = kv.signal("assistant_metadata_visibility", true)
   const [showScrollbar, setShowScrollbar] = kv.signal("scrollbar_visible", false)
   const [contentOverflows, setContentOverflows] = createSignal(false)
@@ -333,6 +336,7 @@ export function Session() {
     showThinking()
     showTimestamps()
     showDetails()
+    showGenericToolOutput()
     setTimeout(refreshScrollbarVisibility, 0)
   })
 
@@ -615,6 +619,19 @@ export function Session() {
       category: "Session",
       onSelect: (dialog) => {
         setShowDetails((prev) => !prev)
+        dialog.clear()
+      },
+    },
+    {
+      title: showGenericToolOutput() ? "Hide generic tool output" : "Show generic tool output",
+      value: "session.toggle.generic_tool_output",
+      category: "Session",
+      slash: {
+        name: "tool-output",
+        aliases: ["generic-tool-output"],
+      },
+      onSelect: (dialog) => {
+        setShowGenericToolOutput((prev) => !prev)
         dialog.clear()
       },
     },
@@ -981,6 +998,45 @@ export function Session() {
 
   const dialog = useDialog()
   const renderer = useRenderer()
+  const runtimeQuery = createMemo(() => sync.data.runtimeQuery[route.sessionID])
+  const runtimeQueue = createMemo(() => sync.data.runtimeQueue[route.sessionID])
+  const workflow = createMemo(() => sync.data.workflow[route.sessionID])
+  const promptHint = createMemo(() => {
+    const workflowState = workflow()
+    if (workflowState?.repairOnly || workflowState?.verifierStatus === "block") {
+      return <text fg={theme.error}>verifier blocked; repair the failed stage before report</text>
+    }
+    const query = runtimeQuery()
+    if (query && query.phase !== "idle") {
+      return (
+        <text fg={theme.textMuted}>
+          {query.phase}
+          {query.action ? `:${query.action}` : ""}
+          {(runtimeQueue()?.pending ?? 0) > 0 ? ` queue ${runtimeQueue()?.pending}` : ""}
+        </text>
+      )
+    }
+    return undefined
+  })
+  const promptRight = createMemo(() => {
+    const workflowState = workflow()
+    if (!workflowState?.activeStage && !workflowState?.verifierStatus && !workflowState?.activeCoordinatorAgent) return
+    return (
+      <>
+        <Show when={workflowState.activeStage}>
+          <text fg={theme.textMuted}>{workflowState.activeStage}</text>
+        </Show>
+        <Show when={workflowState.verifierStatus}>
+          <text fg={workflowState.verifierStatus === "block" ? theme.error : theme.textMuted}>
+            verifier {workflowState.verifierStatus}
+          </text>
+        </Show>
+        <Show when={workflowState.activeCoordinatorAgent}>
+          <text fg={theme.textMuted}>{workflowState.activeCoordinatorAgent}</text>
+        </Show>
+      </>
+    )
+  })
 
   // snap to bottom when session changes
   createEffect(on(() => route.sessionID, toBottom))
@@ -996,6 +1052,7 @@ export function Session() {
         showThinking,
         showTimestamps,
         showDetails,
+        showGenericToolOutput,
         diffWrapMode,
         sync,
       }}
@@ -1127,9 +1184,11 @@ export function Session() {
               <Show when={permissions().length === 0 && questions().length > 0}>
                 <QuestionPrompt request={questions()[0]} />
               </Show>
+              <SubagentFooter />
               <Prompt
                 visible={!session()?.parentID && permissions().length === 0 && questions().length === 0}
                 ref={(r) => {
+                  if (!r) return
                   prompt = r
                   promptRef.set(r)
                   // Apply initial prompt when prompt component mounts (e.g., from fork)
@@ -1142,7 +1201,10 @@ export function Session() {
                   toBottom()
                 }}
                 sessionID={route.sessionID}
+                hint={promptHint()}
+                right={promptRight()}
               />
+              <Footer />
             </box>
           </Show>
           <Toast />
@@ -1665,7 +1727,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
   return (
     <Show when={!shouldHide()}>
       <Switch>
-        <Match when={props.part.tool === "bash"}>
+        <Match when={props.part.tool === "bash" || props.part.tool === "shell"}>
           <Bash {...toolprops} />
         </Match>
         <Match when={props.part.tool === "glob"}>
@@ -1725,7 +1787,7 @@ type ToolProps<T extends Tool.Info> = {
 }
 function GenericTool(props: ToolProps<any>) {
   const ctx = use()
-  const { theme } = useTheme()
+  const { theme, syntax } = useTheme()
   const summary = createMemo(() => {
     const raw =
       renderToolDisplay(props.metadata, {
@@ -1747,11 +1809,23 @@ function GenericTool(props: ToolProps<any>) {
 
   return (
     <Switch>
-      <Match when={ctx.showDetails() && details()}>
+      <Match when={(ctx.showDetails() || ctx.showGenericToolOutput()) && (details() || props.output)}>
         <BlockTool title={`# ${props.tool}`} part={props.part}>
           <box gap={1}>
             <text fg={theme.text}>{summary()}</text>
-            <text fg={theme.textMuted}>{details()}</text>
+            <Show when={details()}>
+              <text fg={theme.textMuted}>{details()}</text>
+            </Show>
+            <Show when={ctx.showGenericToolOutput() && props.output}>
+              <code
+                filetype="text"
+                drawUnstyledText={false}
+                streaming={false}
+                syntaxStyle={syntax()}
+                content={props.output ?? ""}
+                fg={theme.textMuted}
+              />
+            </Show>
           </box>
         </BlockTool>
       </Match>

@@ -28,6 +28,7 @@ import { useArgs } from "./args"
 import { batch, onMount } from "solid-js"
 import { Log } from "@/util/log"
 import type { Path } from "@killstata/sdk"
+import { appendPartDelta, type RuntimeQueryState, type RuntimeQueueState, type WorkflowTuiState } from "./runtime-state"
 
 export const { use: useSync, provider: SyncProvider } = createSimpleContext({
   name: "Sync",
@@ -51,26 +52,9 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       session_status: {
         [sessionID: string]: SessionStatus
       }
-      workflow: {
-        [sessionID: string]: {
-          workflowRunId?: string
-          activeStage?: string
-          activeStageId?: string
-          approvalStatus?: "required" | "approved" | "declined"
-          currentChecklistItem?: {
-            id: string
-            label: string
-            status: "pending" | "in_progress" | "completed" | "blocked"
-          }
-          analysisChecklist: {
-            id: string
-            label: string
-            status: "pending" | "in_progress" | "completed" | "blocked"
-            linkedStageId?: string
-            summary?: string
-          }[]
-        }
-      }
+      runtimeQuery: Record<string, RuntimeQueryState>
+      runtimeQueue: Record<string, RuntimeQueueState>
+      workflow: Record<string, WorkflowTuiState>
       session_diff: {
         [sessionID: string]: Snapshot.FileDiff[]
       }
@@ -110,6 +94,8 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       provider_default: {},
       session: [],
       session_status: {},
+      runtimeQuery: {},
+      runtimeQueue: {},
       workflow: {},
       session_diff: {},
       todo: {},
@@ -349,11 +335,46 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     sdk.event.on("runtime.workflow.state" as any, (event: any) => {
       setStore("workflow", event.properties.sessionID, {
         workflowRunId: event.properties.workflowRunId,
+        branch: event.properties.branch,
         activeStage: event.properties.activeStage,
         activeStageId: event.properties.activeStageId,
+        activeCoordinatorAgent: event.properties.activeCoordinatorAgent,
+        repairOnly: event.properties.repairOnly,
+        latestFailureCode: event.properties.latestFailureCode,
+        verifierStatus: event.properties.verifierStatus,
+        trustedArtifacts: event.properties.trustedArtifacts ?? [],
+        rerunTargetStageId: event.properties.rerunTargetStageId,
         approvalStatus: event.properties.approvalStatus,
         currentChecklistItem: event.properties.currentChecklistItem,
         analysisChecklist: event.properties.analysisChecklist ?? [],
+      })
+    })
+
+    sdk.event.on("message.part.delta" as any, (event: any) => {
+      const parts = store.part[event.properties.messageID]
+      if (!parts) return
+      setStore(
+        "part",
+        event.properties.messageID,
+        produce((draft) => {
+          appendPartDelta(draft, event.properties.partID, event.properties.field as keyof Part, event.properties.delta)
+        }),
+      )
+    })
+
+    sdk.event.on("runtime.query.state" as any, (event: any) => {
+      setStore("runtimeQuery", event.properties.sessionID, {
+        phase: event.properties.phase,
+        generation: event.properties.generation,
+        pending: event.properties.pending,
+        action: event.properties.action,
+      })
+    })
+
+    sdk.event.on("runtime.queue.updated" as any, (event: any) => {
+      setStore("runtimeQueue", event.properties.sessionID, {
+        pending: event.properties.pending,
+        actions: event.properties.actions ?? [],
       })
     })
 
@@ -361,7 +382,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     const args = useArgs()
 
     async function bootstrap() {
-      console.log("bootstrapping")
       const start = Date.now() - 30 * 24 * 60 * 60 * 1000
       const sessionListPromise = sdk.client.session
         .list({ start: start })
