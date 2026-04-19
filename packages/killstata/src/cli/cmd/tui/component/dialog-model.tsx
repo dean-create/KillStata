@@ -7,6 +7,7 @@ import { useDialog } from "@tui/ui/dialog"
 import { createDialogProviderOptions, DialogProvider } from "./dialog-provider"
 import { useKeybind } from "../context/keybind"
 import * as fuzzysort from "fuzzysort"
+import { isUserSelectableProvider } from "../../../../provider/provider-catalog"
 
 export function useConnected() {
   const sync = useSync()
@@ -47,6 +48,7 @@ export function DialogModel(props: { providerID?: string }) {
       ? favorites.flatMap((item) => {
           const provider = sync.data.provider.find((x) => x.id === item.providerID)
           if (!provider) return []
+          if (!isUserSelectableProvider(provider)) return []
           const model = provider.models[item.modelID]
           if (!model) return []
           return [
@@ -78,6 +80,7 @@ export function DialogModel(props: { providerID?: string }) {
       ? recentList.flatMap((item) => {
           const provider = sync.data.provider.find((x) => x.id === item.providerID)
           if (!provider) return []
+          if (!isUserSelectableProvider(provider)) return []
           const model = provider.models[item.modelID]
           if (!model) return []
           return [
@@ -107,7 +110,7 @@ export function DialogModel(props: { providerID?: string }) {
 
     const providerOptions = pipe(
       sync.data.provider,
-      (providers) => providers.filter((provider) => provider.id !== "killstata"),
+      (providers) => providers.filter((provider) => provider.id !== "killstata" && isUserSelectableProvider(provider)),
       sortBy((provider) => provider.name),
       flatMap((provider) =>
         pipe(

@@ -35,12 +35,19 @@ export const PROVIDER_PRIORITY: Record<string, number> = Object.fromEntries(
   POPULAR_PROVIDER_ORDER.map((providerID, index) => [providerID, index + 1]),
 )
 
+const HIDDEN_PROVIDER_PATTERNS = [/\bcoding[- ]plan\b/i, /\btoken[- ]plan\b/i]
+
 export function providerPriority(providerID: string) {
   return PROVIDER_PRIORITY[providerID] ?? 99
 }
 
 export function isPopularProvider(providerID: string) {
   return providerID in PROVIDER_PRIORITY
+}
+
+export function isUserSelectableProvider(provider: { id: string; name?: string }) {
+  const haystacks = [provider.id, provider.name ?? ""]
+  return !HIDDEN_PROVIDER_PATTERNS.some((pattern) => haystacks.some((value) => pattern.test(value)))
 }
 
 export function supportsApiKeyProvider(

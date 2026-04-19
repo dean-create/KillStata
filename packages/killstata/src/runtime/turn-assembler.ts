@@ -222,6 +222,9 @@ export class TurnAssembler {
       }
 
       case "text-start":
+        if (this.currentText) {
+          await this.finalizeText()
+        }
         this.currentText = {
           id: Identifier.ascending("part"),
           messageID: this.input.assistantMessage.id,
@@ -236,7 +239,9 @@ export class TurnAssembler {
         return
 
       case "text-delta":
-        if (!this.currentText) return
+        if (!this.currentText) {
+          this.currentText = this.createTextPart(event.providerMetadata as Record<string, unknown> | undefined)
+        }
         this.currentText.text += event.text
         if (event.providerMetadata) this.currentText.metadata = event.providerMetadata as Record<string, unknown>
         if (this.currentText.text) {
@@ -248,6 +253,9 @@ export class TurnAssembler {
         return
 
       case "text-end":
+        if (!this.currentText) {
+          this.currentText = this.createTextPart(event.providerMetadata as Record<string, unknown> | undefined)
+        }
         await this.finalizeText(event.providerMetadata as Record<string, unknown> | undefined)
         return
 
@@ -332,6 +340,20 @@ export class TurnAssembler {
       return { _raw: input, _parseError: "Invalid JSON" }
     }
     return { _raw: String(input), _parseError: "Unexpected input type" }
+  }
+
+  private createTextPart(providerMetadata?: Record<string, unknown>) {
+    return {
+      id: Identifier.ascending("part"),
+      messageID: this.input.assistantMessage.id,
+      sessionID: this.input.assistantMessage.sessionID,
+      type: "text" as const,
+      text: "",
+      time: {
+        start: Date.now(),
+      },
+      metadata: providerMetadata,
+    }
   }
 
   private async finalizeText(providerMetadata?: Record<string, unknown>) {

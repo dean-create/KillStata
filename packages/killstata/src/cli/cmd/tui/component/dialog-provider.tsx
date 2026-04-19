@@ -21,6 +21,7 @@ import {
   normalizeProviderID,
   providerPriority,
   supportsApiKeyProvider,
+  isUserSelectableProvider,
 } from "../../../../provider/provider-catalog"
 
 export function createDialogProviderOptions() {
@@ -33,6 +34,7 @@ export function createDialogProviderOptions() {
       sync.data.provider_next.all,
       (providers) =>
         providers.filter((provider) => provider.id !== "killstata").filter((provider) => {
+          if (!isUserSelectableProvider(provider)) return false
           const methods = sync.data.provider_auth[provider.id] ?? []
           return supportsApiKeyProvider(provider, methods)
         }),

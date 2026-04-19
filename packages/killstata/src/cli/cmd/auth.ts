@@ -11,6 +11,7 @@ import { Global } from "../../global"
 import { Instance } from "../../project/instance"
 import {
   buildCustomProviderConfig,
+  isUserSelectableProvider,
   normalizeApiKey,
   normalizeBaseURL,
   normalizeProviderID,
@@ -120,7 +121,12 @@ export const AuthLoginCommand = cmd({
         const providers = await ModelsDev.get().then((x) => {
           const filtered: Record<string, (typeof x)[string]> = {}
           for (const [key, value] of Object.entries(x)) {
-            if ((enabled ? enabled.has(key) : true) && !disabled.has(key) && supportsApiKeyProvider(value)) {
+            if (
+              (enabled ? enabled.has(key) : true) &&
+              !disabled.has(key) &&
+              isUserSelectableProvider(value) &&
+              supportsApiKeyProvider(value)
+            ) {
               filtered[key] = value
             }
           }

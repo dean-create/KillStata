@@ -8,6 +8,7 @@ import { Config } from "../../config/config"
 import { ModelsDev } from "../../provider/models"
 import {
   buildCustomProviderConfig,
+  isUserSelectableProvider,
   normalizeApiKey,
   normalizeBaseURL,
   normalizeProviderID,
@@ -634,6 +635,7 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
   const providers: ModelsDev.Provider[] = Object.values(providerMap)
     .filter((provider) => (enabled ? enabled.has(provider.id) : true) && !disabled.has(provider.id))
     .filter((provider) => provider.id !== "killstata")
+    .filter((provider) => isUserSelectableProvider(provider))
     .filter((provider) => supportsApiKeyProvider(provider))
     .sort((a, b) => {
       return providerNameCollator.compare(providerDisplaySortKey(a), providerDisplaySortKey(b))
