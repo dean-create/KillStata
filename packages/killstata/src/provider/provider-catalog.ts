@@ -37,6 +37,43 @@ export const PROVIDER_PRIORITY: Record<string, number> = Object.fromEntries(
 
 const HIDDEN_PROVIDER_PATTERNS = [/\bcoding[- ]plan\b/i, /\btoken[- ]plan\b/i]
 
+type ProviderDisplayInput = {
+  id: string
+  name?: string
+  api?: string
+  env?: string[]
+}
+
+const PROVIDER_DISPLAY_OVERRIDES: Record<
+  string,
+  {
+    name: string
+    region: string
+    note: string
+  }
+> = {
+  alibaba: {
+    name: "Alibaba International (DashScope)",
+    region: "International",
+    note: "Use Alibaba Cloud international DashScope keys",
+  },
+  "alibaba-cn": {
+    name: "Alibaba China (DashScope/Bailian)",
+    region: "China",
+    note: "Use mainland China DashScope / Bailian keys",
+  },
+  minimax: {
+    name: "MiniMax Global (minimax.io)",
+    region: "Global",
+    note: "Use keys issued for platform.minimax.io",
+  },
+  "minimax-cn": {
+    name: "MiniMax China (minimaxi.com)",
+    region: "China",
+    note: "Use keys issued for platform.minimaxi.com",
+  },
+}
+
 export function providerPriority(providerID: string) {
   return PROVIDER_PRIORITY[providerID] ?? 99
 }
@@ -75,6 +112,34 @@ export function normalizeProviderID(value: string) {
 
 export function normalizeBaseURL(value: string) {
   return value.trim().replace(/\/+$/, "")
+}
+
+export function providerEndpointHost(provider: ProviderDisplayInput) {
+  if (!provider.api) return
+  try {
+    return new URL(provider.api).host
+  } catch {
+    return provider.api.replace(/^https?:\/\//, "").split("/")[0]
+  }
+}
+
+export function providerDisplayName(provider: ProviderDisplayInput) {
+  return PROVIDER_DISPLAY_OVERRIDES[provider.id]?.name ?? provider.name ?? provider.id
+}
+
+export function providerDisplayDescription(provider: ProviderDisplayInput) {
+  const override = PROVIDER_DISPLAY_OVERRIDES[provider.id]
+  const host = providerEndpointHost(provider)
+  const parts = [
+    override?.region,
+    host ? `endpoint: ${host}` : undefined,
+    provider.env?.[0] ? `key: ${provider.env[0]}` : "API key",
+  ].filter((item): item is string => !!item)
+  return parts.join(" | ")
+}
+
+export function providerDisplayNote(provider: ProviderDisplayInput) {
+  return PROVIDER_DISPLAY_OVERRIDES[provider.id]?.note
 }
 
 export function buildCustomProviderConfig(input: {

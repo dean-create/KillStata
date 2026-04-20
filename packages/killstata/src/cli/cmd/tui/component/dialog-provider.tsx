@@ -19,6 +19,9 @@ import {
   normalizeApiKey,
   normalizeBaseURL,
   normalizeProviderID,
+  providerDisplayDescription,
+  providerDisplayName,
+  providerDisplayNote,
   providerPriority,
   supportsApiKeyProvider,
   isUserSelectableProvider,
@@ -40,16 +43,17 @@ export function createDialogProviderOptions() {
         }),
       sortBy(
         (x) => providerPriority(x.id),
-        (x) => x.name,
+        (x) => providerDisplayName(x),
       ),
       map((provider) => {
         const isConnected = connected().has(provider.id)
+        const note = providerDisplayNote(provider)
         return {
-          title: provider.name,
+          title: providerDisplayName(provider),
           value: provider.id,
-          description: "(API key)",
+          description: providerDisplayDescription(provider),
           category: isPopularProvider(provider.id) ? "Popular" : "Other",
-          footer: isConnected ? "Connected" : undefined,
+          footer: isConnected ? `Connected${note ? ` | ${note}` : ""}` : note,
           async onSelect() {
             const methods = (sync.data.provider_auth[provider.id] ?? []).filter((method) => method.type === "api")
             const apiMethods = methods.length
@@ -81,7 +85,14 @@ export function createDialogProviderOptions() {
             if (index == null) return
             const method = apiMethods[index]
             if (method.type === "api") {
-              return dialog.replace(() => <ApiMethod providerID={provider.id} title={method.label} />)
+              return dialog.replace(() => (
+                <ApiMethod
+                  providerID={provider.id}
+                  title={`${providerDisplayName(provider)} ${method.label}`}
+                  description={providerDisplayDescription(provider)}
+                  note={providerDisplayNote(provider)}
+                />
+              ))
             }
           },
         }
@@ -92,7 +103,7 @@ export function createDialogProviderOptions() {
       value: "__custom__",
       description: "(API key + base URL)",
       category: "Other",
-      footer: undefined,
+      footer: "",
       async onSelect() {
         const providerName = await DialogPrompt.show(dialog, "Provider name", {
           placeholder: "My Provider",
@@ -275,6 +286,8 @@ function CodeMethod(props: CodeMethodProps) {
 interface ApiMethodProps {
   providerID: string
   title: string
+  description?: string
+  note?: string
 }
 function ApiMethod(props: ApiMethodProps) {
   const dialog = useDialog()
@@ -285,7 +298,17 @@ function ApiMethod(props: ApiMethodProps) {
     <DialogPrompt
       title={props.title}
       placeholder="API key"
-      description={() => <text>Paste your API key. Subscription logins are not supported in this build.</text>}
+      description={() => (
+        <box gap={1}>
+          <text>Paste your API key. Subscription logins are not supported in this build.</text>
+          <Show when={props.description}>
+            <text>{props.description}</text>
+          </Show>
+          <Show when={props.note}>
+            <text>{props.note}</text>
+          </Show>
+        </box>
+      )}
       onConfirm={async (value) => {
         const key = normalizeApiKey(value)
         if (!key) return

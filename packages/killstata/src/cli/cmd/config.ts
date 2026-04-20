@@ -12,6 +12,9 @@ import {
   normalizeApiKey,
   normalizeBaseURL,
   normalizeProviderID,
+  providerDisplayDescription,
+  providerDisplayName,
+  providerDisplayNote,
   supportsApiKeyProvider,
 } from "../../provider/provider-catalog"
 import { ensureSkillDirectories, userSkillsRoot } from "../../skill"
@@ -75,7 +78,7 @@ const providerNameCollator = new Intl.Collator("en", {
 })
 
 function providerDisplaySortKey(provider: ModelsDev.Provider) {
-  return (provider.name || provider.id)
+  return providerDisplayName(provider)
     .replace(/\s+\((china|cn)\)$/i, "")
     .replace(/^(the)\s+/i, "")
     .trim()
@@ -99,8 +102,26 @@ function joinApiPath(baseURL: string, pathname: string) {
   return `${normalizeBaseURL(baseURL)}${pathname.startsWith("/") ? pathname : `/${pathname}`}`
 }
 
+function sanitizeValidationDetail(detail: string, status?: number) {
+  const htmlTitle = detail.match(/<title[^>]*>(.*?)<\/title>/is)?.[1]
+  const htmlHeading = detail.match(/<h1[^>]*>(.*?)<\/h1>/is)?.[1]
+  const candidate = htmlTitle || htmlHeading || detail
+  const stripped = candidate
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim()
+  return stripped || (status ? `${status} error` : "Unknown provider response")
+}
+
 function normalizeValidationError(providerName: string, detail: string, status?: number) {
-  const lowered = detail.toLowerCase()
+  const clean = sanitizeValidationDetail(detail, status)
+  const lowered = clean.toLowerCase()
   if (
     lowered.includes("incorrect api key provided") ||
     lowered.includes("apikeyerror") ||
@@ -114,7 +135,17 @@ function normalizeValidationError(providerName: string, detail: string, status?:
     return `${providerName} API key is invalid or not active. Paste the full API key and try again.`
   }
 
-  return `${providerName} API key validation failed: ${detail}`
+  if (status === 404 || lowered.includes("404 not found")) {
+    return `${providerName} API key validation endpoint returned 404 Not Found. This usually means the selected provider endpoint does not support /models verification, or the region/base URL is wrong. Check the provider region and try again.`
+  }
+
+  return `${providerName} API key validation failed: ${clean}`
+}
+
+function supportsModelsEndpointValidation(provider: ModelsDev.Provider) {
+  const id = provider.id.toLowerCase()
+  if (id === "minimax" || id === "minimax-cn" || id.startsWith("minimax-")) return false
+  return true
 }
 
 async function validateApiKeyWithModelsEndpoint(input: {
@@ -156,7 +187,7 @@ async function validateProviderApiKey(input: {
   baseURL?: string
 }): Promise<ApiKeyValidationResult> {
   const baseURL = input.baseURL || input.provider.api
-  const providerName = input.provider.name
+  const providerName = providerDisplayName(input.provider)
 
   if (input.provider.id === "google") {
     const models = await validateApiKeyWithModelsEndpoint({
@@ -172,6 +203,7 @@ async function validateProviderApiKey(input: {
   }
 
   if ((input.provider.npm ?? "").includes("@ai-sdk/anthropic")) {
+    if (!supportsModelsEndpointValidation(input.provider)) return { validated: false, discoveredModelIDs: [] }
     if (!baseURL) return { validated: false, discoveredModelIDs: [] }
     const models = await validateApiKeyWithModelsEndpoint({
       providerName,
@@ -244,7 +276,7 @@ async function promptAndValidateApiKey(input: {
 }): Promise<{ key: string; usedExistingKey: boolean; discoveredModelIDs: string[] }> {
   if (input.existingAuth?.type === "api") {
     const keepExisting = await prompts.confirm({
-      message: `Use the existing ${input.provider.name} API key and validate it now?`,
+      message: `Use the existing ${providerDisplayName(input.provider)} API key and validate it now?`,
       initialValue: true,
     })
     if (prompts.isCancel(keepExisting)) throw new UI.CancelledError()
@@ -255,7 +287,7 @@ async function promptAndValidateApiKey(input: {
           apiKey: input.existingAuth.key,
           baseURL: input.baseURL,
         })
-        prompts.log.success(`${input.provider.name} API key verified.`)
+        prompts.log.success(`${providerDisplayName(input.provider)} API key verified.`)
         return {
           key: input.existingAuth.key,
           usedExistingKey: true,
@@ -263,14 +295,14 @@ async function promptAndValidateApiKey(input: {
         }
       } catch (error) {
         prompts.log.warn(error instanceof Error ? error.message : String(error))
-        prompts.log.warn(`The saved ${input.provider.name} API key did not verify. Please paste a new one.`)
+        prompts.log.warn(`The saved ${providerDisplayName(input.provider)} API key did not verify. Please paste a new one.`)
       }
     }
   }
 
   while (true) {
     const key = await prompts.password({
-      message: `Paste your ${input.provider.name} API key`,
+      message: `Paste your ${providerDisplayName(input.provider)} API key`,
       validate: (value) => (normalizeApiKey(value ?? "").length > 0 ? undefined : "Required"),
     })
     if (prompts.isCancel(key)) throw new UI.CancelledError()
@@ -283,10 +315,10 @@ async function promptAndValidateApiKey(input: {
         baseURL: input.baseURL,
       })
       if (result.validated) {
-        prompts.log.success(`${input.provider.name} API key verified.`)
+        prompts.log.success(`${providerDisplayName(input.provider)} API key verified.`)
       } else {
         prompts.log.warn(
-          `${input.provider.name} API key was saved, but this provider does not support pre-model verification yet.`,
+          `${providerDisplayName(input.provider)} API key was saved, but this provider does not support pre-model verification yet.`,
         )
       }
       return {
@@ -660,9 +692,9 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
     message: "Choose your model provider (A-Z order)",
     options: [
       ...providers.map((provider) => ({
-        label: provider.name,
+        label: providerDisplayName(provider),
         value: provider.id,
-        hint: provider.env?.[0] ? `API key via ${provider.env[0]}` : "API key",
+        hint: providerDisplayDescription(provider),
       })),
       {
         label: "Custom OpenAI-compatible provider",
@@ -766,7 +798,9 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
   }
 
   const provider = providers.find((item) => item.id === providerID)!
-  prompts.log.info(`${provider.name} in this build uses API key authentication only.`)
+  prompts.log.info(`${providerDisplayName(provider)} in this build uses API key authentication only.`)
+  const providerNote = providerDisplayNote(provider)
+  if (providerNote) prompts.log.info(providerNote)
   if (provider.env?.length) {
     prompts.log.info(`You can also set ${provider.env.join(" or ")} in your environment.`)
   }
@@ -779,16 +813,16 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
     type: "api",
     key: validated.key,
   })
-  prompts.log.success(`${provider.name} API key saved.`)
+  prompts.log.success(`${providerDisplayName(provider)} API key saved.`)
 
   const models = resolveModelChoices(provider, validated.discoveredModelIDs)
   if (models.length === 0) {
-    prompts.log.warn(`No visible models are available for ${provider.name}. Skipping model setup.`)
+    prompts.log.warn(`No visible models are available for ${providerDisplayName(provider)}. Skipping model setup.`)
     return undefined
   }
 
   const modelID = await prompts.select({
-    message: `Choose the default model for ${provider.name}`,
+    message: `Choose the default model for ${providerDisplayName(provider)}`,
     options: models.map((model) => ({
       label: model.name,
       value: model.id,
@@ -803,10 +837,10 @@ async function configureModelProvider(existing: Awaited<ReturnType<typeof Config
 
   const model = models.find((item) => item.id === modelID)!
 
-  prompts.log.success(`Default model set to ${provider.name} / ${model.name ?? model.id}`)
+  prompts.log.success(`Default model set to ${providerDisplayName(provider)} / ${model.name ?? model.id}`)
   return {
     providerID: provider.id,
-    providerName: provider.name,
+    providerName: providerDisplayName(provider),
     modelID: model.id,
     modelName: model.name ?? model.id,
     usedExistingKey: validated.usedExistingKey,

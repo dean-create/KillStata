@@ -7,7 +7,7 @@ import { useDialog } from "@tui/ui/dialog"
 import { createDialogProviderOptions, DialogProvider } from "./dialog-provider"
 import { useKeybind } from "../context/keybind"
 import * as fuzzysort from "fuzzysort"
-import { isUserSelectableProvider } from "../../../../provider/provider-catalog"
+import { isUserSelectableProvider, providerDisplayName } from "../../../../provider/provider-catalog"
 
 export function useConnected() {
   const sync = useSync()
@@ -59,7 +59,7 @@ export function DialogModel(props: { providerID?: string }) {
                 modelID: model.id,
               },
               title: model.name ?? item.modelID,
-              description: provider.name,
+              description: providerDisplayName(provider),
               category: "Favorites",
               onSelect: () => {
                 dialog.clear()
@@ -91,7 +91,7 @@ export function DialogModel(props: { providerID?: string }) {
                 modelID: model.id,
               },
               title: model.name ?? item.modelID,
-              description: provider.name,
+              description: providerDisplayName(provider),
               category: "Recent",
               onSelect: () => {
                 dialog.clear()
@@ -111,7 +111,7 @@ export function DialogModel(props: { providerID?: string }) {
     const providerOptions = pipe(
       sync.data.provider,
       (providers) => providers.filter((provider) => provider.id !== "killstata" && isUserSelectableProvider(provider)),
-      sortBy((provider) => provider.name),
+      sortBy((provider) => providerDisplayName(provider)),
       flatMap((provider) =>
         pipe(
           provider.models,
@@ -131,7 +131,7 @@ export function DialogModel(props: { providerID?: string }) {
               )
                 ? "(Favorite)"
                 : undefined,
-              category: connected() ? provider.name : undefined,
+              category: connected() ? providerDisplayName(provider) : undefined,
               onSelect() {
                 dialog.clear()
                 local.model.set(
@@ -190,7 +190,7 @@ export function DialogModel(props: { providerID?: string }) {
   )
 
   const title = createMemo(() => {
-    if (provider()) return provider()!.name
+    if (provider()) return providerDisplayName(provider()!)
     return "Select model"
   })
 
