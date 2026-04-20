@@ -105,12 +105,14 @@ For `smart_baseline`, the tool saves the recommendation artifacts above and then
 Front-end delivery rule:
 - `auto_recommend` does not have to create a `killstata_output_*` bundle when it only emits recommendations
 - Any successful estimation run with formal result artifacts must create a `killstata_output_*` delivery bundle
-- A completed econometric analysis delivery bundle must contain exactly five user-facing files:
+- A completed econometric analysis delivery bundle must contain exactly four default user-facing files:
   - `回归结果_<method>.md`
   - `三线表_<method>.tex`
   - `三线表_<method>.docx`
   - `计量分析数据_<method>.xlsx`
-  - `期刊小论文_<method>.docx`
+- Do not generate `期刊小论文_<method>.docx` by default
+- If the regression result is significant at a conventional level, ask the user whether to generate `期刊小论文_<method>.docx`
+- Only generate and publish `期刊小论文_<method>.docx` after explicit user confirmation, for example with `options.generateJournalPaper=true`
 - Extra diagnostics, metadata, snapshots, CSV files, raw result JSON, and auxiliary tables stay in `.killstata`
 
 The `auto_recommend` path should:

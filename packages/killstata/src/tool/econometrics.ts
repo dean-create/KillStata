@@ -980,6 +980,10 @@ function coefficientDirection(coefficient?: number) {
   return "接近于零"
 }
 
+function hasSignificantRegressionResult(result: PythonResult) {
+  return typeof result.p_value === "number" && result.p_value < 0.1
+}
+
 function buildBaselineReportDocxPayload(input: {
   methodName: MethodName
   outputPath: string
@@ -4272,19 +4276,24 @@ except Exception as e:
       }
     }
 
-    result.journal_paper_docx_path = await generateJournalPaperDocx({
-      methodName: params.methodName,
-      outputDir,
-      pythonCommand,
-      result,
-      dependentVar: params.dependentVar,
-      treatmentVar: params.treatmentVar,
-      covariates: params.covariates,
-      entityVar: params.entityVar,
-      timeVar: params.timeVar,
-      clusterVar: params.clusterVar,
-      qaGateReason: qaGate.qaGateReason,
-    })
+    const shouldGenerateJournalPaper =
+      (params.options?.["generateJournalPaper"] === true || params.options?.["generate_journal_paper"] === true) &&
+      hasSignificantRegressionResult(result)
+    if (shouldGenerateJournalPaper) {
+      result.journal_paper_docx_path = await generateJournalPaperDocx({
+        methodName: params.methodName,
+        outputDir,
+        pythonCommand,
+        result,
+        dependentVar: params.dependentVar,
+        treatmentVar: params.treatmentVar,
+        covariates: params.covariates,
+        entityVar: params.entityVar,
+        timeVar: params.timeVar,
+        clusterVar: params.clusterVar,
+        qaGateReason: qaGate.qaGateReason,
+      })
+    }
 
     if (datasetManifest) {
       appendArtifact(datasetManifest, {
@@ -4433,7 +4442,6 @@ except Exception as e:
     if (result.academic_table_workbook_path) output += `- Three-line table Excel: ${relativeWithinProject(result.academic_table_workbook_path)}\n`
     if (result.academic_table_docx_path) output += `- Three-line table Word: ${relativeWithinProject(result.academic_table_docx_path)}\n`
     if (result.delivery_report_docx_path) output += `- Result report Word: ${relativeWithinProject(result.delivery_report_docx_path)}\n`
-    if (result.journal_paper_docx_path) output += `- Journal-style paper Word: ${relativeWithinProject(result.journal_paper_docx_path)}\n`
     output += `- Concise result summary: ${relativeWithinProject(conciseResultPath)}\n`
     if (result.output_path) output += `- Result JSON: ${relativeWithinProject(result.output_path)}\n`
     if (result.resolved_python_executable) output += `- Python interpreter: ${result.resolved_python_executable}\n`
@@ -4441,6 +4449,13 @@ except Exception as e:
     if (publishedFiles.length) {
       output += `Published files:\n`
       for (const item of publishedFiles) output += `- ${item.relativePath}\n`
+    }
+    if (hasSignificantRegressionResult(result)) {
+      if (result.journal_paper_docx_path) {
+        output += `\n已按用户确认生成期刊格式小论文 Word。\n`
+      } else {
+        output += `\n本次回归结果在常用统计水平上显著。是否需要我基于这次结果继续生成期刊格式小论文 Word？\n`
+      }
     }
 
     output += `\nResults directory: ${relativeWithinProject(outputDir)}/\n`
