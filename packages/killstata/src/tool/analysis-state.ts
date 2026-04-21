@@ -247,6 +247,15 @@ function baseDeliveryBundleName(runId: string) {
   return `${DELIVERY_BUNDLE_PREFIX}${runIdDeliveryStamp(runId)}`
 }
 
+function normalizeLegacyDeliveryBundleName(name: string) {
+  if (!name.startsWith(LEGACY_DELIVERY_BUNDLE_PREFIX)) return name
+  const suffix = name.slice(LEGACY_DELIVERY_BUNDLE_PREFIX.length)
+  if (/^\d{12}$/.test(suffix)) {
+    return `${DELIVERY_BUNDLE_PREFIX}${suffix.slice(0, 8)}_${suffix.slice(8)}`
+  }
+  return `${DELIVERY_BUNDLE_PREFIX}${suffix}`
+}
+
 function legacyDeliveryBundleNames(runId: string) {
   const stamp = runIdDeliveryStamp(runId)
   const compactStamp = stamp.replace("_", "")
@@ -409,9 +418,8 @@ function migrateLegacyDeliveryBundles() {
     if (!fs.existsSync(root)) continue
     for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory() || !entry.name.startsWith(LEGACY_DELIVERY_BUNDLE_PREFIX)) continue
-      const suffix = entry.name.slice(LEGACY_DELIVERY_BUNDLE_PREFIX.length)
       const legacyName = entry.name
-      const currentName = `${DELIVERY_BUNDLE_PREFIX}${suffix}`
+      const currentName = normalizeLegacyDeliveryBundleName(legacyName)
       migrateDirectoryIfNeeded(path.join(root, legacyName), path.join(root, currentName))
       replacements.push({ from: legacyName, to: currentName })
     }

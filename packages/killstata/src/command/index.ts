@@ -6,8 +6,13 @@ import { Identifier } from "../id/id"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
 import { MCP } from "../mcp"
+import { Log } from "../util/log"
+import { withTimeout } from "@/util/timeout"
 
 export namespace Command {
+  const log = Log.create({ service: "command" })
+  const MCP_PROMPTS_TIMEOUT_MS = 250
+
   export const Event = {
     Executed: BusEvent.define(
       "command.executed",
@@ -240,7 +245,14 @@ export namespace Command {
         hints: hints(command.template),
       }
     }
-    for (const [name, prompt] of Object.entries(await MCP.prompts())) {
+    const mcpPrompts = await withTimeout(MCP.prompts(), MCP_PROMPTS_TIMEOUT_MS).catch((error) => {
+      log.warn("skipping MCP prompt commands during command list bootstrap", {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return {}
+    })
+
+    for (const [name, prompt] of Object.entries(mcpPrompts)) {
       result[name] = {
         name,
         mcp: true,

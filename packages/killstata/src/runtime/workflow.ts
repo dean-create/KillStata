@@ -2335,14 +2335,19 @@ export function resolveToolAvailability(input: {
       bundle = [...new Set([...readCore, "data_import", "data_batch", "workflow"])]
     }
     if (agent === "analyst" && approvalStatus !== "approved") {
+      const allowRegressionTable =
+        stage === "baseline_estimate" ||
+        stage === "verifier" ||
+        stage === "report" ||
+        inputIntent === "verify" ||
+        inputIntent === "report"
       bundle = bundle.filter(
         (tool) =>
           ![
-            "regression_table",
             "heterogeneity_runner",
             "paper_draft",
             "slide_generator",
-          ].includes(tool),
+          ].includes(tool) && (tool !== "regression_table" || allowRegressionTable),
       )
     }
     return {
@@ -2392,14 +2397,19 @@ export function resolveToolAvailability(input: {
   }
 
   if (agent === "analyst" && approvalStatus !== "approved") {
+    const allowRegressionTable =
+      stage === "baseline_estimate" ||
+      stage === "verifier" ||
+      stage === "report" ||
+      inputIntent === "verify" ||
+      inputIntent === "report"
     bundle = bundle.filter(
       (tool) =>
         ![
-          "regression_table",
           "heterogeneity_runner",
           "paper_draft",
           "slide_generator",
-        ].includes(tool),
+        ].includes(tool) && (tool !== "regression_table" || allowRegressionTable),
     )
   }
 
