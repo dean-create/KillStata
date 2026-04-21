@@ -335,6 +335,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     sdk.event.on("runtime.workflow.state" as any, (event: any) => {
       setStore("workflow", event.properties.sessionID, {
         workflowRunId: event.properties.workflowRunId,
+        workflowLocale: event.properties.workflowLocale,
         branch: event.properties.branch,
         activeStage: event.properties.activeStage,
         activeStageId: event.properties.activeStageId,

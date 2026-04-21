@@ -83,6 +83,8 @@ import {
   type AnalysisToolPartLike,
 } from "@/runtime/analysis-text-sanitizer"
 import { isAnalysisTurn } from "@/runtime/analysis-user-view"
+import { isReasoningExpanded, toggleReasoningExpandedState } from "./reasoning-state"
+import { workflowStageLabel } from "@/runtime/workflow-locale"
 
 addDefaultParsers(parsers.parsers)
 
@@ -134,6 +136,8 @@ const context = createContext<{
   showDetails: () => boolean
   showGenericToolOutput: () => boolean
   diffWrapMode: () => "word" | "none"
+  reasoningExpanded: (partID: string) => boolean
+  toggleReasoningExpanded: (partID: string) => void
   sync: ReturnType<typeof useSync>
 }>()
 
@@ -188,6 +192,7 @@ export function Session() {
   const [contentOverflows, setContentOverflows] = createSignal(false)
   const [diffWrapMode, setDiffWrapMode] = createSignal<"word" | "none">("word")
   const [animationsEnabled, setAnimationsEnabled] = kv.signal("animations_enabled", true)
+  const [reasoningExpandedState, setReasoningExpandedState] = createSignal<Record<string, boolean>>({})
 
   const wide = createMemo(() => dimensions().width > 120)
   const sidebarVisible = createMemo(() => {
@@ -1021,14 +1026,19 @@ export function Session() {
   const promptRight = createMemo(() => {
     const workflowState = workflow()
     if (!workflowState?.activeStage && !workflowState?.verifierStatus && !workflowState?.activeCoordinatorAgent) return
+    const workflowLocale = workflowState.workflowLocale ?? "en"
     return (
       <>
         <Show when={workflowState.activeStage}>
-          <text fg={theme.textMuted}>{workflowState.activeStage}</text>
+          <text fg={theme.textMuted}>
+            {workflowStageLabel(workflowLocale, workflowState.activeStage) ?? workflowState.activeStage}
+          </text>
         </Show>
         <Show when={workflowState.verifierStatus}>
           <text fg={workflowState.verifierStatus === "block" ? theme.error : theme.textMuted}>
-            verifier {workflowState.verifierStatus}
+            {workflowLocale === "zh-CN"
+              ? `校验器 ${workflowState.verifierStatus === "pass" ? "通过" : workflowState.verifierStatus === "warn" ? "警告" : "阻塞"}`
+              : `verifier ${workflowState.verifierStatus}`}
           </text>
         </Show>
         <Show when={workflowState.activeCoordinatorAgent}>
@@ -1054,6 +1064,9 @@ export function Session() {
         showDetails,
         showGenericToolOutput,
         diffWrapMode,
+        reasoningExpanded: (partID) => isReasoningExpanded(reasoningExpandedState(), partID),
+        toggleReasoningExpanded: (partID) =>
+          setReasoningExpandedState((state) => toggleReasoningExpandedState(state, partID)),
         sync,
       }}
     >
@@ -1556,10 +1569,10 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
   const ctx = use()
   const sync = useSync()
   const renderer = useRenderer()
-  const [expanded, setExpanded] = createSignal(false)
   const content = createMemo(() => {
     return props.part.text.replace("[REDACTED]", "").trim()
   })
+  const expanded = createMemo(() => ctx.reasoningExpanded(props.part.id))
   const shouldShow = createMemo(() => {
     if (!content() || !ctx.showThinking()) return false
     if (isAnalysisAssistantMessage(props.message, sync) && !ctx.showDetails()) return false
@@ -1580,7 +1593,7 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
         backgroundColor={theme.backgroundPanel}
         onMouseUp={() => {
           if (renderer.getSelection()?.getSelectedText()) return
-          setExpanded((prev) => !prev)
+          ctx.toggleReasoningExpanded(props.part.id)
         }}
       >
         <text fg={theme.textMuted} paddingLeft={1}>
@@ -1591,7 +1604,7 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
           <code
             filetype="markdown"
             drawUnstyledText={false}
-            streaming={true}
+            streaming={false}
             syntaxStyle={subtleSyntax()}
             content={content()}
             conceal={ctx.conceal()}

@@ -79,6 +79,7 @@ export namespace RuntimeEvents {
     z.object({
       sessionID: z.string(),
       workflowRunId: z.string().optional(),
+      workflowLocale: z.enum(["zh-CN", "en"]).optional(),
       branch: z.string().optional(),
       activeStage: z.string().optional(),
       activeStageId: z.string().optional(),

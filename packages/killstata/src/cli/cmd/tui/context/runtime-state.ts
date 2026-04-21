@@ -17,6 +17,7 @@ export type RuntimeQueueState = {
 
 export type WorkflowTuiState = {
   workflowRunId?: string
+  workflowLocale?: "zh-CN" | "en"
   branch?: string
   activeStage?: string
   activeStageId?: string

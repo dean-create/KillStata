@@ -1,4 +1,5 @@
 import type { LanguageModelUsage, ProviderMetadata } from "ai"
+import type { WorkflowLocale } from "./workflow-locale"
 
 export type QueuedSessionActionType = "prompt" | "command" | "shell" | "continue" | "retry" | "repair" | "compaction"
 
@@ -163,6 +164,7 @@ export interface WorkflowRun {
   workflowRunId: string
   sessionID: string
   workflowMode: "econometrics"
+  workflowLocale: WorkflowLocale
   datasetId?: string
   runId?: string
   branch: string

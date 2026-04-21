@@ -57,6 +57,12 @@ import {
 } from "./analysis-user-view"
 import { formatRuntimePythonSetupError, getRuntimePythonStatus } from "@/killstata/runtime-config"
 import { ensureAnalysisPlan, formatAnalysisChecklist, setAnalysisPlanApproval } from "@/runtime/workflow"
+import {
+  workflowAnalysisPlanHeader,
+  workflowChecklistApprovalPrompt,
+  workflowChecklistIntro,
+  workflowChecklistOptions,
+} from "@/runtime/workflow-locale"
 
 const log = Log.create({ service: "data-import-tool" })
 
@@ -667,35 +673,37 @@ export const DataImportTool = Tool.define("data_import", {
       if (!ANALYST_PRE_APPROVAL_ACTIONS.has(params.action)) {
         const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
         if (!analystState.planApproved) {
-          const plannedRun = ensureAnalysisPlan({
+          const plannedRun = await ensureAnalysisPlan({
             sessionID: ctx.sessionID,
             datasetId: params.datasetId,
             runId: typeof params.options?.["runId"] === "string" ? params.options["runId"] : undefined,
             branch,
           })
+          const locale = plannedRun.workflowLocale
+          const approvalOptions = workflowChecklistOptions(locale, "analysis")
           AnalysisIntent.markAnalystPlanGenerated(ctx.sessionID)
           const answers = await Question.ask({
             sessionID: ctx.sessionID,
             questions: [
               {
-                header: "Analysis Plan",
+                header: workflowAnalysisPlanHeader(locale),
                 question: [
-                  "Analyst prepared this execution checklist:",
+                  workflowChecklistIntro(locale, "analysis"),
                   ...formatAnalysisChecklist(plannedRun),
                   "",
-                  "Start executing this plan now?",
+                  workflowChecklistApprovalPrompt(locale, "analysis"),
                 ].join("\n"),
                 custom: false,
                 options: [
-                  { label: "Yes", description: "Approve the plan and continue with data and analysis steps" },
-                  { label: "No", description: "Stay in planning mode and stop before execution" },
+                  approvalOptions.yes,
+                  approvalOptions.no,
                 ],
               },
             ],
             tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
           })
 
-          if (answers[0]?.[0] !== "Yes") {
+          if (answers[0]?.[0] !== approvalOptions.yes.label) {
             setAnalysisPlanApproval({
               sessionID: ctx.sessionID,
               approvalStatus: "declined",

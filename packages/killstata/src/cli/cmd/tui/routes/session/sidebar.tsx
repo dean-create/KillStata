@@ -11,6 +11,14 @@ import { useDirectory } from "../../context/directory"
 import { useKV } from "../../context/kv"
 import { TodoItem } from "../../component/todo-item"
 import { contextUsageHint, getContextUsage } from "./context-usage"
+import {
+  workflowApprovalStatusLabel,
+  workflowChecklistStatusLabel,
+  workflowPlanTitle,
+  workflowStageLabel,
+  workflowStageTitle,
+  workflowApprovalTitle,
+} from "@/runtime/workflow-locale"
 
 export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const sync = useSync()
@@ -20,6 +28,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const todo = createMemo(() => sync.data.todo[props.sessionID] ?? [])
   const messages = createMemo(() => sync.data.message[props.sessionID] ?? [])
   const workflow = createMemo(() => sync.data.workflow[props.sessionID])
+  const workflowLocale = createMemo(() => workflow()?.workflowLocale ?? "en")
 
   const [expanded, setExpanded] = createStore({
     mcp: false,
@@ -226,14 +235,18 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
             <Show when={workflow()?.analysisChecklist?.length}>
               <box>
                 <text fg={theme.text}>
-                  <b>Workflow Plan</b>
+                  <b>{workflowPlanTitle(workflowLocale())}</b>
                 </text>
                 <Show when={workflow()?.approvalStatus}>
-                  <text fg={theme.textMuted}>Approval: {workflow()?.approvalStatus}</text>
+                  <text fg={theme.textMuted}>
+                    {workflowApprovalTitle(workflowLocale())}:{" "}
+                    {workflowApprovalStatusLabel(workflowLocale(), workflow()?.approvalStatus) ?? workflow()?.approvalStatus}
+                  </text>
                 </Show>
                 <Show when={workflow()?.activeStage}>
                   <text fg={theme.textMuted}>
-                    Stage: {workflow()?.activeStage}
+                    {workflowStageTitle(workflowLocale())}:{" "}
+                    {workflowStageLabel(workflowLocale(), workflow()?.activeStage) ?? workflow()?.activeStage}
                     {workflow()?.activeStageId ? ` (${workflow()?.activeStageId})` : ""}
                   </text>
                 </Show>
@@ -251,7 +264,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                       }
                       wrapMode="word"
                     >
-                      {item.label}: {item.status}
+                      {item.label}: {workflowChecklistStatusLabel(workflowLocale(), item.status)}
                       {item.summary ? ` - ${item.summary}` : ""}
                     </text>
                   )}

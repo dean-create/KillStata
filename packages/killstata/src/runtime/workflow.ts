@@ -2,6 +2,7 @@ import crypto from "crypto"
 import fs from "fs"
 import path from "path"
 import { Bus } from "@/bus"
+import { MessageV2 } from "@/session/message-v2"
 import type {
   AnalysisChecklistItem,
   RepairHandler,
@@ -21,6 +22,23 @@ import type {
   WorkflowStageKind,
 } from "./types"
 import { RuntimeEvents } from "./events"
+import {
+  detectWorkflowLocaleFromText,
+  inferWorkflowLocaleFromSession,
+  workflowAnalysisPlanHeader,
+  workflowApprovalStatusLabel,
+  workflowChecklistLabel,
+  workflowChecklistIntro,
+  workflowChecklistApprovalPrompt,
+  workflowChecklistOptions,
+  workflowChecklistStatusLabel,
+  workflowLocaleLabel,
+  workflowPlanTitle,
+  workflowStageLabel,
+  workflowStageTitle,
+  workflowApprovalTitle,
+  type WorkflowLocale,
+} from "./workflow-locale"
 import type { FailureType, ToolReflection } from "@/tool/analysis-reflection"
 import { getStage, projectStateRoot, readDatasetManifest } from "@/tool/analysis-state"
 
@@ -49,12 +67,12 @@ const DEFAULT_STAGE_EDGES = DEFAULT_STAGE_SEQUENCE.slice(0, -1).map((kind, index
 }))
 
 const ANALYSIS_CHECKLIST_TEMPLATE = [
-  { id: "data_readiness", label: "Data readiness" },
-  { id: "identification", label: "Identification & variables" },
-  { id: "baseline_model", label: "Baseline model" },
-  { id: "diagnostics", label: "Diagnostics & robustness" },
-  { id: "reporting", label: "Reporting" },
-] as const satisfies ReadonlyArray<Pick<AnalysisChecklistItem, "id" | "label">>
+  { id: "data_readiness" },
+  { id: "identification" },
+  { id: "baseline_model" },
+  { id: "diagnostics" },
+  { id: "reporting" },
+] as const satisfies ReadonlyArray<Pick<AnalysisChecklistItem, "id">>
 
 const AUTO_VERIFY_STAGES = new Set<WorkflowStageKind>([
   "import",
@@ -190,6 +208,27 @@ function normalizeRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
+async function latestNonSyntheticUserText(sessionID: string) {
+  for await (const message of MessageV2.stream(sessionID)) {
+    if (message.info.role !== "user") continue
+    const text = message.parts
+      .filter(
+        (part): part is MessageV2.TextPart => part.type === "text" && !part.synthetic && !part.ignored,
+      )
+      .map((part) => part.text.trim())
+      .filter(Boolean)
+      .join("\n")
+    if (text) return text
+  }
+  return undefined
+}
+
+async function resolveWorkflowLocale(sessionID: string, fallback: WorkflowLocale = "en") {
+  const latestUserText = await latestNonSyntheticUserText(sessionID)
+  if (latestUserText) return detectWorkflowLocaleFromText(latestUserText)
+  return inferWorkflowLocaleFromSession(sessionID, fallback)
+}
+
 function latestStageByKinds(run: WorkflowRun | undefined, kinds: WorkflowStageKind[]) {
   if (!run) return undefined
   const wanted = new Set(kinds)
@@ -256,11 +295,20 @@ function checklistStatusForDataReadiness(run: WorkflowRun): AnalysisChecklistIte
 }
 
 function checklistSummary(run: WorkflowRun, itemID: AnalysisChecklistItem["id"]) {
+  const locale = run.workflowLocale
   const stage = latestStageForChecklist(run, itemID)
   if (itemID === "data_readiness") {
-    if (run.datasetId && stage?.stageId) return `Reusing ${run.datasetId} / ${stage.stageId}`
-    if (run.datasetId) return `Current dataset: ${run.datasetId}`
-    return stage ? `Latest prep stage: ${stage.stageId}` : "Waiting for import and QA"
+    if (run.datasetId && stage?.stageId) {
+      return locale === "zh-CN" ? `复用 ${run.datasetId} / ${stage.stageId}` : `Reusing ${run.datasetId} / ${stage.stageId}`
+    }
+    if (run.datasetId) return locale === "zh-CN" ? `当前数据集：${run.datasetId}` : `Current dataset: ${run.datasetId}`
+    return stage
+      ? locale === "zh-CN"
+        ? `最近准备阶段：${stage.stageId}`
+        : `Latest prep stage: ${stage.stageId}`
+      : locale === "zh-CN"
+        ? "等待导入与 QA"
+        : "Waiting for import and QA"
   }
   if (itemID === "identification") {
     const baselineStage = latestStageByKinds(run, ["baseline_estimate"])
@@ -277,16 +325,148 @@ function checklistSummary(run: WorkflowRun, itemID: AnalysisChecklistItem["id"])
           .join(", ")
       }
     }
-    return run.approvalStatus === "required" ? "Waiting for execution approval" : "Need core variables and identification strategy"
+    return run.approvalStatus === "required"
+      ? locale === "zh-CN"
+        ? "等待执行审批"
+        : "Waiting for execution approval"
+      : locale === "zh-CN"
+        ? "需要明确核心变量与识别策略"
+        : "Need core variables and identification strategy"
   }
   if (itemID === "baseline_model") {
-    return stage ? `${stage.stageId} (${stage.status})` : "Baseline model has not run yet"
+    return stage
+      ? `${stage.stageId} (${workflowChecklistStatusLabel(locale, stage.status === "running" ? "in_progress" : stage.status === "completed" ? "completed" : stage.status === "blocked" || stage.status === "failed" ? "blocked" : "pending")})`
+      : locale === "zh-CN"
+        ? "基准模型尚未运行"
+        : "Baseline model has not run yet"
   }
   if (itemID === "diagnostics") {
-    if (run.latestVerifier?.status) return `verifier=${run.latestVerifier.status}`
-    return stage ? `${stage.stageId} (${stage.status})` : "Diagnostics and robustness checks have not run yet"
+    if (run.latestVerifier?.status) {
+      return locale === "zh-CN"
+        ? `核验器=${workflowLocaleLabel(locale, {
+            en: run.latestVerifier.status,
+            zh:
+              run.latestVerifier.status === "pass"
+                ? "通过"
+                : run.latestVerifier.status === "warn"
+                  ? "警告"
+                  : "阻塞",
+          })}`
+        : `verifier=${run.latestVerifier.status}`
+    }
+    return stage
+      ? `${stage.stageId} (${workflowChecklistStatusLabel(locale, stage.status === "running" ? "in_progress" : stage.status === "completed" ? "completed" : stage.status === "blocked" || stage.status === "failed" ? "blocked" : "pending")})`
+      : locale === "zh-CN"
+        ? "诊断与稳健性检查尚未运行"
+        : "Diagnostics and robustness checks have not run yet"
   }
-  return stage ? `${stage.stageId} (${stage.status})` : "Grounded report has not been generated yet"
+  return stage
+    ? `${stage.stageId} (${workflowChecklistStatusLabel(locale, stage.status === "running" ? "in_progress" : stage.status === "completed" ? "completed" : stage.status === "blocked" || stage.status === "failed" ? "blocked" : "pending")})`
+    : locale === "zh-CN"
+      ? "带依据的结果报告尚未生成"
+      : "Grounded report has not been generated yet"
+}
+
+function workflowChecklistSummary(run: WorkflowRun, itemID: AnalysisChecklistItem["id"]) {
+  const locale = run.workflowLocale
+  const stage = latestStageForChecklist(run, itemID)
+  if (itemID === "data_readiness") {
+    if (run.datasetId && stage?.stageId) {
+      return locale === "zh-CN" ? `复用 ${run.datasetId} / ${stage.stageId}` : `Reusing ${run.datasetId} / ${stage.stageId}`
+    }
+    if (run.datasetId) return locale === "zh-CN" ? `当前数据集：${run.datasetId}` : `Current dataset: ${run.datasetId}`
+    return stage
+      ? locale === "zh-CN"
+        ? `最近准备阶段：${stage.stageId}`
+        : `Latest prep stage: ${stage.stageId}`
+      : locale === "zh-CN"
+        ? "等待导入与 QA"
+        : "Waiting for import and QA"
+  }
+  if (itemID === "identification") {
+    const baselineStage = latestStageByKinds(run, ["baseline_estimate"])
+    if (baselineStage?.replayInput) {
+      const dependentVar =
+        typeof baselineStage.replayInput["dependentVar"] === "string"
+          ? baselineStage.replayInput["dependentVar"]
+          : undefined
+      const treatmentVar =
+        typeof baselineStage.replayInput["treatmentVar"] === "string"
+          ? baselineStage.replayInput["treatmentVar"]
+          : undefined
+      if (dependentVar || treatmentVar) {
+        return [dependentVar ? `Y=${dependentVar}` : undefined, treatmentVar ? `T=${treatmentVar}` : undefined]
+          .filter(Boolean)
+          .join(", ")
+      }
+    }
+    return run.approvalStatus === "required"
+      ? locale === "zh-CN"
+        ? "等待执行审批"
+        : "Waiting for execution approval"
+      : locale === "zh-CN"
+        ? "需要明确核心变量与识别策略"
+        : "Need core variables and identification strategy"
+  }
+  if (itemID === "baseline_model") {
+    return stage
+      ? `${stage.stageId} (${workflowChecklistStatusLabel(
+          locale,
+          stage.status === "running"
+            ? "in_progress"
+            : stage.status === "completed"
+              ? "completed"
+              : stage.status === "blocked" || stage.status === "failed"
+                ? "blocked"
+                : "pending",
+        )})`
+      : locale === "zh-CN"
+        ? "基准模型尚未运行"
+        : "Baseline model has not run yet"
+  }
+  if (itemID === "diagnostics") {
+    if (run.latestVerifier?.status) {
+      return locale === "zh-CN"
+        ? `校验器=${workflowLocaleLabel(locale, {
+            en: run.latestVerifier.status,
+            zh:
+              run.latestVerifier.status === "pass"
+                ? "通过"
+                : run.latestVerifier.status === "warn"
+                  ? "警告"
+                  : "阻塞",
+          })}`
+        : `verifier=${run.latestVerifier.status}`
+    }
+    return stage
+      ? `${stage.stageId} (${workflowChecklistStatusLabel(
+          locale,
+          stage.status === "running"
+            ? "in_progress"
+            : stage.status === "completed"
+              ? "completed"
+              : stage.status === "blocked" || stage.status === "failed"
+                ? "blocked"
+                : "pending",
+        )})`
+      : locale === "zh-CN"
+        ? "诊断与稳健性检查尚未运行"
+        : "Diagnostics and robustness checks have not run yet"
+  }
+  return stage
+    ? `${stage.stageId} (${workflowChecklistStatusLabel(
+        locale,
+        stage.status === "running"
+          ? "in_progress"
+          : stage.status === "completed"
+            ? "completed"
+            : stage.status === "blocked" || stage.status === "failed"
+              ? "blocked"
+              : "pending",
+      )})`
+    : locale === "zh-CN"
+      ? "带依据的结果报告尚未生成"
+      : "Grounded report has not been generated yet"
 }
 
 function refreshAnalysisChecklist(run: WorkflowRun) {
@@ -343,10 +523,10 @@ function refreshAnalysisChecklist(run: WorkflowRun) {
     const linkedStage = latestStageForChecklist(run, item.id)
     return {
       id: item.id,
-      label: item.label,
+      label: workflowChecklistLabel(run.workflowLocale, item.id),
       status: statusMap[item.id],
       linkedStageId: linkedStage?.stageId,
-      summary: checklistSummary(run, item.id),
+      summary: workflowChecklistSummary(run, item.id),
     }
   })
 }
@@ -417,6 +597,7 @@ function emptyRun(input: { sessionID: string; datasetId?: string; runId?: string
     workflowRunId: createWorkflowRunId(input),
     sessionID: input.sessionID,
     workflowMode: "econometrics",
+    workflowLocale: "en",
     datasetId: input.datasetId,
     runId: input.runId,
     branch: input.branch,
@@ -427,7 +608,7 @@ function emptyRun(input: { sessionID: string; datasetId?: string; runId?: string
     trustedArtifacts: [],
     analysisChecklist: ANALYSIS_CHECKLIST_TEMPLATE.map((item) => ({
       id: item.id,
-      label: item.label,
+      label: workflowChecklistLabel("en", item.id),
       status: item.id === "data_readiness" ? "in_progress" : "pending",
     })),
     createdAt,
@@ -455,6 +636,7 @@ function ensureRun(
     existing.datasetId = input.datasetId ?? existing.datasetId
     existing.runId = input.runId ?? existing.runId
     existing.branch = branch
+    existing.workflowLocale = existing.workflowLocale ?? "en"
     existing.updatedAt = nowIso()
     sessionState.activeRunId = existing.workflowRunId
     return existing
@@ -763,6 +945,7 @@ function publishWorkflowState(sessionID: string, run?: WorkflowRun, rerunTargetS
   Bus.publish(RuntimeEvents.WorkflowState, {
     sessionID,
     workflowRunId: workflow?.workflowRunId,
+    workflowLocale: workflow?.workflowLocale,
     branch: workflow?.branch,
     activeStage: workflow?.activeStage,
     activeStageId: activeStage?.stageId,
@@ -1154,7 +1337,7 @@ export function getActiveWorkflowRun(sessionID: string) {
   return session.runs.find((run) => run.workflowRunId === session.activeRunId) ?? session.runs.at(-1)
 }
 
-export function ensureAnalysisPlan(input: {
+export async function ensureAnalysisPlan(input: {
   sessionID: string
   datasetId?: string
   runId?: string
@@ -1166,6 +1349,7 @@ export function ensureAnalysisPlan(input: {
     runId: input.runId,
     branch: input.branch,
   })
+  run.workflowLocale = await resolveWorkflowLocale(input.sessionID, run.workflowLocale)
   run.planGeneratedAt = run.planGeneratedAt ?? nowIso()
   if (run.approvalStatus !== "approved") run.approvalStatus = "required"
   run.updatedAt = nowIso()
@@ -1199,62 +1383,82 @@ export function setAnalysisPlanApproval(input: {
 
 export function formatAnalysisChecklist(run?: WorkflowRun) {
   if (!run) return []
+  const locale = run.workflowLocale ?? "en"
   return (run.analysisChecklist ?? []).map((item, index) => {
     const detail = item.summary ? ` - ${item.summary}` : ""
-    return `${index + 1}. ${item.label} [${item.status}]${detail}`
+    return `${index + 1}. ${item.label} [${workflowChecklistStatusLabel(locale, item.status)}]${detail}`
   })
 }
 
 export function workflowPromptSummary(sessionID: string) {
   const run = getActiveWorkflowRun(sessionID)
   if (!run) return []
+  const locale = run.workflowLocale ?? "en"
   const stage =
     (run.activeNodeId ? run.stages.find((item) => item.nodeId === run.activeNodeId) : undefined) ??
     activeOrLatestStage(run)
   const base = [
-    "Workflow runtime summary:",
+    locale === "zh-CN" ? "工作流运行摘要：" : "Workflow runtime summary:",
     `- workflowRunId: ${run.workflowRunId}`,
     `- branch: ${run.branch}`,
     run.datasetId ? `- datasetId: ${run.datasetId}` : undefined,
     run.runId ? `- runId: ${run.runId}` : undefined,
     run.activeStage
-      ? `- active stage: ${run.activeStage}${stage ? ` (${stage.stageId}, status=${stage.status})` : ""}`
+      ? `- ${locale === "zh-CN" ? "当前阶段" : "active stage"}: ${workflowStageLabel(locale, run.activeStage) ?? run.activeStage}${stage ? ` (${stage.stageId}, ${locale === "zh-CN" ? "状态" : "status"}=${workflowChecklistStatusLabel(locale, stage.status === "running" ? "in_progress" : stage.status === "completed" ? "completed" : stage.status === "blocked" || stage.status === "failed" ? "blocked" : "pending")})` : ""}`
       : undefined,
-    run.repairOnly ? `- repair-only mode: enabled` : `- repair-only mode: disabled`,
+    run.repairOnly
+      ? `- ${locale === "zh-CN" ? "仅修复模式" : "repair-only mode"}: ${locale === "zh-CN" ? "开启" : "enabled"}`
+      : `- ${locale === "zh-CN" ? "仅修复模式" : "repair-only mode"}: ${locale === "zh-CN" ? "关闭" : "disabled"}`,
     run.latestFailure
-      ? `- last failure: ${run.latestFailure.code}; retry stage=${run.latestFailure.retryStage}; repair=${run.latestFailure.repairAction}`
+      ? `- ${locale === "zh-CN" ? "最近失败" : "last failure"}: ${run.latestFailure.code}; ${locale === "zh-CN" ? "重试阶段" : "retry stage"}=${run.latestFailure.retryStage}; ${locale === "zh-CN" ? "修复动作" : "repair"}=${run.latestFailure.repairAction}`
       : undefined,
-    run.latestVerifier ? `- latest verifier: ${run.latestVerifier.status}` : undefined,
+    run.latestVerifier
+      ? `- ${locale === "zh-CN" ? "最近校验器" : "latest verifier"}: ${workflowLocaleLabel(locale, {
+          en: run.latestVerifier.status,
+          zh:
+            run.latestVerifier.status === "pass"
+              ? "通过"
+              : run.latestVerifier.status === "warn"
+                ? "警告"
+                : "阻塞",
+        })}`
+      : undefined,
   ].filter(Boolean)
   const stagePolicy = stage
     ? [
-        "Workflow stage policy:",
-        `- current stage kind: ${stage.kind}`,
-        `- depends on: ${(stage.dependsOn ?? []).join(", ") || "none"}`,
-        `- downstream stages: ${(stage.downstream ?? []).join(", ") || "none"}`,
-        `- replayable: ${stage.replayable === false ? "no" : "yes"}`,
-        `- recommended skill bundle: ${recommendedSkillBundle(stage.kind).join(", ")}`,
+        locale === "zh-CN" ? "工作流阶段策略：" : "Workflow stage policy:",
+        `- ${locale === "zh-CN" ? "当前阶段类型" : "current stage kind"}: ${workflowStageLabel(locale, stage.kind) ?? stage.kind}`,
+        `- ${locale === "zh-CN" ? "依赖阶段" : "depends on"}: ${(stage.dependsOn ?? []).map((item) => workflowStageLabel(locale, item) ?? item).join(", ") || (locale === "zh-CN" ? "无" : "none")}`,
+        `- ${locale === "zh-CN" ? "下游阶段" : "downstream stages"}: ${(stage.downstream ?? []).map((item) => workflowStageLabel(locale, item) ?? item).join(", ") || (locale === "zh-CN" ? "无" : "none")}`,
+        `- ${locale === "zh-CN" ? "可回放" : "replayable"}: ${stage.replayable === false ? (locale === "zh-CN" ? "否" : "no") : locale === "zh-CN" ? "是" : "yes"}`,
+        `- ${locale === "zh-CN" ? "推荐技能包" : "recommended skill bundle"}: ${recommendedSkillBundle(stage.kind).join(", ")}`,
       ]
     : []
   const verifierPolicy = [
-    "Verifier policy:",
-    `- auto verifier required: ${stage && stageNeedsVerifier(stage.kind) ? "yes" : "no"}`,
+    locale === "zh-CN" ? "校验器策略：" : "Verifier policy:",
+    `- ${locale === "zh-CN" ? "是否自动需要校验器" : "auto verifier required"}: ${stage && stageNeedsVerifier(stage.kind) ? (locale === "zh-CN" ? "是" : "yes") : locale === "zh-CN" ? "否" : "no"}`,
     run.latestVerifier?.status === "block"
-      ? "- verifier is blocking progress; do not continue to narrative/report, repair the failed stage only."
-      : "- continue only if artifacts and stage assumptions remain valid.",
+      ? locale === "zh-CN"
+        ? "- 校验器当前阻塞流程；不要继续叙述或报告，只修复失败阶段。"
+        : "- verifier is blocking progress; do not continue to narrative/report, repair the failed stage only."
+      : locale === "zh-CN"
+        ? "- 仅在产物与阶段假设仍然有效时继续。"
+        : "- continue only if artifacts and stage assumptions remain valid.",
   ]
   const memory = [
-    "Workflow memory:",
+    locale === "zh-CN" ? "工作流记忆：" : "Workflow memory:",
     run.trustedArtifacts.length
-      ? `- trusted artifacts: ${run.trustedArtifacts.slice(-6).join(", ")}`
-      : "- trusted artifacts: none yet",
+      ? `- ${locale === "zh-CN" ? "可信产物" : "trusted artifacts"}: ${run.trustedArtifacts.slice(-6).join(", ")}`
+      : `- ${locale === "zh-CN" ? "可信产物" : "trusted artifacts"}: ${locale === "zh-CN" ? "暂无" : "none yet"}`,
   ]
   const checklist = [
-    "Workflow checklist:",
+    workflowPlanTitle(locale) + ":",
     ...(run.analysisChecklist ?? []).map(
-      (item) => `- ${item.label}: ${item.status}${item.summary ? ` (${item.summary})` : ""}`,
+      (item) => `- ${item.label}: ${workflowChecklistStatusLabel(locale, item.status)}${item.summary ? ` (${item.summary})` : ""}`,
     ),
-    run.approvalStatus ? `- execution approval: ${run.approvalStatus}` : undefined,
+    run.approvalStatus
+      ? `- ${workflowApprovalTitle(locale).toLowerCase()}: ${workflowApprovalStatusLabel(locale, run.approvalStatus)}`
+      : undefined,
   ].filter(Boolean)
   return [base.join("\n"), stagePolicy.join("\n"), verifierPolicy.join("\n"), memory.join("\n"), checklist.join("\n")].filter(
     (item) => item.trim().length > 0,

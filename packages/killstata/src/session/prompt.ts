@@ -49,6 +49,7 @@ import type { QueuedSessionAction, ToolAvailabilityPolicy, WorkflowInputIntent }
 import { RuntimeHooks } from "@/runtime/hooks"
 import { allowMcpToolForWorkflow } from "@/runtime/workflow"
 import { SessionRunCoordinator } from "./run-state"
+import { detectWorkflowLocaleFromText } from "@/runtime/workflow-locale"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1468,6 +1469,7 @@ export namespace SessionPrompt {
       .filter((part): part is MessageV2.TextPart => part.type === "text")
       .map((part) => part.text)
       .join("\n")
+    const workflowLocale = detectWorkflowLocaleFromText(userText)
     const isPlanSwitchRequest =
       userMessage.info.agent === "explorer" && /User has requested to enter explorer mode/i.test(userText)
     const isPlanApprovalSwitch =
@@ -1481,7 +1483,21 @@ export namespace SessionPrompt {
           messageID: userMessage.info.id,
           sessionID: userMessage.info.sessionID,
           type: "text",
-          text: `<system-reminder>
+          text:
+            workflowLocale === "zh-CN"
+              ? `<system-reminder>
+Explorer 模式已启用。
+
+当前是数据准备模式。你可以检查文件，并运行导入、QA、描述统计、相关性、预处理和变量工程等数据准备工具。
+在任何删除型步骤（如 filter/dropna/rollback）之前，都必须先征求用户确认。
+默认不要运行正式计量估计或报告生成工具；请把准备好的产物交给 Analyst。
+
+你可以从三种常见方向提供帮助：
+1. 分析数据集：检查文件、概括结构、识别变量角色、标记 QA 问题，并进行非破坏性清洗。
+2. 设计实证研究：细化研究问题、变量、识别策略和所需准备步骤。
+3. 解答计量问题：解释方法、假设、诊断与建议的下一步。
+</system-reminder>`
+              : `<system-reminder>
 Explorer mode is active.
 
 This is data-preparation mode. You may inspect files and run data-prep tools for import, QA, describe, correlation, preprocessing, and variable engineering.
@@ -1504,8 +1520,11 @@ You can provide targeted help in three common ways:
           sessionID: userMessage.info.sessionID,
           type: "text",
           text:
-            ANALYST_SWITCH +
-            "\n\nReview the latest dataset and QA artifacts first, then present an execution checklist before running econometrics.",
+            workflowLocale === "zh-CN"
+              ? ANALYST_SWITCH +
+                "\n\n先检查最新数据集和 QA 产物，再给出执行清单，之后再运行计量分析。"
+              : ANALYST_SWITCH +
+                "\n\nReview the latest dataset and QA artifacts first, then present an execution checklist before running econometrics.",
           synthetic: true,
         })
       }
@@ -1527,7 +1546,9 @@ You can provide targeted help in three common ways:
             sessionID: userMessage.info.sessionID,
             type: "text",
             text:
-              ANALYST_SWITCH + "\n\n" + `A plan file exists at ${plan}. You should execute on the plan defined within it`,
+              workflowLocale === "zh-CN"
+                ? ANALYST_SWITCH + "\n\n" + `计划文件已存在：${plan}。你应按其中定义的计划执行。`
+                : ANALYST_SWITCH + "\n\n" + `A plan file exists at ${plan}. You should execute on the plan defined within it`,
             synthetic: true,
           })
           userMessage.parts.push(part)
@@ -1538,7 +1559,21 @@ You can provide targeted help in three common ways:
           messageID: userMessage.info.id,
           sessionID: userMessage.info.sessionID,
           type: "text",
-          text: `<system-reminder>
+          text:
+            workflowLocale === "zh-CN"
+              ? `<system-reminder>
+Analyst 模式已启用。
+
+你正在接收来自 Explorer 的工作流交接。不要直接跳去跑回归。
+
+开始实证执行前：
+1. 优先读取最新的 canonical dataset / datasetId-stageId 上下文。
+2. 检查最近的 QA、描述统计与 workflow 产物。
+3. 先展示简洁执行清单：数据准备、识别策略与变量、基准模型、诊断与稳健性、结果报告。
+4. 在运行估计或重执行数据步骤前先征求批准。
+5. 优先复用 Explorer 生成的产物，除非 workflow 证据显示它们已过期或缺失。
+</system-reminder>`
+              : `<system-reminder>
 Analyst mode is active.
 
 You are receiving a workflow handoff from Explorer. Do not jump straight into regression.
@@ -1565,7 +1600,24 @@ Before empirical execution:
           messageID: userMessage.info.id,
           sessionID: userMessage.info.sessionID,
           type: "text",
-          text: `<system-reminder>
+          text:
+            workflowLocale === "zh-CN"
+              ? `<system-reminder>
+Explorer 模式已启用。
+
+当前是数据准备模式，不是只读规划模式。
+
+你可以检查文件，并运行导入、描述统计、相关性、QA、预处理和变量工程等数据准备工具。
+在任何删除型步骤（如 filter/dropna/rollback）之前，都必须先征求用户确认。
+默认不要运行正式计量估计、回归表或报告生成工具。
+你的职责是把干净数据集、QA 证据和变量候选交给 Analyst。
+
+你可以从三种常见方向提供帮助：
+1. 分析数据集：检查文件、概括结构、识别变量角色、标记 QA 问题，并进行非破坏性清洗。
+2. 设计实证研究：细化研究问题、变量、识别策略和准备计划。
+3. 解答计量问题：解释方法、假设、诊断，以及 workflow 下一步该做什么。
+</system-reminder>`
+              : `<system-reminder>
 Explorer mode is active.
 
 This is data-preparation mode, not read-only planning mode.
@@ -1594,7 +1646,38 @@ You can provide targeted help in three common ways:
         messageID: userMessage.info.id,
         sessionID: userMessage.info.sessionID,
         type: "text",
-        text: `<system-reminder>
+        text:
+          workflowLocale === "zh-CN"
+            ? `<system-reminder>
+Explorer 模式已启用。用户明确表示现在不希望你执行，因此你绝对不能进行任何编辑（下文提到的计划文件除外）、运行任何非只读工具（包括修改配置或提交 commit），也不能对系统做其他任何更改。这条规则优先于你收到的其他指令。
+
+## 计划文件信息：
+${exists ? `计划文件已存在：${plan}。你可以读取它，并使用 edit 工具做增量修改。` : `计划文件尚不存在。你应使用 write 工具在 ${plan} 创建它。`}
+请通过写入或编辑这个文件来逐步构建计划。注意：这是唯一允许你修改的文件；除此之外，你只能执行只读操作。
+
+## 规划流程
+
+### 阶段 1：初步理解
+目标：通过阅读代码并向用户提问，全面理解需求。关键点：这一阶段只允许使用 explore 子代理类型。
+
+1. 专注理解用户需求，以及与需求相关的代码。
+
+2. **最多并行启动 3 个 explore agent**（单条消息内多次工具调用），高效探索代码库。
+   - 当任务仅涉及已知文件、用户已给出明确路径、或只是很小的定点修改时，用 1 个 agent。
+   - 当范围不确定、涉及多个模块、或需要先理解现有模式再规划时，再用多个 agent。
+   - 质量高于数量，最多 3 个，但通常越少越好。
+   - 如果用多个 agent，请给每个 agent 指定明确的探索重点。
+
+3. 探索后，使用 question tool 先澄清用户需求里的歧义。
+
+### 阶段 2：设计
+目标：设计实现方案。
+
+基于第一阶段的探索结果，启动通用 agent 设计实现方案。
+
+最多并行启动 1 个 agent。
+</system-reminder>`
+            : `<system-reminder>
 Explorer mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
 
 ## Plan File Info:

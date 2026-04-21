@@ -47,6 +47,12 @@ import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./anal
 import { formatRuntimePythonSetupError, getRuntimePythonStatus } from "@/killstata/runtime-config"
 import { ensureAnalysisPlan, formatAnalysisChecklist, setAnalysisPlanApproval } from "@/runtime/workflow"
 import {
+  workflowAnalysisPlanHeader,
+  workflowChecklistApprovalPrompt,
+  workflowChecklistIntro,
+  workflowChecklistOptions,
+} from "@/runtime/workflow-locale"
+import {
   buildSmartDatasetProfile,
   recommendEconometricsPlan,
   type SmartColumnProfile,
@@ -2549,35 +2555,37 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
     if (ctx.agent === "analyst" && params.methodName !== "auto_recommend") {
       const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
       if (!analystState.planApproved) {
-        const plannedRun = ensureAnalysisPlan({
+        const plannedRun = await ensureAnalysisPlan({
           sessionID: ctx.sessionID,
           datasetId: params.datasetId,
           runId: params.runId,
           branch: params.branch ?? "main",
         })
+        const locale = plannedRun.workflowLocale
+        const approvalOptions = workflowChecklistOptions(locale, "empirical")
         AnalysisIntent.markAnalystPlanGenerated(ctx.sessionID)
         const answers = await Question.ask({
           sessionID: ctx.sessionID,
           questions: [
             {
-              header: "Analysis Plan",
+              header: workflowAnalysisPlanHeader(locale),
               question: [
-                "Analyst prepared this empirical execution checklist:",
+                workflowChecklistIntro(locale, "empirical"),
                 ...formatAnalysisChecklist(plannedRun),
                 "",
-                "Approve it to start the econometric workflow.",
+                workflowChecklistApprovalPrompt(locale, "empirical"),
               ].join("\n"),
               custom: false,
               options: [
-                { label: "Yes", description: "Approve the plan and start econometric execution" },
-                { label: "No", description: "Stay in planning mode and do not run the model yet" },
+                approvalOptions.yes,
+                approvalOptions.no,
               ],
             },
           ],
           tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
         })
 
-        if (answers[0]?.[0] !== "Yes") {
+        if (answers[0]?.[0] !== approvalOptions.yes.label) {
           setAnalysisPlanApproval({
             sessionID: ctx.sessionID,
             approvalStatus: "declined",

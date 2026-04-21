@@ -1,5 +1,5 @@
 {
-  "version": "0.1.16",
+  "version": "0.1.17",
   "name": "killstata",
   "description": "AI-native econometrics CLI with staged data import, regression workflows, and paper-ready outputs.",
   "type": "module",
@@ -61,7 +61,8 @@
     "parsers-config.ts",
     "src/",
     "skills/",
-    "python/",
+    "python/**/*.py",
+    "python/README.md",
     "script/postinstall.mjs",
     "tsconfig.json",
     "package.json",
