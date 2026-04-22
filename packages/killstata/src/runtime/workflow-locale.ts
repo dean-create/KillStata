@@ -4,13 +4,7 @@ export type WorkflowLocale = "zh-CN" | "en"
 
 const CHINESE_CHAR = /[\u3400-\u9fff\uf900-\ufaff]/
 
-const CHECKLIST_LABELS: Record<
-  AnalysisChecklistItem["id"],
-  {
-    en: string
-    zh: string
-  }
-> = {
+const CHECKLIST_LABELS: Record<AnalysisChecklistItem["id"], { en: string; zh: string }> = {
   data_readiness: {
     en: "Data readiness",
     zh: "数据准备",
@@ -33,13 +27,7 @@ const CHECKLIST_LABELS: Record<
   },
 }
 
-const STAGE_LABELS: Record<
-  WorkflowStageKind,
-  {
-    en: string
-    zh: string
-  }
-> = {
+const STAGE_LABELS: Record<WorkflowStageKind, { en: string; zh: string }> = {
   healthcheck: { en: "Healthcheck", zh: "环境检查" },
   import: { en: "Import", zh: "数据导入" },
   profile_or_schema_check: { en: "Profile / schema check", zh: "结构与模式检查" },
@@ -47,30 +35,18 @@ const STAGE_LABELS: Record<
   preprocess_or_filter: { en: "Preprocess / filter", zh: "预处理与筛选" },
   describe_or_diagnostics: { en: "Describe / diagnostics", zh: "描述统计与诊断" },
   baseline_estimate: { en: "Baseline estimate", zh: "基准估计" },
-  verifier: { en: "Verifier", zh: "校验" },
+  verifier: { en: "Verifier", zh: "校验器" },
   report: { en: "Report", zh: "报告生成" },
 }
 
-const STATUS_LABELS: Record<
-  AnalysisChecklistItem["status"],
-  {
-    en: string
-    zh: string
-  }
-> = {
+const STATUS_LABELS: Record<AnalysisChecklistItem["status"], { en: string; zh: string }> = {
   pending: { en: "pending", zh: "待开始" },
   in_progress: { en: "in_progress", zh: "进行中" },
   completed: { en: "completed", zh: "已完成" },
   blocked: { en: "blocked", zh: "已阻塞" },
 }
 
-const APPROVAL_LABELS: Record<
-  NonNullable<WorkflowRun["approvalStatus"]>,
-  {
-    en: string
-    zh: string
-  }
-> = {
+const APPROVAL_LABELS: Record<NonNullable<WorkflowRun["approvalStatus"]>, { en: string; zh: string }> = {
   required: { en: "required", zh: "待审批" },
   approved: { en: "approved", zh: "已批准" },
   declined: { en: "declined", zh: "已拒绝" },
@@ -84,6 +60,7 @@ export function detectWorkflowLocaleFromText(text?: string): WorkflowLocale {
 
 export async function inferWorkflowLocaleFromSession(sessionID: string, fallback: WorkflowLocale = "en") {
   const { MessageV2 } = await import("@/session/message-v2")
+  let latest = ""
   for await (const message of MessageV2.stream(sessionID)) {
     if (message.info.role !== "user") continue
     const userText = message.parts
@@ -92,10 +69,9 @@ export async function inferWorkflowLocaleFromSession(sessionID: string, fallback
       .map((part) => part.text.trim())
       .filter(Boolean)
       .join("\n")
-    if (!userText) continue
-    return detectWorkflowLocaleFromText(userText)
+    if (userText) latest = userText
   }
-  return fallback
+  return latest ? detectWorkflowLocaleFromText(latest) : fallback
 }
 
 export function workflowLocaleLabel(locale: WorkflowLocale, values: { en: string; zh: string }) {

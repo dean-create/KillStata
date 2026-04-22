@@ -122,9 +122,11 @@ function analysisErrorDisplayText(input: {
 }) {
   const message = input.text?.trim()
   if (!message) return undefined
+  const friendly = userFacingAnalysisErrorText(message)
+  if (friendly && !input.showDetails) return friendly
   if (!input.isAnalysis || input.showDetails) return message
   if (input.waitingForAccess) return undefined
-  return userFacingAnalysisErrorText(message) ?? (isInternalAnalysisErrorText(message) ? undefined : message)
+  return isInternalAnalysisErrorText(message) ? undefined : message
 }
 
 const context = createContext<{
@@ -1819,6 +1821,12 @@ function GenericTool(props: ToolProps<any>) {
       pathMode: "relative",
     })
   })
+  const rawOutput = createMemo(() => props.output?.trim() ?? "")
+  const showRawOutput = createMemo(() => {
+    if (!ctx.showGenericToolOutput() || !rawOutput()) return false
+    const visibleText = [summary(), details()].filter(Boolean).join("\n")
+    return !visibleText.includes(rawOutput())
+  })
 
   return (
     <Switch>
@@ -1829,13 +1837,13 @@ function GenericTool(props: ToolProps<any>) {
             <Show when={details()}>
               <text fg={theme.textMuted}>{details()}</text>
             </Show>
-            <Show when={ctx.showGenericToolOutput() && props.output}>
+            <Show when={showRawOutput()}>
               <code
                 filetype="text"
                 drawUnstyledText={false}
                 streaming={false}
                 syntaxStyle={syntax()}
-                content={props.output ?? ""}
+                content={rawOutput()}
                 fg={theme.textMuted}
               />
             </Show>

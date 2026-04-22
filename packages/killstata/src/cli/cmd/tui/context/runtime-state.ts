@@ -65,3 +65,41 @@ export function workflowStatusLabel(workflow?: Pick<WorkflowTuiState, "repairOnl
   if (workflow.verifierStatus === "pass") return "verifier-pass"
   return undefined
 }
+
+type WorkflowUiLocale = NonNullable<WorkflowTuiState["workflowLocale"]>
+
+const WORKFLOW_STATUS_DISPLAY: Record<string, { en: string; zh: string }> = {
+  "repair-only": { en: "repair-only", zh: "仅修复模式" },
+  "verifier-block": { en: "verifier block", zh: "校验器阻塞" },
+  "verifier-warn": { en: "verifier warn", zh: "校验器警告" },
+  "verifier-pass": { en: "verifier pass", zh: "校验器通过" },
+}
+
+const WORKFLOW_AGENT_DISPLAY: Record<string, { en: string; zh: string }> = {
+  explore: { en: "Explorer", zh: "探索器" },
+  explorer: { en: "Explorer", zh: "探索器" },
+  general: { en: "Analyst", zh: "分析器" },
+  analyst: { en: "Analyst", zh: "分析器" },
+  verifier: { en: "Verifier", zh: "校验器" },
+  subagent: { en: "Subagent", zh: "子智能体" },
+  coordinator: { en: "Coordinator", zh: "协调器" },
+  agent: { en: "Agent", zh: "智能体" },
+}
+
+export function workflowStatusDisplayLabel(
+  workflow?: Pick<WorkflowTuiState, "repairOnly" | "verifierStatus">,
+  locale: WorkflowUiLocale = "en",
+) {
+  const label = workflowStatusLabel(workflow)
+  if (!label) return undefined
+  const display = WORKFLOW_STATUS_DISPLAY[label]
+  if (!display) return label
+  return locale === "zh-CN" ? display.zh : display.en
+}
+
+export function workflowAgentDisplayLabel(agent?: string, locale: WorkflowUiLocale = "en") {
+  if (!agent) return undefined
+  const display = WORKFLOW_AGENT_DISPLAY[agent]
+  if (!display) return agent
+  return locale === "zh-CN" ? display.zh : display.en
+}

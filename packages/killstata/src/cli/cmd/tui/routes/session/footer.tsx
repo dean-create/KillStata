@@ -5,7 +5,8 @@ import { useDirectory } from "../../context/directory"
 import { useConnected } from "../../component/dialog-model"
 import { createStore } from "solid-js/store"
 import { useRoute } from "../../context/route"
-import { workflowStatusLabel } from "../../context/runtime-state"
+import { workflowAgentDisplayLabel, workflowStatusDisplayLabel, workflowStatusLabel } from "../../context/runtime-state"
+import { workflowStageLabel } from "@/runtime/workflow-locale"
 
 export function Footer() {
   const { theme } = useTheme()
@@ -31,6 +32,8 @@ export function Footer() {
     return sync.data.workflow[route.data.sessionID]
   })
   const workflowLabel = createMemo(() => workflowStatusLabel(workflow()))
+  const workflowLocale = createMemo(() => workflow()?.workflowLocale ?? "en")
+  const workflowDisplayLabel = createMemo(() => workflowStatusDisplayLabel(workflow(), workflowLocale()))
   const directory = useDirectory()
   const connected = useConnected()
 
@@ -74,7 +77,7 @@ export function Footer() {
             </text>
           </Match>
           <Match when={connected()}>
-            <Show when={workflowLabel()}>
+            <Show when={workflowDisplayLabel()}>
               <text
                 fg={
                   workflowLabel() === "verifier-pass"
@@ -84,14 +87,21 @@ export function Footer() {
                       : theme.error
                 }
               >
-                {workflowLabel()}
+                {workflowDisplayLabel()}
               </text>
             </Show>
             <Show when={workflow()?.activeStage}>
-              <text fg={theme.textMuted}>stage {workflow()?.activeStage}</text>
+              <text fg={theme.textMuted}>
+                {workflowLocale() === "zh-CN" ? "阶段" : "stage"}{" "}
+                {workflowStageLabel(workflowLocale(), workflow()?.activeStage) ?? workflow()?.activeStage}
+              </text>
             </Show>
             <Show when={workflow()?.activeCoordinatorAgent}>
-              <text fg={theme.textMuted}>agent {workflow()?.activeCoordinatorAgent}</text>
+              <text fg={theme.textMuted}>
+                {workflowLocale() === "zh-CN" ? "执行者" : "agent"}{" "}
+                {workflowAgentDisplayLabel(workflow()?.activeCoordinatorAgent, workflowLocale()) ??
+                  workflow()?.activeCoordinatorAgent}
+              </text>
             </Show>
             <Show when={runtimeQuery() && runtimeQuery()?.phase !== "idle"}>
               <text fg={theme.textMuted}>

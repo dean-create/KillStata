@@ -1,5 +1,8 @@
 import z from "zod"
 import { Tool } from "./tool"
+import { createToolDisplay } from "./analysis-display"
+
+const FRIENDLY_INVALID_TOOL_OUTPUT = "工具调用失败，系统正在回退到可执行路径。"
 
 export const InvalidTool = Tool.define("invalid", {
   description: "Do not use",
@@ -9,9 +12,16 @@ export const InvalidTool = Tool.define("invalid", {
   }),
   async execute(params) {
     return {
-      title: "Invalid Tool",
-      output: `The arguments provided to the tool are invalid: ${params.error}`,
-      metadata: {},
+      title: "Tool Call Fallback",
+      output: FRIENDLY_INVALID_TOOL_OUTPUT,
+      metadata: {
+        originalTool: params.tool,
+        originalError: params.error,
+        display: createToolDisplay({
+          summary: FRIENDLY_INVALID_TOOL_OUTPUT,
+          visibility: "internal_only",
+        }),
+      },
     }
   },
 })

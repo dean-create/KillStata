@@ -6,7 +6,7 @@ import {
   userFacingAnalysisErrorText,
   type AnalysisToolPartLike,
 } from "@/runtime/analysis-text-sanitizer"
-import { isAnalysisTurn } from "@/runtime/analysis-user-view"
+import { isAnalysisTurn, maybeBuildAnalysisUserViewText } from "@/runtime/analysis-user-view"
 
 export type TranscriptOptions = {
   thinking: boolean
@@ -30,6 +30,14 @@ export type MessageWithParts = {
 }
 
 const INTERNAL_ANALYSIS_TRANSCRIPT_TOOLS = new Set([
+  "data_import",
+  "data_batch",
+  "econometrics",
+  "regression_table",
+  "heterogeneity_runner",
+  "research_brief",
+  "paper_draft",
+  "slide_generator",
   "glob",
   "grep",
   "list",
@@ -136,6 +144,19 @@ export function formatMessage(
     if (!formatted) continue
     result += formatted
     renderedBody = true
+  }
+
+  if (!renderedBody && msg.role === "assistant") {
+    const analysisFallback = analysisTurn
+      ? maybeBuildAnalysisUserViewText({
+          tools: assistantTools,
+          latestUserText,
+        })
+      : undefined
+    if (analysisFallback?.text) {
+      result += `${analysisFallback.text}\n\n`
+      renderedBody = true
+    }
   }
 
   if (!renderedBody && msg.role === "assistant") {

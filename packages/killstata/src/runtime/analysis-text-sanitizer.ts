@@ -3,7 +3,7 @@ import { isAnalysisTurn, wantsRawAnalysisDetail, type AnalysisToolPartLike } fro
 const LEGACY_ANALYSIS_FALLBACK_TEXT = "正在继续分析，稍后给出结果。"
 const PARQUET_STAGE_FALLBACK_TEXT = "该文件是内部 Parquet 工作层，系统已自动改用结构化结果文件继续分析。"
 const BINARY_FILE_FALLBACK_TEXT = "该文件是结构化二进制数据，系统已自动改用可读取的结果文件继续分析。"
-const TOOL_UNAVAILABLE_FALLBACK_TEXT = "分析工具调用失败，系统正在回退到可执行路径。"
+const TOOL_UNAVAILABLE_FALLBACK_TEXT = "工具调用失败，系统正在回退到可执行路径。"
 
 const NOISE_LINE_PATTERNS = [
   /^Thinking:/i,
@@ -13,6 +13,14 @@ const NOISE_LINE_PATTERNS = [
   /^I will /i,
   /^Now I /i,
   /^Next,? I /i,
+  /^我来帮您.*$/,
+  /^首先让我.*$/,
+  /^阶段[一二三四五六七八九十]+[：:].*$/,
+  /^现在(创建|开始|运行|进行|更新|查看|完成|导入|执行|切换|读取|检查|生成).*$/,
+  /^让我(修正|运行|查看|读取|检查|确认).*$/,
+  /^根据您的指令.*$/,
+  /^最后(查看|检查|整理|生成).*$/,
+  /^\d+[.、]\s*(检查|导入|数据|筛选|对|使用|分析|执行).*$/,
   /^Called the Read tool with the following input:/i,
   /^Read tool failed to read .*$/i,
   /^Do not execute mutating tools\./i,
@@ -229,7 +237,7 @@ function fallbackMessagesForInternalErrors(text: string) {
     messages.push(BINARY_FILE_FALLBACK_TEXT)
   }
 
-  if (/Model tried to call unavailable tool/i.test(text)) {
+  if (/Model tried to call unavailable tool/i.test(text) || /The arguments provided to the tool are invalid/i.test(text)) {
     messages.push(TOOL_UNAVAILABLE_FALLBACK_TEXT)
   }
 
@@ -309,6 +317,13 @@ export function sanitizeAnalysisAssistantText(input: {
       }
     }
 
+    if (hasInternalData) {
+      return {
+        text: "",
+        sanitized: true,
+      }
+    }
+
     return {
       text: input.text,
       sanitized: false,
@@ -336,7 +351,7 @@ export function sanitizeAnalysisAssistantText(input: {
     }
   }
 
-  if (hasInternalData || (hasNoise && !stripped)) {
+  if (hasInternalData || (analysisTurn && stripped !== normalized && !stripped) || (hasNoise && !stripped)) {
     return {
       text: "",
       sanitized: true,
