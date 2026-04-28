@@ -40,6 +40,16 @@ function parsePathAccessQuestion(question: string) {
   }
 }
 
+function isAllowedAnalysisRuntimeShell(request: RunPermissionRequest) {
+  if (request.permission !== "bash") return false
+
+  const description = String(request.metadata?.description ?? "")
+  const patterns = request.patterns.join("\n")
+  const knownAnalysisTask = /^Run econometric method:/i.test(description) || /^Data pipeline action:/i.test(description)
+  const knownRuntimePattern = /\*(econometrics|data)\*/i.test(patterns)
+  return knownAnalysisTask && knownRuntimePattern
+}
+
 export function decideNonInteractiveQuestion(input: {
   workspaceRoot: string
   projectRoot?: string
@@ -57,8 +67,8 @@ export function decideNonInteractiveQuestion(input: {
     if (primary.header === "Analysis Plan") {
       return {
         action: "reply",
-        answers: [["No"]],
-        reason: "auto_skip_analysis_plan_question",
+        answers: [["Yes"]],
+        reason: "auto_accept_analysis_plan_question",
       }
     }
     return {
@@ -92,6 +102,14 @@ export function decideNonInteractivePermission(input: {
       response: "once",
       auto: true,
       reason: "auto_allow_low_risk_read",
+    }
+  }
+
+  if (isAllowedAnalysisRuntimeShell(input.request)) {
+    return {
+      response: "once",
+      auto: true,
+      reason: "auto_allow_analysis_runtime_shell",
     }
   }
 
