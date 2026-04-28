@@ -736,9 +736,19 @@ export namespace ProviderTransform {
       lowered.includes("incorrect api key provided") ||
       lowered.includes("apikeyerror") ||
       lowered.includes("alibabacloud.com") ||
-      lowered.includes("invalid_api_key")
+      lowered.includes("invalid_api_key") ||
+      lowered.includes("invalid api key") ||
+      lowered.includes("authentication_error")
     ) {
       return "API key is invalid or not active. Reconnect this provider and make sure you pasted the full API key."
+    }
+    if (
+      lowered.includes("arrearage") ||
+      lowered.includes("overdue-payment") ||
+      lowered.includes("account is in good standing") ||
+      lowered.includes("access denied")
+    ) {
+      return "This provider account is unavailable because of billing or access restrictions. Check the account balance, service status, and model permissions for this API key, then retry."
     }
 
     return message

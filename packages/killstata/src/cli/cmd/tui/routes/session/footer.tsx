@@ -1,12 +1,12 @@
 import { createMemo, Match, onCleanup, onMount, Show, Switch } from "solid-js"
-import { useTheme } from "../../context/theme"
-import { useSync } from "../../context/sync"
-import { useDirectory } from "../../context/directory"
-import { useConnected } from "../../component/dialog-model"
 import { createStore } from "solid-js/store"
-import { useRoute } from "../../context/route"
-import { workflowAgentDisplayLabel, workflowStatusDisplayLabel, workflowStatusLabel } from "../../context/runtime-state"
 import { workflowStageLabel } from "@/runtime/workflow-locale"
+import { useConnected } from "../../component/dialog-model"
+import { useDirectory } from "../../context/directory"
+import { useRoute } from "../../context/route"
+import { useSync } from "../../context/sync"
+import { useTheme } from "../../context/theme"
+import { workflowAgentDisplayLabel, workflowStatusDisplayLabel, workflowStatusLabel } from "../../context/runtime-state"
 
 export function Footer() {
   const { theme } = useTheme()
@@ -42,7 +42,6 @@ export function Footer() {
   })
 
   onMount(() => {
-    // Track all timeouts to ensure proper cleanup
     const timeouts: ReturnType<typeof setTimeout>[] = []
 
     function tick() {
@@ -59,6 +58,7 @@ export function Footer() {
         return
       }
     }
+
     timeouts.push(setTimeout(() => tick(), 10_000))
 
     onCleanup(() => {
@@ -114,21 +114,21 @@ export function Footer() {
             </Show>
             <Show when={permissions().length > 0}>
               <text fg={theme.warning}>
-                <span style={{ fg: theme.warning }}>△</span> {permissions().length} Permission
+                <span style={{ fg: theme.warning }}>!</span> {permissions().length} Permission
                 {permissions().length > 1 ? "s" : ""}
               </text>
             </Show>
             <text fg={theme.text}>
-              <span style={{ fg: lsp().length > 0 ? theme.success : theme.textMuted }}>•</span> {lsp().length} LSP
+              <span style={{ fg: lsp().length > 0 ? theme.success : theme.textMuted }}>o</span> {lsp().length} LSP
             </text>
             <Show when={mcp()}>
               <text fg={theme.text}>
                 <Switch>
                   <Match when={mcpError()}>
-                    <span style={{ fg: theme.error }}>⊙ </span>
+                    <span style={{ fg: theme.error }}>x</span>
                   </Match>
                   <Match when={true}>
-                    <span style={{ fg: theme.success }}>⊙ </span>
+                    <span style={{ fg: theme.success }}>o</span>
                   </Match>
                 </Switch>
                 {mcp()} MCP

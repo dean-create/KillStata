@@ -15,12 +15,12 @@ const NOISE_LINE_PATTERNS = [
   /^Next,? I /i,
   /^我来帮您.*$/,
   /^首先让我.*$/,
-  /^阶段[一二三四五六七八九十]+[：:].*$/,
+  /^阶段[一二三四五六七八九十\d]+[：:].*$/,
   /^现在(创建|开始|运行|进行|更新|查看|完成|导入|执行|切换|读取|检查|生成).*$/,
   /^让我(修正|运行|查看|读取|检查|确认).*$/,
   /^根据您的指令.*$/,
   /^最后(查看|检查|整理|生成).*$/,
-  /^\d+[.、]\s*(检查|导入|数据|筛选|对|使用|分析|执行).*$/,
+  /^\d+[.、]\s*(检查|导入|数据|筛选|使用|分析|执行).*$/,
   /^Called the Read tool with the following input:/i,
   /^Read tool failed to read .*$/i,
   /^Do not execute mutating tools\./i,
@@ -289,7 +289,6 @@ export function sanitizeAnalysisAssistantText(input: {
 
   const needsSanitization = analysisTurn || hasInternalData
 
-  // Non-analysis answers should not be sanitized just because they are long.
   if (!needsSanitization) {
     return {
       text: input.text,
