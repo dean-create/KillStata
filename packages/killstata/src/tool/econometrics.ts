@@ -2546,6 +2546,15 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
         `Retry budget exhausted for econometrics in this session (${retryBudget.count}/${retryBudget.max}). Inspect the reflection logs and repair the failed stage before retrying.`,
       )
     }
+    validateMethodOptions({
+      methodName: params.methodName,
+      dependentVar: params.dependentVar,
+      treatmentVar: params.treatmentVar,
+      options: params.options,
+      entityVar: params.entityVar,
+      timeVar: params.timeVar,
+    })
+
     const pythonStatus = await getRuntimePythonStatus()
     if (!pythonStatus.ok || pythonStatus.missing.length) {
       throw new Error(formatRuntimePythonSetupError("econometrics", pythonStatus))
@@ -2606,15 +2615,6 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
         AnalysisIntent.markAnalystPlanApproval(ctx.sessionID, true)
       }
     }
-
-    validateMethodOptions({
-      methodName: params.methodName,
-      dependentVar: params.dependentVar,
-      treatmentVar: params.treatmentVar,
-      options: params.options,
-      entityVar: params.entityVar,
-      timeVar: params.timeVar,
-    })
 
     const artifactInput = resolveArtifactInput({
       datasetId: params.datasetId,

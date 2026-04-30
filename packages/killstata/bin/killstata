@@ -29,14 +29,22 @@ function launch(runtime, entryFile) {
     args.unshift("run", "--conditions=browser")
   }
 
+  const desktopClient = process.env.KILLSTATA_CLIENT === "desktop"
   const child = spawn(runtime, args, {
-    stdio: "inherit",
+    stdio: desktopClient ? ["ignore", "pipe", "pipe"] : "inherit",
     cwd: PACKAGE_ROOT,
+    shell: false,
+    windowsHide: true,
     env: {
       ...process.env,
       KILLSTATA: "1",
     },
   })
+
+  if (desktopClient) {
+    child.stdout?.on("data", (chunk) => process.stdout.write(chunk))
+    child.stderr?.on("data", (chunk) => process.stderr.write(chunk))
+  }
 
   child.on("exit", (code) => {
     process.exit(code ?? 0)

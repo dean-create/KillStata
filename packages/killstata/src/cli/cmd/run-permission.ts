@@ -50,6 +50,14 @@ function isAllowedAnalysisRuntimeShell(request: RunPermissionRequest) {
   return knownAnalysisTask && knownRuntimePattern
 }
 
+function isAnalysisPlanQuestion(header: string) {
+  return header === "Analysis Plan" || header === "分析计划"
+}
+
+function analysisPlanAnswer(header: string) {
+  return header === "分析计划" ? "是" : "Yes"
+}
+
 export function decideNonInteractiveQuestion(input: {
   workspaceRoot: string
   projectRoot?: string
@@ -64,10 +72,10 @@ export function decideNonInteractiveQuestion(input: {
   }
 
   if (primary.header !== "Path Access") {
-    if (primary.header === "Analysis Plan") {
+    if (isAnalysisPlanQuestion(primary.header)) {
       return {
         action: "reply",
-        answers: [["Yes"]],
+        answers: [[analysisPlanAnswer(primary.header)]],
         reason: "auto_accept_analysis_plan_question",
       }
     }

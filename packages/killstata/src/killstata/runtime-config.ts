@@ -65,7 +65,7 @@ export const REQUIRED_PYTHON_PACKAGES = [
   "matplotlib",
   "openpyxl",
   "pyarrow",
-  "docx",
+  "python-docx",
 ] as const
 
 export function defaultPythonCommand() {
@@ -443,16 +443,44 @@ export async function resolveRuntimePythonCommand() {
 
 export function pythonInstallCommand(
   pythonExecutable: string,
-  packages = [...REQUIRED_PYTHON_PACKAGES],
+  packages: readonly string[] = [...REQUIRED_PYTHON_PACKAGES],
 ) {
-  return `${shellQuote(pythonExecutable)} -m pip install ${packages.join(" ")}`
+  const pipPackages = packages.map((pkg) => (pkg === "docx" ? "python-docx" : pkg))
+  return `${shellQuote(pythonExecutable)} -m pip install ${pipPackages.join(" ")}`
 }
 
-export function checkPythonPackages(pythonExecutable: string, packages = [...REQUIRED_PYTHON_PACKAGES]): PythonPackageReport {
+export function checkPythonPackages(
+  pythonExecutable: string,
+  packages: readonly string[] = [...REQUIRED_PYTHON_PACKAGES],
+): PythonPackageReport {
+  const checks = packages.map((pkg) => {
+    if (pkg === "python-docx" || pkg === "docx") {
+      return {
+        package: "python-docx",
+        module: "docx",
+        documentClass: true,
+      }
+    }
+    return {
+      package: pkg,
+      module: pkg,
+      documentClass: false,
+    }
+  })
   const script = [
-    "import importlib.util, json",
-    `packages = ${JSON.stringify(packages)}`,
-    "missing = [pkg for pkg in packages if importlib.util.find_spec(pkg) is None]",
+    "import importlib, importlib.util, json",
+    `checks = json.loads(${JSON.stringify(JSON.stringify(checks))})`,
+    "missing = []",
+    "for item in checks:",
+    "    try:",
+    "        if importlib.util.find_spec(item['module']) is None:",
+    "            raise ImportError('module is unavailable')",
+    "        if item.get('documentClass'):",
+    "            module = importlib.import_module(item['module'])",
+    "            if not hasattr(module, 'Document'):",
+    "                raise ImportError('python-docx Document class is unavailable')",
+    "    except Exception:",
+    "        missing.append(item['package'])",
     "print(json.dumps({'missing': missing}))",
   ].join("\n")
 

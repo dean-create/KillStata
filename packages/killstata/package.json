@@ -1,5 +1,5 @@
 {
-  "version": "0.1.20",
+  "version": "0.1.21",
   "name": "killstata",
   "description": "AI-native econometrics CLI with staged data import, regression workflows, and paper-ready outputs.",
   "type": "module",
