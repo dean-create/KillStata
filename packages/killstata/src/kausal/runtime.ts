@@ -8,6 +8,7 @@ export type KausalPromptInput = {
   rawPrompt?: string
   agent: "explorer" | "analyst" | string
   model?: string
+  sessionID?: string
   activeFile?: string
   configContent?: string
 }
@@ -54,7 +55,7 @@ export async function runKausalPrompt(input: KausalPromptInput, onEvent: (event:
       return Server.App().fetch(new Request(request, { headers }))
     }) as typeof globalThis.fetch
     const sdk = createKillstataClient({ baseUrl: "http://killstata.internal", fetch: fetchFn })
-    const sessionID = await createSession(sdk, input.rawPrompt || input.prompt)
+    const sessionID = await resolveSession(sdk, input.sessionID, input.rawPrompt || input.prompt)
     const result = await streamPrompt({
       sdk,
       sessionID,
@@ -86,6 +87,15 @@ async function createSession(sdk: KillstataClient, prompt: string) {
   return result.data.id
 }
 
+async function resolveSession(sdk: KillstataClient, sessionID: string | undefined, prompt: string) {
+  const id = sessionID?.trim()
+  if (id) {
+    const sessions = await sdk.session.list().catch(() => undefined)
+    if (sessions?.data?.some((session) => session.id === id)) return id
+  }
+  return createSession(sdk, prompt)
+}
+
 async function streamPrompt(input: {
   sdk: KillstataClient
   sessionID: string
@@ -103,6 +113,15 @@ async function streamPrompt(input: {
   })
   let finalText = ""
   let errorText = ""
+  const updates: KausalRuntimeEvent[] = []
+  const emit = (event: KausalRuntimeEvent) => {
+    const normalized = {
+      timestamp: Date.now(),
+      ...event,
+    }
+    updates.push(normalized)
+    input.onEvent(normalized)
+  }
 
   const eventProcessor = (async () => {
     for await (const event of events.stream) {
@@ -113,7 +132,7 @@ async function streamPrompt(input: {
 
         if (part.type === "text") {
           finalText = part.text || finalText
-          input.onEvent({
+          emit({
             type: "assistant.text",
             id: part.id,
             text: part.text,
@@ -122,7 +141,7 @@ async function streamPrompt(input: {
         }
 
         if (part.type === "step-start") {
-          input.onEvent({
+          emit({
             type: "step.started",
             id: part.id,
             text: part.title || part.text || "开始分析步骤",
@@ -130,7 +149,7 @@ async function streamPrompt(input: {
         }
 
         if (part.type === "step-finish") {
-          input.onEvent({
+          emit({
             type: "step.completed",
             id: part.id,
             text: part.title || part.text || "分析步骤完成",
@@ -138,7 +157,7 @@ async function streamPrompt(input: {
         }
 
         if (part.type === "tool") {
-          input.onEvent({
+          emit({
             type: `tool.${part.state?.status || "updated"}`,
             id: part.id,
             tool: part.tool,
@@ -150,9 +169,13 @@ async function streamPrompt(input: {
         }
       }
 
+      if (payload.type === "runtime.workflow.state" && payload.properties?.sessionID === input.sessionID) {
+        emit(normalizeWorkflowStateEvent(payload.properties))
+      }
+
       if (payload.type === "session.error" && payload.properties.sessionID === input.sessionID) {
         errorText = readErrorMessage(payload.properties.error)
-        input.onEvent({ type: "error", text: errorText })
+        emit({ type: "error", text: errorText })
       }
 
       if (payload.type === "permission.asked" && payload.properties.sessionID === input.sessionID) {
@@ -170,7 +193,7 @@ async function streamPrompt(input: {
           permissionID: request.id,
           response: decision.response,
         })
-        input.onEvent({
+        emit({
           type: decision.response === "reject" ? "permission.auto.rejected" : "permission.auto.allowed",
           text: decision.reason,
           decision,
@@ -208,7 +231,7 @@ async function streamPrompt(input: {
             requestID: question.id,
           })
         }
-        input.onEvent({
+        emit({
           type: kausalDecision.action === "reply" ? "question.auto.replied" : "question.auto.rejected",
           text: kausalDecision.reason,
           decision: kausalDecision,
@@ -231,11 +254,26 @@ async function streamPrompt(input: {
 
   await eventProcessor.finally(() => eventsAbort.abort())
   if (errorText) throw new Error(errorText)
-  input.onEvent({ type: "run.completed", text: "Kausal Agent 已完成。" })
+  emit({ type: "run.completed", text: "Kausal Agent 已完成。" })
   return {
     command: "embedded-runtime",
     text: finalText || "Kausal Agent 已完成，但没有返回文本结果。",
-    updates: [],
+    updates,
+    sessionID: input.sessionID,
+    runtimeSessionId: input.sessionID,
+  }
+}
+
+function normalizeWorkflowStateEvent(properties: any): KausalRuntimeEvent {
+  const stage = properties.activeStage
+    ? `阶段 ${properties.activeStage}${properties.activeStageId ? ` (${properties.activeStageId})` : ""}`
+    : ""
+  const approval = properties.approvalStatus ? `审批 ${properties.approvalStatus}` : ""
+  const verifier = properties.verifierStatus ? `校验 ${properties.verifierStatus}` : ""
+  return {
+    type: "workflow.state",
+    text: [stage, approval, verifier].filter(Boolean).join(" · ") || "工作流状态已更新",
+    ...properties,
   }
 }
 

@@ -2,6 +2,8 @@ import { Bus } from "@/bus"
 import { RuntimeEvents } from "@/runtime/events"
 import { QueryGuard } from "@/runtime/query-guard"
 import type { QueuedSessionAction, QueuedSessionActionType } from "@/runtime/types"
+import { RuntimeTaskLedger } from "@/runtime/task-ledger"
+import { RuntimeProtocol } from "@/runtime/protocol"
 import { Instance } from "@/project/instance"
 import { SessionStatus } from "./status"
 import { MessageV2 } from "./message-v2"
@@ -20,7 +22,7 @@ type Runtime = {
 }
 
 function publishQueue(sessionID: string, runtime: Runtime) {
-  Bus.publish(RuntimeEvents.QueueUpdated, {
+  const payload = {
     sessionID,
     pending: runtime.queue.length,
     actions: runtime.queue.map((action) => ({
@@ -29,17 +31,31 @@ function publishQueue(sessionID: string, runtime: Runtime) {
       priority: action.priority,
       createdAt: action.createdAt,
     })),
+  }
+  Bus.publish(RuntimeEvents.QueueUpdated, payload)
+  RuntimeProtocol.publish({
+    sessionID,
+    source: "runtime",
+    type: "queue.updated",
+    payload,
   })
 }
 
 function publishQueryState(sessionID: string, runtime: Runtime, action?: QueuedSessionActionType) {
   const snapshot = runtime.guard.snapshot(runtime.queue.length, action ?? runtime.queue[0]?.type)
-  Bus.publish(RuntimeEvents.QueryState, {
+  const payload = {
     sessionID,
     phase: !runtime.guard.active && runtime.queue.length > 0 ? "accepted" : snapshot.phase,
     generation: snapshot.generation,
     pending: snapshot.pending,
     action: snapshot.action,
+  }
+  Bus.publish(RuntimeEvents.QueryState, payload)
+  RuntimeProtocol.publish({
+    sessionID,
+    source: "runtime",
+    type: "query.state",
+    payload,
   })
 }
 
@@ -89,6 +105,7 @@ export namespace SessionRunCoordinator {
     const runtime = ensure(action.sessionID)
     runtime.queue.push(action)
     runtime.queue.sort((a, b) => b.priority - a.priority || a.createdAt - b.createdAt)
+    RuntimeTaskLedger.recordQueued(action)
     publishQueue(action.sessionID, runtime)
     publishQueryState(action.sessionID, runtime, action.type)
     return action
@@ -129,6 +146,14 @@ export namespace SessionRunCoordinator {
   export function next(sessionID: string) {
     const runtime = ensure(sessionID)
     const next = runtime.queue.shift()
+    if (next) {
+      RuntimeTaskLedger.markStatus({
+        sessionID,
+        taskId: next.id,
+        status: "dispatching",
+        message: `${next.type} dispatching`,
+      })
+    }
     publishQueue(sessionID, runtime)
     publishQueryState(sessionID, runtime, next?.type)
     return next
@@ -149,6 +174,13 @@ export namespace SessionRunCoordinator {
   export function startDispatch(sessionID: string, generation: number) {
     const runtime = ensure(sessionID)
     const started = runtime.guard.start(generation)
+    if (started) {
+      RuntimeTaskLedger.markStatus({
+        sessionID,
+        status: "running",
+        message: "query running",
+      })
+    }
     publishQueryState(sessionID, runtime, runtime.queue[0]?.type)
     return started
   }
@@ -156,6 +188,13 @@ export namespace SessionRunCoordinator {
   export function cancelDispatch(sessionID: string, generation: number) {
     const runtime = ensure(sessionID)
     const cancelled = runtime.guard.cancelDispatch(generation)
+    if (cancelled) {
+      RuntimeTaskLedger.markStatus({
+        sessionID,
+        status: "cancelled",
+        message: "dispatch cancelled",
+      })
+    }
     publishQueryState(sessionID, runtime)
     return cancelled
   }
@@ -164,6 +203,11 @@ export namespace SessionRunCoordinator {
     const runtime = ensure(sessionID)
     runtime.abort = undefined
     runtime.guard.finish(generation)
+    RuntimeTaskLedger.markStatus({
+      sessionID,
+      status: "completed",
+      message: "query completed",
+    })
     publishQueue(sessionID, runtime)
     publishQueryState(sessionID, runtime)
     SessionStatus.set(sessionID, { type: "idle" })
@@ -176,6 +220,11 @@ export namespace SessionRunCoordinator {
     runtime.queue = []
     runtime.guard = new QueryGuard()
     rejectAll(sessionID, error ?? new Error("Session prompt cancelled"))
+    RuntimeTaskLedger.markStatus({
+      sessionID,
+      status: "cancelled",
+      message: error instanceof Error ? error.message : "Session prompt cancelled",
+    })
     publishQueue(sessionID, runtime)
     publishQueryState(sessionID, runtime)
     SessionStatus.set(sessionID, { type: "idle" })
@@ -188,6 +237,11 @@ export namespace SessionRunCoordinator {
     runtime.queue = []
     runtime.guard = new QueryGuard()
     rejectAll(sessionID, error)
+    RuntimeTaskLedger.markStatus({
+      sessionID,
+      status: "failed",
+      message: error instanceof Error ? error.message : "Session prompt failed",
+    })
     publishQueue(sessionID, runtime)
     publishQueryState(sessionID, runtime)
     SessionStatus.set(sessionID, { type: "idle" })

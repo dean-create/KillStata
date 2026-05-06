@@ -60,6 +60,211 @@ export interface CompactionSnapshot {
   trustedArtifactPaths: string[]
   childSessionSummaries: string[]
   numericGroundingState: string[]
+  activeTaskId?: string
+  activeStageId?: string
+  latestFailureCode?: StageFailureCode
+  latestVerifierStatus?: "pass" | "warn" | "block"
+  inputGraphRefs?: string[]
+  latestContextSnapshot?: ContextManagerSnapshot
+}
+
+export type RuntimeTaskStatus = "queued" | "dispatching" | "running" | "completed" | "failed" | "cancelled" | "restored"
+
+export type TaskTimelineEventKind =
+  | "input.accepted"
+  | "queue.updated"
+  | "query.state"
+  | "workflow.state"
+  | "tool.lifecycle"
+  | "verifier"
+  | "checkpoint"
+  | "restore"
+  | "policy.decision"
+  | "context.snapshot"
+  | "agent.control"
+  | "protocol.event"
+  | "failure"
+  | "completed"
+
+export interface InputGraphNode {
+  id: string
+  type: "text" | "file" | "image" | "dataset" | "artifact" | "stage" | "command"
+  label?: string
+  ref?: string
+  mime?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface TaskTimelineEvent {
+  id: string
+  taskId: string
+  sessionID: string
+  kind: TaskTimelineEventKind
+  stageId?: string
+  workflowRunId?: string
+  message?: string
+  metadata?: Record<string, unknown>
+  createdAt: string
+}
+
+export interface RuntimeCheckpoint {
+  checkpointId: string
+  taskId?: string
+  sessionID: string
+  workflowRunId?: string
+  stageId?: string
+  branch?: string
+  activeStage?: WorkflowStageKind
+  trustedArtifacts: string[]
+  verifierStatus?: "pass" | "warn" | "block"
+  repairOnly?: boolean
+  replayInput?: Record<string, unknown>
+  createdAt: string
+}
+
+export interface RestoreTarget {
+  checkpointId?: string
+  stageId?: string
+}
+
+export interface RuntimeTaskRecord {
+  taskId: string
+  sessionID: string
+  actionType: QueuedSessionActionType
+  status: RuntimeTaskStatus
+  priority: number
+  messageID?: string
+  workflowRunId?: string
+  stageId?: string
+  activeStage?: WorkflowStageKind
+  inputGraph: InputGraphNode[]
+  timeline: TaskTimelineEvent[]
+  latestCheckpointId?: string
+  latestFailureCode?: StageFailureCode
+  verifierStatus?: "pass" | "warn" | "block"
+  repairOnly?: boolean
+  policyDecisions?: ExecPolicyDecision[]
+  audit?: Record<string, unknown>[]
+  contextVersion?: number
+  metadata?: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ToolAvailabilityExplanation {
+  toolID: string
+  available: boolean
+  exposure?: "direct" | "deferred" | "blocked"
+  reasons: string[]
+}
+
+export interface RuntimeProtocolEvent {
+  type: string
+  sessionID: string
+  payload: Record<string, unknown>
+}
+
+export interface RuntimeSubmission {
+  submissionId: string
+  sessionID: string
+  source: "tui" | "cli" | "acp" | "kausal" | "runtime"
+  kind: QueuedSessionActionType | "command" | "tool" | "agent"
+  payload: Record<string, unknown>
+  createdAt: string
+}
+
+export interface RuntimeEventEnvelope {
+  version: 1
+  sequence: number
+  sessionID: string
+  source: "runtime" | "workflow" | "tool" | "verifier" | "task-ledger" | "agent-control" | "context"
+  event: RuntimeProtocolEvent
+  createdAt: string
+  compatibility?: Record<string, unknown>
+}
+
+export type ExecPolicyAction = "allow" | "ask" | "deny"
+
+export interface ExecPolicy {
+  profile: "local-default" | "remote-safe" | "verifier-readonly"
+  safePrefixes: string[]
+  askPrefixes: string[]
+  denyPatterns: string[]
+  networkRequiresApproval: boolean
+  externalWriteRequiresApproval: boolean
+}
+
+export interface ExecPolicyDecision {
+  decisionId: string
+  sessionID: string
+  toolName: string
+  command: string
+  action: ExecPolicyAction
+  reason: string
+  matchedRule?: string
+  networkAccess?: boolean
+  filesystemRisk?: "none" | "external_write" | "destructive" | "trusted_artifact_overwrite"
+  createdAt: string
+}
+
+export interface DeferredToolEntry {
+  toolID: string
+  reason: string
+  enableWhen: string[]
+  remoteSafe: boolean
+  repairOnlyAllowed: boolean
+}
+
+export interface ToolExposurePlan {
+  directTools: string[]
+  deferredTools: DeferredToolEntry[]
+  blockedTools: ToolAvailabilityExplanation[]
+  policy: ToolAvailabilityPolicy
+}
+
+export interface ContextManagerSnapshot {
+  sessionID: string
+  historyVersion: number
+  referenceContext: {
+    activeTaskId?: string
+    activeWorkflowRunId?: string
+    activeStageId?: string
+    latestFailureCode?: StageFailureCode
+    latestVerifierStatus?: "pass" | "warn" | "block"
+    trustedArtifacts: string[]
+    inputGraphRefs: string[]
+  }
+  tokenEstimate: number
+  protectedItems: string[]
+  imageInputs: Array<{
+    ref: string
+    mode: "native" | "text-reference"
+  }>
+  createdAt: string
+}
+
+export interface InterAgentMessage {
+  messageId: string
+  sessionID: string
+  fromAgent: "coordinator" | "explore" | "general" | "verifier"
+  toAgent: "explore" | "general" | "verifier"
+  stageId?: string
+  envelope: {
+    summary: string
+    findings: string[]
+    producedArtifacts: string[]
+    nextStepRecommendation: string
+  }
+  createdAt: string
+}
+
+export interface AgentControlState {
+  sessionID: string
+  activeAgent?: "explore" | "general" | "verifier"
+  forkMode?: "minimal_context" | "last_n_turns" | "workflow_slice"
+  decisions: WorkflowCoordinatorDecision[]
+  messages: InterAgentMessage[]
+  updatedAt: string
 }
 
 export type WorkflowStageKind =
@@ -184,6 +389,11 @@ export interface WorkflowRun {
   lastRerunExecution?: Record<string, unknown>
   latestFailure?: StageFailureRecord
   latestVerifier?: VerifierReport
+  activeTaskId?: string
+  lastCheckpointId?: string
+  lastRestore?: Record<string, unknown>
+  activePermissionProfile?: ExecPolicy["profile"]
+  latestContextSnapshot?: ContextManagerSnapshot
   createdAt: string
   updatedAt: string
 }
@@ -272,7 +482,12 @@ export interface StageReuseRecord {
 export interface ToolAvailabilityResolution {
   policy: ToolAvailabilityPolicy
   allowedToolIDs: string[]
+  directToolIDs?: string[]
+  deferredToolIDs?: string[]
+  blockedToolIDs?: string[]
   bundle: string[]
+  explanations?: ToolAvailabilityExplanation[]
+  exposurePlan?: ToolExposurePlan
 }
 
 export interface CommandCapability {
@@ -281,6 +496,10 @@ export interface CommandCapability {
   workflowAware?: boolean
   immediate?: boolean
   remoteSafe?: boolean
+  repairOnlyAllowed?: boolean
+  requiresTrustedArtifacts?: boolean
+  visibleWhen?: string[]
+  blockedReason?: string
 }
 
 export interface LifecycleHookResult {

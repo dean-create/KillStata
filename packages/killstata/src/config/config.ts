@@ -589,6 +589,10 @@ export namespace Config {
     workflowAware: z.boolean().optional(),
     immediate: z.boolean().optional(),
     remoteSafe: z.boolean().optional(),
+    repairOnlyAllowed: z.boolean().optional(),
+    requiresTrustedArtifacts: z.boolean().optional(),
+    visibleWhen: z.array(z.string()).optional(),
+    blockedReason: z.string().optional(),
   })
   export type Command = z.infer<typeof Command>
 

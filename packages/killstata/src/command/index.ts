@@ -37,6 +37,10 @@ export namespace Command {
       workflowAware: z.boolean().optional(),
       immediate: z.boolean().optional(),
       remoteSafe: z.boolean().optional(),
+      repairOnlyAllowed: z.boolean().optional(),
+      requiresTrustedArtifacts: z.boolean().optional(),
+      visibleWhen: z.array(z.string()).optional(),
+      blockedReason: z.string().optional(),
       // workaround for zod not supporting async functions natively so we use getters
       // https://zod.dev/v4/changelog?id=zfunction
       template: z.promise(z.string()).or(z.string()),
@@ -69,33 +73,68 @@ export namespace Command {
     ARTIFACT: "artifact",
     DOCTOR: "doctor",
     VERIFY: "verify",
+    TASKS: "tasks",
+    TIMELINE: "timeline",
+    RESTORE: "restore",
+    TOOLS: "tools",
+    SKILLS: "skills",
+    DIAGNOSTICS: "diagnostics",
+    AGENT: "agent",
   } as const
 
-  export function capabilityTags(command: Pick<Info, "availability" | "queueBehavior" | "workflowAware" | "immediate" | "remoteSafe">) {
+  export function capabilityTags(command: Pick<Info, "availability" | "queueBehavior" | "workflowAware" | "immediate" | "remoteSafe" | "repairOnlyAllowed" | "requiresTrustedArtifacts">) {
     return [
       command.workflowAware ? "workflow" : undefined,
       ...(command.availability ?? []),
       command.queueBehavior ?? (command.immediate ? "immediate" : undefined),
       command.remoteSafe ? "remote-safe" : undefined,
+      command.repairOnlyAllowed ? "repair-only-ok" : undefined,
+      command.requiresTrustedArtifacts ? "trusted-artifacts" : undefined,
     ].filter((item, index, arr): item is string => typeof item === "string" && arr.indexOf(item) === index)
   }
 
-  export function resolveCapability(command: Pick<Info, "availability" | "queueBehavior" | "workflowAware" | "immediate" | "remoteSafe">) {
+  export function resolveCapability(command: Pick<Info, "availability" | "queueBehavior" | "workflowAware" | "immediate" | "remoteSafe" | "repairOnlyAllowed" | "requiresTrustedArtifacts" | "visibleWhen" | "blockedReason">) {
     return {
       availability: command.availability,
       queueBehavior: command.queueBehavior,
       workflowAware: command.workflowAware,
       immediate: command.immediate,
       remoteSafe: command.remoteSafe,
+      repairOnlyAllowed: command.repairOnlyAllowed,
+      requiresTrustedArtifacts: command.requiresTrustedArtifacts,
+      visibleWhen: command.visibleWhen,
+      blockedReason: command.blockedReason,
     }
   }
 
   function workflowTemplate(input: {
-    action: "status" | "stage" | "artifacts" | "doctor" | "verify" | "rerun_plan" | "rerun"
+    action:
+      | "status"
+      | "stage"
+      | "artifacts"
+      | "doctor"
+      | "verify"
+      | "rerun_plan"
+      | "rerun"
+      | "tasks"
+      | "timeline"
+      | "restore"
+      | "tools"
+      | "skills"
+      | "diagnostics"
+      | "agent"
     guidance: string[]
   }) {
+    const commandName =
+      input.action === "status"
+        ? "workflow"
+        : input.action === "stage"
+          ? "stage"
+          : input.action === "artifacts"
+            ? "artifact"
+            : input.action
     return [
-      `You are handling the /${input.action === "status" ? "workflow" : input.action === "stage" ? "stage" : input.action === "artifacts" ? "artifact" : input.action === "doctor" ? "doctor" : input.action === "verify" ? "verify" : "rerun"} command.`,
+      `You are handling the /${commandName} command.`,
       `Always call the workflow tool with action="${input.action}" first.`,
       "If the user supplied $ARGUMENTS, treat them as an optional stage identifier or filter and pass them through when appropriate.",
       ...input.guidance,
@@ -168,6 +207,7 @@ export namespace Command {
         availability: ["workflow"],
         queueBehavior: "queued",
         remoteSafe: true,
+        repairOnlyAllowed: true,
         hints: ["$ARGUMENTS"],
         template: workflowTemplate({
           action: "rerun",
@@ -185,6 +225,7 @@ export namespace Command {
         availability: ["workflow"],
         queueBehavior: "queued",
         remoteSafe: true,
+        requiresTrustedArtifacts: false,
         hints: ["$ARGUMENTS"],
         template: workflowTemplate({
           action: "artifacts",
@@ -201,6 +242,7 @@ export namespace Command {
         queueBehavior: "immediate",
         immediate: true,
         remoteSafe: true,
+        repairOnlyAllowed: true,
         hints: ["$ARGUMENTS"],
         template: workflowTemplate({
           action: "doctor",
@@ -216,12 +258,133 @@ export namespace Command {
         availability: ["workflow"],
         queueBehavior: "queued",
         remoteSafe: true,
+        repairOnlyAllowed: true,
         hints: ["$ARGUMENTS"],
         template: workflowTemplate({
           action: "verify",
           guidance: [
             "Return the verifier result first.",
             "If verification blocks, stop and report only the repair stage that must run next.",
+          ],
+        }),
+      },
+      [Default.TASKS]: {
+        name: Default.TASKS,
+        description: "show persisted runtime tasks, queue state, current task, and failed task status",
+        workflowAware: true,
+        availability: ["workflow", "task-ledger"],
+        queueBehavior: "queued",
+        remoteSafe: true,
+        repairOnlyAllowed: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "tasks",
+          guidance: [
+            "Show the active task, queued/running/failed tasks, and the latest checkpoint if available.",
+            "Keep the output concise and operational.",
+          ],
+        }),
+      },
+      [Default.TIMELINE]: {
+        name: Default.TIMELINE,
+        description: "show the task timeline with workflow, tool, verifier, checkpoint, and restore events",
+        workflowAware: true,
+        availability: ["workflow", "task-ledger"],
+        queueBehavior: "queued",
+        remoteSafe: true,
+        repairOnlyAllowed: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "timeline",
+          guidance: [
+            "Show the recent timeline events in chronological order.",
+            "Highlight where the current workflow is blocked or recoverable.",
+          ],
+        }),
+      },
+      [Default.RESTORE]: {
+        name: Default.RESTORE,
+        description: "restore workflow pointers to the latest trusted checkpoint or selected checkpoint/stage",
+        workflowAware: true,
+        availability: ["workflow", "restore"],
+        queueBehavior: "queued",
+        remoteSafe: true,
+        repairOnlyAllowed: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "restore",
+          guidance: [
+            "Restore only workflow pointers and trusted artifact references; never overwrite raw data.",
+            "If restore is unavailable, explain which checkpoint or stage is missing.",
+          ],
+        }),
+      },
+      [Default.TOOLS]: {
+        name: Default.TOOLS,
+        description: "explain currently available tools and why blocked tools are hidden",
+        workflowAware: true,
+        availability: ["workflow", "tool-capability"],
+        queueBehavior: "queued",
+        remoteSafe: true,
+        repairOnlyAllowed: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "tools",
+          guidance: [
+            "Explain available tools, hidden tools, and the exact policy reason.",
+            "Use stage, agent, model, platform, and repair-only context when available.",
+          ],
+        }),
+      },
+      [Default.SKILLS]: {
+        name: Default.SKILLS,
+        description: "show recommended skill bundles for the current workflow stage",
+        workflowAware: true,
+        availability: ["workflow", "skills"],
+        queueBehavior: "queued",
+        remoteSafe: true,
+        repairOnlyAllowed: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "skills",
+          guidance: [
+            "Show the current stage skill bundle and why it is relevant.",
+            "Do not paste long skill documents unless explicitly requested.",
+          ],
+        }),
+      },
+      [Default.DIAGNOSTICS]: {
+        name: Default.DIAGNOSTICS,
+        description: "show Python, MCP, LSP, dependency, workflow, and verifier diagnostics",
+        workflowAware: true,
+        availability: ["workflow", "diagnostics"],
+        queueBehavior: "immediate",
+        immediate: true,
+        remoteSafe: true,
+        repairOnlyAllowed: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "diagnostics",
+          guidance: [
+            "Summarize runtime diagnostics first, then workflow blockers.",
+            "Prefer actionable repair hints over generic explanations.",
+          ],
+        }),
+      },
+      [Default.AGENT]: {
+        name: Default.AGENT,
+        description: "show workflow coordinator and sub-agent control state",
+        workflowAware: true,
+        availability: ["workflow", "agent-control"],
+        queueBehavior: "queued",
+        remoteSafe: true,
+        repairOnlyAllowed: true,
+        hints: ["$ARGUMENTS"],
+        template: workflowTemplate({
+          action: "agent",
+          guidance: [
+            "Show the current coordinator agent, fork mode, recent decisions, and structured inter-agent handoff messages.",
+            "Use this for operational status only; do not infer hidden agent state from chat text.",
           ],
         }),
       },
@@ -238,6 +401,10 @@ export namespace Command {
         workflowAware: command.workflowAware,
         immediate: command.immediate,
         remoteSafe: command.remoteSafe,
+        repairOnlyAllowed: command.repairOnlyAllowed,
+        requiresTrustedArtifacts: command.requiresTrustedArtifacts,
+        visibleWhen: command.visibleWhen,
+        blockedReason: command.blockedReason,
         get template() {
           return command.template
         },

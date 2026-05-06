@@ -45,7 +45,7 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
-import type { QueuedSessionAction, ToolAvailabilityPolicy, WorkflowInputIntent } from "@/runtime/types"
+import type { InputGraphNode, QueuedSessionAction, ToolAvailabilityPolicy, WorkflowInputIntent } from "@/runtime/types"
 import { RuntimeHooks } from "@/runtime/hooks"
 import { allowMcpToolForWorkflow } from "@/runtime/workflow"
 import { SessionRunCoordinator } from "./run-state"
@@ -83,6 +83,40 @@ export namespace SessionPrompt {
 
   function resolveCallbacks(sessionID: string, message: MessageV2.WithParts, actionID?: string) {
     SessionRunCoordinator.resolveAction(sessionID, message, actionID)
+  }
+
+  function inputGraphFromParts(parts: PromptInput["parts"], intent?: WorkflowInputIntent): InputGraphNode[] {
+    const graph: InputGraphNode[] = []
+    if (intent) {
+      graph.push({
+        id: `intent:${intent}`,
+        type: "command",
+        label: intent,
+        metadata: { intent },
+      })
+    }
+    for (const part of parts) {
+      if (part.type === "text") {
+        const text = part.text.trim()
+        if (!text) continue
+        graph.push({
+          id: part.id ?? `text:${graph.length}`,
+          type: "text",
+          label: text.length > 80 ? `${text.slice(0, 77)}...` : text,
+        })
+        continue
+      }
+      if (part.type === "file") {
+        graph.push({
+          id: part.id ?? `file:${graph.length}`,
+          type: part.mime?.startsWith("image/") ? "image" : "file",
+          label: part.filename,
+          ref: part.url,
+          mime: part.mime,
+        })
+      }
+    }
+    return graph
   }
 
   function startDispatch(sessionID: string) {
@@ -244,6 +278,7 @@ export namespace SessionPrompt {
         messageID: message.info.id,
         intent: input.intent,
         hasImageInput: input.parts.some((part) => part.type === "file" && part.mime?.startsWith("image/")),
+        inputGraph: inputGraphFromParts(input.parts, input.intent),
         ...(input.queueMetadata ?? {}),
       },
     })

@@ -1,19 +1,41 @@
 import z from "zod"
 import { MCP } from "@/mcp"
 import { getRuntimePythonStatus } from "@/killstata/runtime-config"
+import { AgentControl } from "@/runtime/agent-control"
+import { DEFAULT_EXEC_POLICY } from "@/runtime/exec-policy"
 import { Tool } from "./tool"
 import {
   buildRerunPlan,
   buildVerifierReport,
   executeRerunPlan,
+  recommendedSkillBundle,
+  resolveToolAvailability,
+  restoreWorkflowCheckpoint,
   runVerifierGate,
+  workflowTaskLedger,
   workflowArtifactList,
   workflowStageDetails,
   workflowStatusSummary,
+  workflowToolPolicy,
 } from "@/runtime/workflow"
 
 const parameters = z.object({
-  action: z.enum(["status", "stage", "artifacts", "doctor", "verify", "rerun_plan", "rerun"]),
+  action: z.enum([
+    "status",
+    "stage",
+    "artifacts",
+    "doctor",
+    "verify",
+    "rerun_plan",
+    "rerun",
+    "tasks",
+    "timeline",
+    "restore",
+    "tools",
+    "skills",
+    "diagnostics",
+    "agent",
+  ]),
   stageId: z.string().optional(),
 })
 
@@ -33,6 +55,37 @@ function jsonBlock(value: unknown) {
 function metadata(input: WorkflowToolMetadata): WorkflowToolMetadata {
   return input
 }
+
+const KNOWN_TOOL_IDS = [
+  "invalid",
+  "question",
+  "read",
+  "list",
+  "glob",
+  "grep",
+  "skill",
+  "workflow",
+  "webfetch",
+  "websearch",
+  "codesearch",
+  "task",
+  "todo_read",
+  "todoread",
+  "todowrite",
+  "bash",
+  "shell",
+  "edit",
+  "write",
+  "apply_patch",
+  "data_import",
+  "data_batch",
+  "econometrics",
+  "regression_table",
+  "research_brief",
+  "paper_draft",
+  "slide_generator",
+  "heterogeneity_runner",
+]
 
 export const WorkflowTool = Tool.define("workflow", async () => ({
   description:
@@ -99,6 +152,173 @@ export const WorkflowTool = Tool.define("workflow", async () => ({
           mcp: {
             toolCount: mcpTools,
           },
+        }),
+      }
+    }
+
+    if (params.action === "diagnostics") {
+      const workflow = workflowStatusSummary(ctx.sessionID)
+      const python = await getRuntimePythonStatus()
+      const mcpTools = Object.keys(await MCP.tools()).length
+      const ledger = workflowTaskLedger(ctx.sessionID)
+      const latestTask = ledger.tasks.at(-1)
+      return {
+        title: "Workflow Diagnostics",
+        metadata: metadata({
+          workflowRunId: workflow.workflow?.workflowRunId,
+          stageId: workflow.activeStage?.stageId,
+          branch: workflow.workflow?.branch,
+          artifactRefs: workflow.activeStage?.artifactRefs ?? [],
+        }),
+        output: jsonBlock({
+          workflow,
+          python,
+          mcp: { toolCount: mcpTools },
+          execPolicy: {
+            profile: DEFAULT_EXEC_POLICY.profile,
+            networkRequiresApproval: DEFAULT_EXEC_POLICY.networkRequiresApproval,
+            externalWriteRequiresApproval: DEFAULT_EXEC_POLICY.externalWriteRequiresApproval,
+            latestDecision: latestTask?.policyDecisions?.at(-1),
+          },
+          context: {
+            latestContextVersion: latestTask?.contextVersion,
+            latestContextSnapshot: latestTask?.metadata?.latestContextSnapshot,
+          },
+          taskLedger: {
+            activeTaskId: ledger.activeTaskId,
+            taskCount: ledger.tasks.length,
+            checkpointCount: ledger.checkpoints.length,
+            latestTask,
+            latestCheckpoint: ledger.checkpoints.at(-1),
+          },
+        }),
+      }
+    }
+
+    if (params.action === "tasks") {
+      const ledger = workflowTaskLedger(ctx.sessionID)
+      const workflow = workflowStatusSummary(ctx.sessionID)
+      return {
+        title: "Runtime Tasks",
+        metadata: metadata({
+          workflowRunId: workflow.workflow?.workflowRunId,
+          stageId: workflow.activeStage?.stageId,
+          branch: workflow.workflow?.branch,
+          artifactRefs: workflow.activeStage?.artifactRefs ?? [],
+        }),
+        output: jsonBlock({
+          activeTaskId: ledger.activeTaskId,
+          tasks: ledger.tasks.slice(-20),
+          checkpoints: ledger.checkpoints.slice(-10),
+        }),
+      }
+    }
+
+    if (params.action === "timeline") {
+      const ledger = workflowTaskLedger(ctx.sessionID)
+      const workflow = workflowStatusSummary(ctx.sessionID)
+      const events = ledger.tasks.flatMap((task) => task.timeline).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      return {
+        title: "Runtime Timeline",
+        metadata: metadata({
+          workflowRunId: workflow.workflow?.workflowRunId,
+          stageId: workflow.activeStage?.stageId,
+          branch: workflow.workflow?.branch,
+          artifactRefs: workflow.activeStage?.artifactRefs ?? [],
+        }),
+        output: jsonBlock({
+          activeTaskId: ledger.activeTaskId,
+          events: events.slice(-80),
+        }),
+      }
+    }
+
+    if (params.action === "restore") {
+      const result = restoreWorkflowCheckpoint(ctx.sessionID, { stageId: params.stageId })
+      return {
+        title: "Workflow Restore",
+        metadata: metadata({
+          workflowRunId: result.workflow?.workflowRunId,
+          stageId: result.stage?.stageId ?? result.checkpoint?.stageId,
+          branch: result.stage?.branch ?? result.workflow?.branch,
+          artifactRefs: result.workflow?.trustedArtifacts ?? result.checkpoint?.trustedArtifacts ?? [],
+        }),
+        output: jsonBlock(result),
+      }
+    }
+
+    if (params.action === "tools") {
+      const workflow = workflowStatusSummary(ctx.sessionID)
+      const policy = workflowToolPolicy({
+        sessionID: ctx.sessionID,
+        agent: ctx.agent,
+        platformCapabilities: {
+          mcp: true,
+          images: true,
+          remote: false,
+        },
+        modelCapabilities: {
+          supportsTools: true,
+          supportsImages: true,
+        },
+      })
+      const resolution = resolveToolAvailability({ policy, toolIDs: KNOWN_TOOL_IDS })
+      return {
+        title: "Workflow Tools",
+        metadata: metadata({
+          workflowRunId: workflow.workflow?.workflowRunId,
+          stageId: workflow.activeStage?.stageId,
+          branch: workflow.workflow?.branch,
+          artifactRefs: workflow.activeStage?.artifactRefs ?? [],
+        }),
+        output: jsonBlock({
+          policy: resolution.policy,
+          allowedToolIDs: resolution.allowedToolIDs,
+          directToolIDs: resolution.directToolIDs,
+          deferredToolIDs: resolution.deferredToolIDs,
+          blockedToolIDs: resolution.blockedToolIDs,
+          exposurePlan: resolution.exposurePlan,
+          explanations: resolution.explanations,
+        }),
+      }
+    }
+
+    if (params.action === "agent") {
+      const workflow = workflowStatusSummary(ctx.sessionID)
+      const state = AgentControl.current(ctx.sessionID)
+      return {
+        title: "Workflow Agent Control",
+        metadata: metadata({
+          workflowRunId: workflow.workflow?.workflowRunId,
+          stageId: workflow.activeStage?.stageId,
+          branch: workflow.workflow?.branch,
+          artifactRefs: workflow.activeStage?.artifactRefs ?? [],
+        }),
+        output: jsonBlock({
+          workflow: {
+            activeCoordinatorAgent: workflow.workflow?.activeCoordinatorAgent,
+            activeStage: workflow.workflow?.activeStage,
+            repairOnly: workflow.workflow?.repairOnly,
+          },
+          agentControl: state,
+        }),
+      }
+    }
+
+    if (params.action === "skills") {
+      const workflow = workflowStatusSummary(ctx.sessionID)
+      const kind = workflow.workflow?.activeStage ?? workflow.activeStage?.kind
+      return {
+        title: "Workflow Skills",
+        metadata: metadata({
+          workflowRunId: workflow.workflow?.workflowRunId,
+          stageId: workflow.activeStage?.stageId,
+          branch: workflow.workflow?.branch,
+          artifactRefs: workflow.activeStage?.artifactRefs ?? [],
+        }),
+        output: jsonBlock({
+          activeStage: kind,
+          recommendedSkillBundle: kind ? recommendedSkillBundle(kind) : [],
         }),
       }
     }

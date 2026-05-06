@@ -28,7 +28,18 @@ import { useArgs } from "./args"
 import { batch, onMount } from "solid-js"
 import { Log } from "@/util/log"
 import type { Path } from "@killstata/sdk"
-import { appendPartDelta, type RuntimeQueryState, type RuntimeQueueState, type WorkflowTuiState } from "./runtime-state"
+import {
+  appendPartDelta,
+  type RuntimeQueryState,
+  type RuntimeQueueState,
+  type RuntimeTaskTuiState,
+  type RuntimeTimelineTuiEvent,
+  type RuntimeProtocolTuiState,
+  type RuntimeExecPolicyTuiState,
+  type RuntimeContextTuiState,
+  type RuntimeAgentControlTuiState,
+  type WorkflowTuiState,
+} from "./runtime-state"
 
 export const { use: useSync, provider: SyncProvider } = createSimpleContext({
   name: "Sync",
@@ -54,6 +65,12 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       }
       runtimeQuery: Record<string, RuntimeQueryState>
       runtimeQueue: Record<string, RuntimeQueueState>
+      runtimeTask: Record<string, RuntimeTaskTuiState>
+      runtimeTimeline: Record<string, RuntimeTimelineTuiEvent[]>
+      runtimeProtocol: Record<string, RuntimeProtocolTuiState>
+      runtimeExecPolicy: Record<string, RuntimeExecPolicyTuiState>
+      runtimeContext: Record<string, RuntimeContextTuiState>
+      runtimeAgentControl: Record<string, RuntimeAgentControlTuiState>
       workflow: Record<string, WorkflowTuiState>
       session_diff: {
         [sessionID: string]: Snapshot.FileDiff[]
@@ -96,6 +113,12 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       session_status: {},
       runtimeQuery: {},
       runtimeQueue: {},
+      runtimeTask: {},
+      runtimeTimeline: {},
+      runtimeProtocol: {},
+      runtimeExecPolicy: {},
+      runtimeContext: {},
+      runtimeAgentControl: {},
       workflow: {},
       session_diff: {},
       todo: {},
@@ -376,6 +399,81 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       setStore("runtimeQueue", event.properties.sessionID, {
         pending: event.properties.pending,
         actions: event.properties.actions ?? [],
+      })
+    })
+
+    sdk.event.on("runtime.task.updated" as any, (event: any) => {
+      const task = event.properties.task
+      setStore("runtimeTask", event.properties.sessionID, {
+        taskId: task.taskId,
+        actionType: task.actionType,
+        status: task.status,
+        stageId: task.stageId,
+        workflowRunId: task.workflowRunId,
+        latestCheckpointId: task.latestCheckpointId,
+        latestFailureCode: task.latestFailureCode,
+        verifierStatus: task.verifierStatus,
+        repairOnly: task.repairOnly,
+        updatedAt: task.updatedAt,
+      })
+    })
+
+    sdk.event.on("runtime.timeline.event" as any, (event: any) => {
+      const item = event.properties.event
+      const existing = store.runtimeTimeline[event.properties.sessionID] ?? []
+      setStore("runtimeTimeline", event.properties.sessionID, [
+        ...existing.filter((entry) => entry.id !== item.id),
+        {
+          id: item.id,
+          taskId: item.taskId,
+          kind: item.kind,
+          stageId: item.stageId,
+          workflowRunId: item.workflowRunId,
+          message: item.message,
+          createdAt: item.createdAt,
+        },
+      ].slice(-80))
+    })
+
+    sdk.event.on("runtime.protocol.event" as any, (event: any) => {
+      const envelope = event.properties.envelope
+      setStore("runtimeProtocol", envelope.sessionID, {
+        sequence: envelope.sequence,
+        source: envelope.source,
+        type: envelope.event?.type,
+        createdAt: envelope.createdAt,
+      })
+    })
+
+    sdk.event.on("runtime.exec_policy.decision" as any, (event: any) => {
+      const decision = event.properties.decision
+      setStore("runtimeExecPolicy", event.properties.sessionID, {
+        action: decision.action,
+        toolName: decision.toolName,
+        reason: decision.reason,
+        createdAt: decision.createdAt,
+      })
+    })
+
+    sdk.event.on("runtime.context.snapshot" as any, (event: any) => {
+      const snapshot = event.properties.snapshot
+      setStore("runtimeContext", event.properties.sessionID, {
+        historyVersion: snapshot.historyVersion,
+        tokenEstimate: snapshot.tokenEstimate,
+        activeStageId: snapshot.referenceContext?.activeStageId,
+        latestVerifierStatus: snapshot.referenceContext?.latestVerifierStatus,
+        createdAt: snapshot.createdAt,
+      })
+    })
+
+    sdk.event.on("runtime.agent_control.state" as any, (event: any) => {
+      const state = event.properties.state
+      setStore("runtimeAgentControl", event.properties.sessionID, {
+        activeAgent: state.activeAgent,
+        forkMode: state.forkMode,
+        decisionCount: state.decisions?.length ?? 0,
+        messageCount: state.messages?.length ?? 0,
+        updatedAt: state.updatedAt,
       })
     })
 

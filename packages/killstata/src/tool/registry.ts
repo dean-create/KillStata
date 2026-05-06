@@ -166,7 +166,7 @@ export namespace ToolRegistry {
       },
     })
     const resolution = resolveToolAvailability({ policy, toolIDs: tools.map((tool) => tool.id) })
-    const workflowAllowed = new Set(resolution.allowedToolIDs)
+    const workflowAllowed = new Set(resolution.directToolIDs ?? resolution.allowedToolIDs)
     const result = await Promise.all(
       tools
         .filter((t) => {

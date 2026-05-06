@@ -16,6 +16,7 @@ import { Shell } from "@/shell/shell"
 
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncation"
+import { evaluateExecPolicy } from "@/runtime/exec-policy"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.KILLSTATA_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -106,6 +107,14 @@ function createShellCommandTool(id: "bash" | "shell", label: "bash" | "shell") {
           throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
         }
         const timeout = params.timeout ?? DEFAULT_TIMEOUT
+        const execPolicyDecision = evaluateExecPolicy({
+          sessionID: ctx.sessionID,
+          toolName: id,
+          command: params.command,
+        })
+        if (execPolicyDecision.action === "deny") {
+          throw new Error(`Command blocked by execution policy: ${execPolicyDecision.reason}`)
+        }
         const tree = await parser().then((p) => p.parse(params.command))
         if (!tree) {
           throw new Error("Failed to parse command")
@@ -167,16 +176,16 @@ function createShellCommandTool(id: "bash" | "shell", label: "bash" | "shell") {
             permission: "external_directory",
             patterns: Array.from(directories),
             always: Array.from(directories).map((x) => path.dirname(x) + "*"),
-            metadata: {},
+            metadata: { execPolicyDecision },
           })
         }
 
-        if (patterns.size > 0) {
+        if (patterns.size > 0 || execPolicyDecision.action === "ask") {
           await ctx.ask({
             permission: "bash",
-            patterns: Array.from(patterns),
+            patterns: Array.from(patterns.size > 0 ? patterns : new Set([params.command])),
             always: Array.from(always),
-            metadata: {},
+            metadata: { execPolicyDecision },
           })
         }
 
@@ -197,6 +206,7 @@ function createShellCommandTool(id: "bash" | "shell", label: "bash" | "shell") {
           metadata: {
             output: "",
             description: params.description,
+            execPolicyDecision,
           },
         })
 
@@ -207,6 +217,7 @@ function createShellCommandTool(id: "bash" | "shell", label: "bash" | "shell") {
               // truncate the metadata to avoid GIANT blobs of data (has nothing to do w/ what agent can access)
               output: output.length > MAX_METADATA_LENGTH ? output.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : output,
               description: params.description,
+              execPolicyDecision,
             },
           })
         }
@@ -276,6 +287,7 @@ function createShellCommandTool(id: "bash" | "shell", label: "bash" | "shell") {
             output: output.length > MAX_METADATA_LENGTH ? output.slice(0, MAX_METADATA_LENGTH) + "\n\n..." : output,
             exit: proc.exitCode,
             description: params.description,
+            execPolicyDecision,
           },
           output,
         }

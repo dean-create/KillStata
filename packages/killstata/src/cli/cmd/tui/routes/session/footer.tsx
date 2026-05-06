@@ -31,6 +31,22 @@ export function Footer() {
     if (route.data.type !== "session") return
     return sync.data.workflow[route.data.sessionID]
   })
+  const runtimeTask = createMemo(() => {
+    if (route.data.type !== "session") return
+    return sync.data.runtimeTask[route.data.sessionID]
+  })
+  const runtimePolicy = createMemo(() => {
+    if (route.data.type !== "session") return
+    return sync.data.runtimeExecPolicy[route.data.sessionID]
+  })
+  const runtimeContext = createMemo(() => {
+    if (route.data.type !== "session") return
+    return sync.data.runtimeContext[route.data.sessionID]
+  })
+  const agentControl = createMemo(() => {
+    if (route.data.type !== "session") return
+    return sync.data.runtimeAgentControl[route.data.sessionID]
+  })
   const workflowLabel = createMemo(() => workflowStatusLabel(workflow()))
   const workflowLocale = createMemo(() => workflow()?.workflowLocale ?? "en")
   const workflowDisplayLabel = createMemo(() => workflowStatusDisplayLabel(workflow(), workflowLocale()))
@@ -101,6 +117,36 @@ export function Footer() {
                 {workflowLocale() === "zh-CN" ? "执行者" : "agent"}{" "}
                 {workflowAgentDisplayLabel(workflow()?.activeCoordinatorAgent, workflowLocale()) ??
                   workflow()?.activeCoordinatorAgent}
+              </text>
+            </Show>
+            <Show when={agentControl()?.activeAgent && agentControl()?.activeAgent !== workflow()?.activeCoordinatorAgent}>
+              <text fg={theme.textMuted}>
+                control {workflowAgentDisplayLabel(agentControl()?.activeAgent, workflowLocale()) ?? agentControl()?.activeAgent}
+              </text>
+            </Show>
+            <Show when={runtimePolicy()}>
+              <text
+                fg={
+                  runtimePolicy()?.action === "deny"
+                    ? theme.error
+                    : runtimePolicy()?.action === "ask"
+                      ? theme.warning
+                      : theme.textMuted
+                }
+              >
+                policy {runtimePolicy()?.action}:{runtimePolicy()?.toolName}
+              </text>
+            </Show>
+            <Show when={runtimeContext()}>
+              <text fg={theme.textMuted}>
+                ctx v{runtimeContext()?.historyVersion}
+                {runtimeContext()?.tokenEstimate ? ` ~${runtimeContext()?.tokenEstimate}t` : ""}
+              </text>
+            </Show>
+            <Show when={runtimeTask() && runtimeTask()?.status !== "completed"}>
+              <text fg={theme.textMuted}>
+                task {runtimeTask()?.status}
+                {runtimeTask()?.latestCheckpointId ? " checkpoint" : ""}
               </text>
             </Show>
             <Show when={runtimeQuery() && runtimeQuery()?.phase !== "idle"}>

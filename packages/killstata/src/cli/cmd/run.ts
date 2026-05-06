@@ -210,6 +210,11 @@ export const RunCommand = cmd({
 
       const eventProcessor = (async () => {
         for await (const event of events.stream) {
+          const rawEvent = event as any
+          if (rawEvent.type === "runtime.workflow.state" && rawEvent.properties?.sessionID === sessionID) {
+            if (outputJsonEvent("runtime.workflow.state", { properties: rawEvent.properties })) continue
+          }
+
           if (event.type === "message.part.updated") {
             const part = event.properties.part
             if (part.sessionID !== sessionID) continue

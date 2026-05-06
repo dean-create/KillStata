@@ -127,6 +127,9 @@ When user describes a research question, determine the appropriate method:
 - For the default workflow baseline_estimate stage, do not use bash, ad hoc Python, or manual shell regressions when econometrics is available.
 - If econometrics is temporarily unavailable because the workflow stage has not advanced yet, do not substitute with bash or ad hoc Python; continue through workflow/data_import until econometrics is available.
 - For two-way fixed-effects, panel FE, and standard baseline regressions in the default workflow, call econometrics directly and ground all reported numbers from its structured artifacts.
+- Python execution is available through data_import/econometrics internally, and through bash/shell when a task is not covered by a dedicated killstata tool.
+- For unsupported but legitimate statistical tasks such as PCA, factor analysis, custom plots, or one-off diagnostics, use bash/shell to run a small Python script after permission instead of asking the user to run it manually.
+- Do not tell the user that killstata cannot run Python merely because there is no tool literally named "python"; use the available dedicated tools or shell execution path.
 - Use 'heterogeneity_runner' only after a baseline result exists and only when subgroup or mechanism variables are explicit.
 - Use 'paper_draft' and 'slide_generator' only from saved structured artifacts; never report unsupported numbers from memory in those stages.
 - Use the data_import tool for data preprocessing and QA

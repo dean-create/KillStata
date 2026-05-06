@@ -15,6 +15,59 @@ export type RuntimeQueueState = {
   }[]
 }
 
+export type RuntimeTaskTuiState = {
+  taskId: string
+  actionType: string
+  status: "queued" | "dispatching" | "running" | "completed" | "failed" | "cancelled" | "restored"
+  stageId?: string
+  workflowRunId?: string
+  latestCheckpointId?: string
+  latestFailureCode?: string
+  verifierStatus?: "pass" | "warn" | "block"
+  repairOnly?: boolean
+  updatedAt: string
+}
+
+export type RuntimeTimelineTuiEvent = {
+  id: string
+  taskId: string
+  kind: string
+  stageId?: string
+  workflowRunId?: string
+  message?: string
+  createdAt: string
+}
+
+export type RuntimeProtocolTuiState = {
+  sequence: number
+  source: string
+  type: string
+  createdAt: string
+}
+
+export type RuntimeExecPolicyTuiState = {
+  action: "allow" | "ask" | "deny"
+  toolName: string
+  reason: string
+  createdAt: string
+}
+
+export type RuntimeContextTuiState = {
+  historyVersion: number
+  tokenEstimate: number
+  activeStageId?: string
+  latestVerifierStatus?: "pass" | "warn" | "block"
+  createdAt: string
+}
+
+export type RuntimeAgentControlTuiState = {
+  activeAgent?: "explore" | "general" | "verifier"
+  forkMode?: "minimal_context" | "last_n_turns" | "workflow_slice"
+  decisionCount: number
+  messageCount: number
+  updatedAt: string
+}
+
 export type WorkflowTuiState = {
   workflowRunId?: string
   workflowLocale?: "zh-CN" | "en"

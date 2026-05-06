@@ -19,6 +19,8 @@ import { Question } from "@/question"
 import { Permission } from "@/permission"
 import { RuntimeEvents } from "@/runtime/events"
 import { RuntimeHooks } from "@/runtime/hooks"
+import { workflowStatusSummary, workflowTaskLedger } from "@/runtime/workflow"
+import { ContextManager } from "@/runtime/context-manager"
 import type { CompactionSnapshot } from "@/runtime/types"
 
 function compactWhitespace(value: string) {
@@ -235,6 +237,20 @@ export namespace SessionCompaction {
       .filter((permission) => permission.sessionID === input.sessionID)
       .map((permission) => clip(permission.message, 140))
 
+    const workflow = workflowStatusSummary(input.sessionID)
+    const ledger = workflowTaskLedger(input.sessionID)
+    const activeTask = ledger.activeTaskId ? ledger.tasks.find((task) => task.taskId === ledger.activeTaskId) : undefined
+    const latestContextSnapshot = ContextManager.snapshot({
+      sessionID: input.sessionID,
+      text: input.messages
+        .slice(-8)
+        .flatMap((message) => message.parts)
+        .filter((part): part is MessageV2.TextPart => part.type === "text")
+        .map((part) => part.text)
+        .join("\n"),
+    })
+    ContextManager.publish(latestContextSnapshot)
+
     return {
       latestGoal,
       activeTodos,
@@ -242,6 +258,12 @@ export namespace SessionCompaction {
       trustedArtifactPaths,
       childSessionSummaries,
       numericGroundingState,
+      activeTaskId: ledger.activeTaskId,
+      activeStageId: workflow.activeStage?.stageId,
+      latestFailureCode: workflow.workflow?.latestFailure?.code,
+      latestVerifierStatus: workflow.workflow?.latestVerifier?.status,
+      inputGraphRefs: activeTask?.inputGraph.map((node) => node.ref ?? node.label ?? node.id).filter(Boolean).slice(0, 12),
+      latestContextSnapshot,
     }
   }
 
@@ -293,6 +315,9 @@ export namespace SessionCompaction {
       snapshot.trustedArtifactPaths.length ? `Trusted artifacts: ${snapshot.trustedArtifactPaths.join(" | ")}` : undefined,
       snapshot.childSessionSummaries.length ? `Subagent outputs: ${snapshot.childSessionSummaries.join(" | ")}` : undefined,
       snapshot.numericGroundingState.length ? `Grounding state: ${snapshot.numericGroundingState.join(" | ")}` : undefined,
+      snapshot.latestContextSnapshot
+        ? `Context snapshot: v${snapshot.latestContextSnapshot.historyVersion}; activeStage=${snapshot.latestContextSnapshot.referenceContext.activeStageId ?? "none"}`
+        : undefined,
     ].filter(Boolean)
 
     return {

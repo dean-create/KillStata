@@ -12,8 +12,10 @@ import type {
   StageReuseRecord,
   StageNode,
   StageStatus,
+  RestoreTarget,
   ToolAvailabilityPolicy,
   ToolAvailabilityResolution,
+  ToolAvailabilityExplanation,
   VerifierCheck,
   VerifierReport,
   VerifierTaskEnvelope,
@@ -22,6 +24,9 @@ import type {
   WorkflowStageKind,
 } from "./types"
 import { RuntimeEvents } from "./events"
+import { RuntimeTaskLedger } from "./task-ledger"
+import { RuntimeProtocol } from "./protocol"
+import { AgentControl } from "./agent-control"
 import {
   detectWorkflowLocaleFromText,
   inferWorkflowLocaleFromSession,
@@ -144,6 +149,8 @@ const INPUT_INTENT_TOOL_BUNDLES = {
     "read",
     "glob",
     "grep",
+    "bash",
+    "shell",
     "skill",
     "data_import",
     "data_batch",
@@ -171,6 +178,8 @@ const INPUT_INTENT_TOOL_BUNDLES = {
     "read",
     "glob",
     "grep",
+    "bash",
+    "shell",
     "skill",
     "data_import",
     "data_batch",
@@ -981,7 +990,7 @@ function publishWorkflowState(sessionID: string, run?: WorkflowRun, rerunTargetS
     ? workflow.stages.find((stage) => stage.nodeId === workflow.activeNodeId)
     : activeOrLatestStage(workflow)
   const checklistItem = currentChecklistItem(workflow)
-  Bus.publish(RuntimeEvents.WorkflowState, {
+  const payload = {
     sessionID,
     workflowRunId: workflow?.workflowRunId,
     workflowLocale: workflow?.workflowLocale,
@@ -1003,6 +1012,46 @@ function publishWorkflowState(sessionID: string, run?: WorkflowRun, rerunTargetS
         }
       : undefined,
     analysisChecklist: workflow?.analysisChecklist ?? [],
+  }
+  Bus.publish(RuntimeEvents.WorkflowState, payload)
+  RuntimeProtocol.publish({
+    sessionID,
+    source: "workflow",
+    type: "workflow.state",
+    payload,
+  })
+  RuntimeTaskLedger.appendEvent({
+    sessionID,
+    taskId: workflow?.activeTaskId,
+    kind: "workflow.state",
+    stageId: activeStage?.stageId,
+    workflowRunId: workflow?.workflowRunId,
+    message: workflow?.activeStage ? `active stage: ${workflow.activeStage}` : "workflow state updated",
+    metadata: {
+      repairOnly: workflow?.repairOnly ?? false,
+      verifierStatus: workflow?.latestVerifier?.status,
+      activeCoordinatorAgent: workflow?.activeCoordinatorAgent,
+      rerunTargetStageId,
+    },
+  })
+}
+
+function activeRuntimeTaskId(sessionID: string) {
+  return RuntimeTaskLedger.listTasks(sessionID).activeTaskId
+}
+
+function createWorkflowCheckpoint(input: { sessionID: string; run: WorkflowRun; stage?: StageNode }) {
+  return RuntimeTaskLedger.createCheckpoint({
+    taskId: input.run.activeTaskId ?? activeRuntimeTaskId(input.sessionID),
+    sessionID: input.sessionID,
+    workflowRunId: input.run.workflowRunId,
+    stageId: input.stage?.stageId,
+    branch: input.stage?.branch ?? input.run.branch,
+    activeStage: input.run.activeStage,
+    trustedArtifacts: input.run.trustedArtifacts ?? [],
+    verifierStatus: input.run.latestVerifier?.status,
+    repairOnly: input.run.repairOnly,
+    replayInput: input.stage?.replayInput,
   })
 }
 
@@ -1552,6 +1601,7 @@ export function recordWorkflowStageSuccess(input: {
           : undefined,
     branch,
   })
+  run.activeTaskId = activeRuntimeTaskId(input.sessionID) ?? run.activeTaskId
   const kind = stageKindFromTool(input.toolName, input.args, metadata)
   const cacheKey = stageCacheKey(kind, input.args, metadata)
   const preferredStageId =
@@ -1612,6 +1662,10 @@ export function recordWorkflowStageSuccess(input: {
     run.latestFailure = undefined
   }
   refreshWorkflowRunDerivedState(run)
+  if (!stageNeedsVerifier(kind) && stageStatus === "completed") {
+    const checkpoint = createWorkflowCheckpoint({ sessionID: input.sessionID, run, stage })
+    run.lastCheckpointId = checkpoint.checkpointId
+  }
   writeWorkflowSession(sessionState)
   publishWorkflowState(input.sessionID, run)
   return { workflowRun: run, stage }
@@ -1630,6 +1684,7 @@ export function recordWorkflowStageFailure(input: {
     runId: typeof input.args.runId === "string" ? input.args.runId : undefined,
     branch,
   })
+  run.activeTaskId = activeRuntimeTaskId(input.sessionID) ?? run.activeTaskId
   const kind = stageKindFromTool(input.toolName, input.args)
   const cacheKey = stageCacheKey(kind, input.args)
   const preferredStageId = typeof input.args.stageId === "string" ? input.args.stageId : `${kind}_failed`
@@ -1678,6 +1733,15 @@ export function recordWorkflowStageFailure(input: {
     failure.code === "STAGE_NOT_RESOLVED" || failure.code === "ARTIFACT_MISSING" ? "explore" : "general"
   run.latestFailure = failure
   run.updatedAt = nowIso()
+  RuntimeTaskLedger.appendEvent({
+    sessionID: input.sessionID,
+    taskId: run.activeTaskId,
+    kind: "failure",
+    stageId: stage.stageId,
+    workflowRunId: run.workflowRunId,
+    message: failure.message,
+    metadata: { code: failure.code, repairAction: failure.repairAction },
+  })
   refreshWorkflowRunDerivedState(run)
   writeWorkflowSession(sessionState)
   publishWorkflowState(input.sessionID, run)
@@ -1978,6 +2042,14 @@ export async function executeRerunPlan(input: {
       expectedOutputContract:
         "Execute the recorded stage replay, preserve structured metadata, and return produced artifacts for verifier/audit use.",
       linkedStageId: currentStage.stageId,
+    })
+    AgentControl.recordDecision({
+      sessionID: input.sessionID,
+      decision: coordinatorDecision,
+      forkMode:
+        coordinatorDecision.agent === "explore"
+          ? "workflow_slice"
+          : "minimal_context",
     })
 
     const reusable = cacheSourceForStage(currentRun ?? run, currentStage)
@@ -2394,6 +2466,11 @@ export async function runVerifierGate(input: {
       "Return VerifierTaskEnvelope with status, checks, blockingFindings, repairHints, trustedArtifacts, summary, findings.",
     linkedStageId: stage.stageId,
   })
+  AgentControl.recordDecision({
+    sessionID: input.sessionID,
+    decision,
+    forkMode: "minimal_context",
+  })
 
   let envelope: VerifierTaskEnvelope | undefined
   if (input.preferFreshRun !== false) {
@@ -2411,6 +2488,20 @@ export async function runVerifierGate(input: {
   }
 
   const report = mergeVerifierEnvelope(built.report, envelope)
+  if (envelope) {
+    AgentControl.recordMessage({
+      sessionID: input.sessionID,
+      fromAgent: "verifier",
+      toAgent: "general",
+      stageId: stage.stageId,
+      envelope: {
+        summary: envelope.summary,
+        findings: envelope.findings,
+        producedArtifacts: envelope.trustedArtifacts,
+        nextStepRecommendation: envelope.repairHints[0] ?? "continue",
+      },
+    })
+  }
   if (envelope) {
     const sessionState = readWorkflowSession(input.sessionID)
     const run =
@@ -2436,6 +2527,20 @@ export async function runVerifierGate(input: {
       run.activeCoordinatorAgent = "verifier"
       run.repairOnly = report.status === "block"
       run.blockedStageId = report.status === "block" ? targetStage.stageId : undefined
+      run.activeTaskId = activeRuntimeTaskId(input.sessionID) ?? run.activeTaskId
+      RuntimeTaskLedger.appendEvent({
+        sessionID: input.sessionID,
+        taskId: run.activeTaskId,
+        kind: "verifier",
+        stageId: targetStage.stageId,
+        workflowRunId: run.workflowRunId,
+        message: `verifier ${report.status}`,
+        metadata: { blockingFindings: report.blockingFindings, repairHints: report.repairHints },
+      })
+      if (report.status !== "block") {
+        const checkpoint = createWorkflowCheckpoint({ sessionID: input.sessionID, run, stage: targetStage })
+        run.lastCheckpointId = checkpoint.checkpointId
+      }
       run.updatedAt = nowIso()
       refreshWorkflowRunDerivedState(run)
       writeWorkflowSession(sessionState)
@@ -2515,6 +2620,67 @@ export function workflowArtifactList(sessionID: string, stageId?: string) {
   }
 }
 
+export function workflowTaskLedger(sessionID: string) {
+  return RuntimeTaskLedger.listTasks(sessionID)
+}
+
+export function restoreWorkflowCheckpoint(sessionID: string, target: RestoreTarget = {}) {
+  const resolved = RuntimeTaskLedger.resolveRestoreTarget(sessionID, target)
+  if (!resolved.checkpoint) {
+    return {
+      restored: false,
+      reason: target.checkpointId
+        ? `Checkpoint not found: ${target.checkpointId}`
+        : target.stageId
+          ? `No checkpoint found for stage: ${target.stageId}`
+          : "No non-blocking checkpoint is available.",
+      checkpoint: null,
+      workflow: getActiveWorkflowRun(sessionID),
+    }
+  }
+
+  const sessionState = readWorkflowSession(sessionID)
+  const run =
+    sessionState.runs.find((item) => item.workflowRunId === resolved.checkpoint?.workflowRunId) ??
+    sessionState.runs.at(-1)
+  if (!run) {
+    return {
+      restored: false,
+      reason: "Workflow run not found for checkpoint.",
+      checkpoint: resolved.checkpoint,
+      workflow: null,
+    }
+  }
+
+  const stage = resolved.checkpoint.stageId
+    ? run.stages.find((item) => item.stageId === resolved.checkpoint?.stageId)
+    : undefined
+  run.activeNodeId = stage?.nodeId ?? run.activeNodeId
+  run.activeStage = resolved.checkpoint.activeStage ?? stage?.kind ?? run.activeStage
+  run.branch = resolved.checkpoint.branch ?? run.branch
+  run.trustedArtifacts = resolved.checkpoint.trustedArtifacts
+  run.repairOnly = false
+  run.blockedStageId = undefined
+  run.activeCoordinatorAgent = "general"
+  run.lastRestore = {
+    checkpointId: resolved.checkpoint.checkpointId,
+    stageId: resolved.checkpoint.stageId,
+    restoredAt: nowIso(),
+  }
+  run.updatedAt = nowIso()
+  refreshWorkflowRunDerivedState(run)
+  writeWorkflowSession(sessionState)
+  RuntimeTaskLedger.recordRestore(sessionID, resolved.checkpoint, run.activeTaskId ?? activeRuntimeTaskId(sessionID))
+  publishWorkflowState(sessionID, run)
+
+  return {
+    restored: true,
+    checkpoint: resolved.checkpoint,
+    workflow: run,
+    stage,
+  }
+}
+
 export function workflowToolPolicy(input: ToolAvailabilityPolicy) {
   if (!input.sessionID) return input
   const run = getActiveWorkflowRun(input.sessionID)
@@ -2535,6 +2701,73 @@ export function resolveToolAvailability(input: {
   toolIDs: string[]
 }): ToolAvailabilityResolution {
   const allowed = new Set(input.toolIDs)
+  const explain = (bundle: string[]): ToolAvailabilityExplanation[] => {
+    const bundleSet = new Set(bundle)
+    return input.toolIDs.map((toolID) => {
+      const reasons: string[] = []
+      if (bundleSet.has(toolID)) {
+        reasons.push("available in the current workflow bundle")
+      } else {
+        reasons.push("not included for the current stage, agent, intent, or capability policy")
+      }
+      if (input.policy.repairOnly && ["paper_draft", "slide_generator", "research_brief"].includes(toolID)) {
+        reasons.push("blocked while repairOnly is active")
+      }
+      if (input.policy.platformCapabilities?.remote && ["bash", "shell", "edit", "write", "apply_patch"].includes(toolID)) {
+        reasons.push("blocked for remote platform safety")
+      }
+      if (input.policy.modelCapabilities?.supportsTools === false && !["workflow", "read", "glob", "grep", "skill"].includes(toolID)) {
+        reasons.push("blocked because the selected model does not support rich tool calling")
+      }
+      if (input.policy.modelCapabilities?.supportsImages === false && toolID === "slide_generator") {
+        reasons.push("blocked because the selected model does not support image-related workflow")
+      }
+      if (input.policy.platformCapabilities?.mcp === false && ["codesearch", "websearch"].includes(toolID)) {
+        reasons.push("blocked because MCP/search capability is unavailable")
+      }
+      const exposure: ToolAvailabilityExplanation["exposure"] = bundleSet.has(toolID)
+        ? "direct"
+        : reasons.some((reason) => reason.startsWith("blocked"))
+          ? "blocked"
+          : "deferred"
+      return {
+        toolID,
+        available: bundleSet.has(toolID) && allowed.has(toolID),
+        exposure,
+        reasons,
+      }
+    })
+  }
+  const finalize = (bundle: string[]): ToolAvailabilityResolution => {
+    const explanations = explain(bundle)
+    const directToolIDs = bundle.filter((tool) => allowed.has(tool))
+    const deferredToolIDs = explanations
+      .filter((item) => item.exposure === "deferred")
+      .map((item) => item.toolID)
+    const blocked = explanations.filter((item) => item.exposure === "blocked")
+    const blockedToolIDs = blocked.map((item) => item.toolID)
+    return {
+      policy: input.policy,
+      bundle,
+      allowedToolIDs: directToolIDs,
+      directToolIDs,
+      deferredToolIDs,
+      blockedToolIDs,
+      explanations,
+      exposurePlan: {
+        directTools: directToolIDs,
+        deferredTools: deferredToolIDs.map((toolID) => ({
+          toolID,
+          reason: explanations.find((item) => item.toolID === toolID)?.reasons.join("; ") ?? "deferred by policy",
+          enableWhen: ["matching stage", "matching agent", "matching model/platform capability"],
+          remoteSafe: !["bash", "shell", "edit", "write", "apply_patch"].includes(toolID),
+          repairOnlyAllowed: !["paper_draft", "slide_generator", "research_brief"].includes(toolID),
+        })),
+        blockedTools: blocked,
+        policy: input.policy,
+      },
+    }
+  }
   const stage = input.policy.currentStage
   const status = input.policy.currentStageStatus
   const agent = input.policy.agent
@@ -2560,19 +2793,36 @@ export function resolveToolAvailability(input: {
     "todowrite",
   ]
 
-  const importBundle = [...readCore, "data_import", "data_batch"]
-  const estimateBundle = [...readCore, "econometrics", "regression_table"]
+  const analysisShellTools = ["bash", "shell"]
+  const importBundle = [...readCore, ...analysisShellTools, "data_import", "data_batch"]
+  const estimateBundle = [...readCore, ...analysisShellTools, "econometrics", "regression_table"]
   const verifyBundle = [...readCore, "regression_table"]
   const reportBundle = [...readCore, "regression_table", "research_brief", "paper_draft", "slide_generator"]
 
-  const repairBundle = [...readCore, "data_import", "data_batch", "econometrics", "regression_table"]
+  const repairBundle = [...readCore, ...analysisShellTools, "data_import", "data_batch", "econometrics", "regression_table"]
+  const applyCapabilityFilters = (tools: string[]) => {
+    let filtered = tools
+    if (input.policy.modelCapabilities?.supportsTools === false) {
+      filtered = filtered.filter((tool) => ["workflow", "read", "glob", "grep", "skill"].includes(tool))
+    }
+    if (input.policy.modelCapabilities?.supportsImages === false) {
+      filtered = filtered.filter((tool) => !["slide_generator"].includes(tool))
+    }
+    if (input.policy.platformCapabilities?.mcp === false) {
+      filtered = filtered.filter((tool) => tool !== "codesearch" && tool !== "websearch")
+    }
+    if (input.policy.platformCapabilities?.remote) {
+      filtered = filtered.filter((tool) => !["bash", "shell", "edit", "write", "apply_patch"].includes(tool))
+    }
+    return filtered
+  }
   let bundle = readCore
   if (!stage) {
     bundle =
       input.policy.workflowMode === "econometrics" || inputIntent === "analysis" || inputIntent === "repair"
         ? inputIntent === "analysis" || inputIntent === "repair"
-          ? [...new Set([...readCore, "data_import", "data_batch", "econometrics", "regression_table"])]
-          : [...readCore, "data_import", "data_batch"]
+          ? [...new Set([...readCore, ...analysisShellTools, "data_import", "data_batch", "econometrics", "regression_table"])]
+          : [...readCore, ...analysisShellTools, "data_import", "data_batch"]
         : readCore
     if (agent === "explorer") {
       bundle = [...new Set([...readCore, "data_import", "data_batch", "workflow"])]
@@ -2593,11 +2843,8 @@ export function resolveToolAvailability(input: {
           ].includes(tool) && (tool !== "regression_table" || allowRegressionTable),
       )
     }
-    return {
-      policy: input.policy,
-      bundle,
-      allowedToolIDs: bundle.filter((tool) => allowed.has(tool)),
-    }
+    bundle = applyCapabilityFilters(bundle)
+    return finalize(bundle)
   }
 
   if (
@@ -2625,7 +2872,7 @@ export function resolveToolAvailability(input: {
   }
 
   if (status === "blocked" || status === "failed" || repairOnly) {
-      bundle = stage === "baseline_estimate" ? repairBundle : [...readCore, "data_import", "data_batch"]
+      bundle = stage === "baseline_estimate" ? repairBundle : [...readCore, ...analysisShellTools, "data_import", "data_batch"]
   }
 
   if (agent === "verifier") {
@@ -2665,27 +2912,9 @@ export function resolveToolAvailability(input: {
     ]
   }
 
-  if (input.policy.modelCapabilities?.supportsTools === false) {
-    bundle = bundle.filter((tool) => ["workflow", "read", "glob", "grep", "skill"].includes(tool))
-  }
+  bundle = applyCapabilityFilters(bundle)
 
-  if (input.policy.modelCapabilities?.supportsImages === false) {
-    bundle = bundle.filter((tool) => !["slide_generator"].includes(tool))
-  }
-
-  if (input.policy.platformCapabilities?.mcp === false) {
-    bundle = bundle.filter((tool) => tool !== "codesearch" && tool !== "websearch")
-  }
-
-  if (input.policy.platformCapabilities?.remote) {
-    bundle = bundle.filter((tool) => !["bash", "shell", "edit", "write", "apply_patch"].includes(tool))
-  }
-
-  return {
-    policy: input.policy,
-    bundle,
-    allowedToolIDs: bundle.filter((tool) => allowed.has(tool)),
-  }
+  return finalize(bundle)
 }
 
 export function filterToolsForWorkflow(input: { policy: ToolAvailabilityPolicy; toolIDs: string[] }) {
