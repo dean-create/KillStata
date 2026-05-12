@@ -2,7 +2,7 @@ import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentu
 import { Clipboard } from "@tui/util/clipboard"
 import { TextAttributes } from "@opentui/core"
 import { RouteProvider, useRoute } from "@tui/context/route"
-import { Switch, Match, createEffect, untrack, ErrorBoundary, createSignal, onMount, batch, Show, on } from "solid-js"
+import { Switch, Match, createEffect, createMemo, untrack, ErrorBoundary, createSignal, onMount, batch, Show, on } from "solid-js"
 import { Installation } from "@/installation"
 import { Flag } from "@/flag/flag"
 import { DialogProvider, useDialog } from "@tui/ui/dialog"
@@ -316,6 +316,15 @@ function App() {
   )
 
   const connected = useConnected()
+  const showAdvancedCommands = createMemo(() => {
+    const tui = sync.data.config.tui as
+      | (typeof sync.data.config.tui & {
+          showAdvancedCommands?: boolean
+          show_advanced_commands?: boolean
+        })
+      | undefined
+    return tui?.showAdvancedCommands === true || tui?.show_advanced_commands === true
+  })
   command.register(() => [
     {
       title: "Switch session",
@@ -323,6 +332,7 @@ function App() {
       keybind: "session_list",
       category: "Session",
       suggested: sync.data.session.length > 0,
+      hidden: !showAdvancedCommands(),
       slash: {
         name: "sessions",
         aliases: ["resume", "continue"],
@@ -337,6 +347,7 @@ function App() {
       value: "session.new",
       keybind: "session_new",
       category: "Session",
+      hidden: !showAdvancedCommands(),
       slash: {
         name: "new",
         aliases: ["clear"],
@@ -353,13 +364,15 @@ function App() {
       },
     },
     {
-      title: "Switch model",
+      title: "模型",
+      description: "选择当前会话使用的大模型",
       value: "model.list",
       keybind: "model_list",
       suggested: true,
-      category: "Agent",
+      category: "核心",
       slash: {
-        name: "models",
+        name: "model",
+        aliases: ["models"],
       },
       onSelect: () => {
         dialog.replace(() => <DialogModel />)
@@ -406,21 +419,24 @@ function App() {
       },
     },
     {
-      title: "Switch agent",
+      title: "智能体",
+      description: "切换 Analyst、Explorer 等工作智能体",
       value: "agent.list",
       keybind: "agent_list",
-      category: "Agent",
+      category: "核心",
       slash: {
-        name: "agents",
+        name: "agent",
+        aliases: ["agents"],
       },
       onSelect: () => {
         dialog.replace(() => <DialogAgent />)
       },
     },
     {
-      title: "Toggle MCPs",
+      title: "MCP 服务",
       value: "mcp.list",
-      category: "Agent",
+      category: "高级",
+      hidden: !showAdvancedCommands(),
       slash: {
         name: "mcps",
         aliases: ["mcp"],
@@ -460,19 +476,22 @@ function App() {
       },
     },
     {
-      title: "Connect provider",
+      title: "配置",
+      description: "配置模型提供商和 API Key",
       value: "provider.connect",
       suggested: !connected(),
       slash: {
-        name: "connect",
+        name: "config",
+        aliases: ["connect"],
       },
       onSelect: () => {
         dialog.replace(() => <DialogProviderList />)
       },
-      category: "Provider",
+      category: "核心",
     },
     {
-      title: "View status",
+      title: "状态",
+      description: "查看当前会话、模型和服务状态",
       keybind: "status_view",
       value: "killstata.status",
       slash: {
@@ -481,12 +500,13 @@ function App() {
       onSelect: () => {
         dialog.replace(() => <DialogStatus />)
       },
-      category: "System",
+      category: "核心",
     },
     {
       title: "Switch theme",
       value: "theme.switch",
       keybind: "theme_list",
+      hidden: !showAdvancedCommands(),
       slash: {
         name: "themes",
       },
@@ -498,6 +518,7 @@ function App() {
     {
       title: "Toggle appearance",
       value: "theme.switch_mode",
+      hidden: !showAdvancedCommands(),
       onSelect: (dialog) => {
         setMode(mode() === "dark" ? "light" : "dark")
         dialog.clear()
@@ -507,6 +528,7 @@ function App() {
     {
       title: "Help",
       value: "help.show",
+      hidden: !showAdvancedCommands(),
       slash: {
         name: "help",
       },
@@ -518,6 +540,7 @@ function App() {
     {
       title: "Open docs",
       value: "docs.open",
+      hidden: !showAdvancedCommands(),
       onSelect: () => {
         open("https://killstata.io/docs").catch(() => { })
         dialog.clear()
@@ -527,6 +550,7 @@ function App() {
     {
       title: "Open WebUI",
       value: "webui.open",
+      hidden: !showAdvancedCommands(),
       onSelect: () => {
         open(sdk.url).catch(() => { })
         dialog.clear()
@@ -536,6 +560,7 @@ function App() {
     {
       title: "Exit the app",
       value: "app.exit",
+      hidden: !showAdvancedCommands(),
       slash: {
         name: "exit",
         aliases: ["quit", "q"],
@@ -547,6 +572,7 @@ function App() {
       title: "Toggle debug panel",
       category: "System",
       value: "app.debug",
+      hidden: !showAdvancedCommands(),
       onSelect: (dialog) => {
         renderer.toggleDebugOverlay()
         dialog.clear()
@@ -556,6 +582,7 @@ function App() {
       title: "Toggle console",
       category: "System",
       value: "app.console",
+      hidden: !showAdvancedCommands(),
       onSelect: (dialog) => {
         renderer.console.toggle()
         dialog.clear()
@@ -565,6 +592,7 @@ function App() {
       title: "Write heap snapshot",
       category: "System",
       value: "app.heap_snapshot",
+      hidden: !showAdvancedCommands(),
       onSelect: (dialog) => {
         const path = writeHeapSnapshot()
         toast.show({
@@ -596,6 +624,7 @@ function App() {
       value: "terminal.title.toggle",
       keybind: "terminal_title_toggle",
       category: "System",
+      hidden: !showAdvancedCommands(),
       onSelect: (dialog) => {
         setTerminalTitleEnabled((prev) => {
           const next = !prev

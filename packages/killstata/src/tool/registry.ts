@@ -30,6 +30,7 @@ import { ApplyPatchTool } from "./apply_patch"
 import { EconometricsTool } from "./econometrics"
 import { DataImportTool } from "./data-import"
 import { DataBatchTool } from "./data-batch"
+import { ManufacturingAnalysisTool } from "./manufacturing-analysis"
 import { RegressionTableTool } from "./regression-table"
 import { ResearchBriefTool } from "./research-brief"
 import { HeterogeneityRunnerTool } from "./heterogeneity-runner"
@@ -127,6 +128,7 @@ export namespace ToolRegistry {
       RegressionTableTool,
       DataImportTool,
       DataBatchTool,
+      ManufacturingAnalysisTool,
       ResearchBriefTool,
       HeterogeneityRunnerTool,
       PaperDraftTool,

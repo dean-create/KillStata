@@ -1149,11 +1149,22 @@ def read_table(file_path):
         read_kwargs = {}
         if isinstance(header_row, int):
             read_kwargs["header"] = header_row
+        workbook = pd.ExcelFile(file_path)
+        sheet_names = [str(name) for name in workbook.sheet_names]
         if mode == "named_sheet":
-            read_kwargs["sheet_name"] = sheet_policy.get("sheetName")
+            requested_sheet = str(sheet_policy.get("sheetName") or "").strip()
+            # 这里提前校验工作表名称，避免 pandas 只返回一句“Worksheet not found”。
+            # 明确列出真实 Sheet，可以让 Agent 下一轮直接修正为合法名称，而不是继续猜。
+            if requested_sheet not in sheet_names:
+                available = "、".join(sheet_names)
+                raise ValueError(
+                    f"Worksheet named '{requested_sheet}' not found. Available sheets: {available}. "
+                    "Use one of the exact sheet names from available sheets, or omit sheetPolicy to import the first sheet."
+                )
+            read_kwargs["sheet_name"] = requested_sheet
         else:
-            read_kwargs["sheet_name"] = 0
-        return pd.read_excel(file_path, **read_kwargs)
+            read_kwargs["sheet_name"] = sheet_names[0] if sheet_names else 0
+        return pd.read_excel(workbook, **read_kwargs)
     if suffix == ".dta":
         read_error = None
         for encoding in [None, "gbk", "latin1"]:

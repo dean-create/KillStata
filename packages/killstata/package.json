@@ -1,5 +1,5 @@
 {
-  "version": "0.1.22",
+  "version": "0.1.23",
   "name": "killstata",
   "description": "AI-native econometrics CLI with staged data import, regression workflows, and paper-ready outputs.",
   "type": "module",
@@ -44,6 +44,7 @@
     "pack:publish:windows:latest": "bun run pack:publish:windows",
     "publish:windows": "bun run script/publish.ts --windows-priority",
     "publish:windows:latest": "bun run publish:windows",
+    "prepublishOnly": "node ./script/guard-source-publish.mjs",
     "release:windows:latest": "bun run script/release-windows.ts",
     "dev": "BROWSERSLIST_IGNORE_OLD_DATA=1 bun run --conditions=browser ./src/index.ts",
     "random": "echo 'Random script updated at $(date)' && echo 'Change queued successfully' && echo 'Another change made' && echo 'Yet another change' && echo 'One more change' && echo 'Final change' && echo 'Another final change' && echo 'Yet another final change'",

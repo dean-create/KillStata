@@ -85,6 +85,23 @@ export namespace SessionPrompt {
     SessionRunCoordinator.resolveAction(sessionID, message, actionID)
   }
 
+  function detectInputIntent(parts: PromptInput["parts"], explicitIntent?: WorkflowInputIntent): WorkflowInputIntent | undefined {
+    if (explicitIntent) return explicitIntent
+
+    const text = parts
+      .map((part) => {
+        if (part.type === "text") return part.text
+        if (part.type === "file") return [part.filename, part.url, part.source?.type === "file" ? part.source.path : ""].join(" ")
+        return ""
+      })
+      .join("\n")
+      .toLowerCase()
+
+    // Excel/CSV/DTA 这类原始表格输入必须先走 intake 阶段，避免模型跳过 data_import 直接回归。
+    if (/\.(xlsx|xls|csv|dta|sav)\b/.test(text) || /\b(excel|spreadsheet|workbook)\b/.test(text)) return "ingest"
+    return undefined
+  }
+
   function inputGraphFromParts(parts: PromptInput["parts"], intent?: WorkflowInputIntent): InputGraphNode[] {
     const graph: InputGraphNode[] = []
     if (intent) {
@@ -180,7 +197,7 @@ export namespace SessionPrompt {
     queuePriority: z.number().int().optional(),
     queueActionType: z.enum(["prompt", "command", "shell", "continue", "retry", "repair", "compaction"]).optional(),
     queueMetadata: z.record(z.string(), z.any()).optional(),
-    intent: z.enum(["status", "repair", "verify", "report", "analysis"]).optional(),
+    intent: z.enum(["status", "repair", "verify", "report", "analysis", "ingest"]).optional(),
     parts: z.array(
       z.discriminatedUnion("type", [
         MessageV2.TextPart.omit({
@@ -271,14 +288,18 @@ export namespace SessionPrompt {
       return message
     }
 
+    const detectedIntent = detectInputIntent(input.parts, input.intent)
+
     const queued = await enqueueAction(input.sessionID, {
       type: input.queueActionType ?? "prompt",
       priority: input.queuePriority ?? 10,
       metadata: {
         messageID: message.info.id,
-        intent: input.intent,
+        intent: detectedIntent,
+        autoSkillBundle:
+          detectedIntent === "ingest" ? ["workflow-orchestrator", "xlsx-processor", "tabular-ingest"] : undefined,
         hasImageInput: input.parts.some((part) => part.type === "file" && part.mime?.startsWith("image/")),
-        inputGraph: inputGraphFromParts(input.parts, input.intent),
+        inputGraph: inputGraphFromParts(input.parts, detectedIntent),
         ...(input.queueMetadata ?? {}),
       },
     })

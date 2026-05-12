@@ -39,6 +39,7 @@ export namespace Command {
       remoteSafe: z.boolean().optional(),
       repairOnlyAllowed: z.boolean().optional(),
       requiresTrustedArtifacts: z.boolean().optional(),
+      advanced: z.boolean().optional(),
       visibleWhen: z.array(z.string()).optional(),
       blockedReason: z.string().optional(),
       // workaround for zod not supporting async functions natively so we use getters
@@ -147,6 +148,16 @@ export namespace Command {
     return Object.fromEntries(Object.entries(commands).filter(([name]) => !blocked.has(name)))
   }
 
+  function showAdvancedCommands(cfg: Awaited<ReturnType<typeof Config.get>>) {
+    return cfg.tui?.showAdvancedCommands === true || cfg.tui?.show_advanced_commands === true
+  }
+
+  function visibleCommands(commands: Record<string, Info>, cfg: Awaited<ReturnType<typeof Config.get>>) {
+    const filtered = applyDisabledCommands(commands, cfg.disabled_commands)
+    if (showAdvancedCommands(cfg)) return filtered
+    return Object.fromEntries(Object.entries(filtered).filter(([, command]) => command.advanced !== true))
+  }
+
   const state = Instance.state(async () => {
     const cfg = await Config.get()
 
@@ -154,6 +165,7 @@ export namespace Command {
       [Default.INIT]: {
         name: Default.INIT,
         description: "create/update AGENTS.md",
+        advanced: true,
         get template() {
           return PROMPT_INITIALIZE.replace("${path}", Instance.worktree)
         },
@@ -162,6 +174,7 @@ export namespace Command {
       [Default.REVIEW]: {
         name: Default.REVIEW,
         description: "review changes [commit|branch|pr], defaults to uncommitted",
+        advanced: true,
         get template() {
           return PROMPT_REVIEW.replace("${path}", Instance.worktree)
         },
@@ -170,7 +183,7 @@ export namespace Command {
       },
       [Default.WORKFLOW]: {
         name: Default.WORKFLOW,
-        description: "show the current econometrics workflow run, active stage, verifier status, and next actions",
+        description: "查看当前计量工作流、阶段状态、校验器和下一步",
         workflowAware: true,
         availability: ["workflow"],
         queueBehavior: "queued",
@@ -187,6 +200,7 @@ export namespace Command {
       [Default.STAGE]: {
         name: Default.STAGE,
         description: "inspect a workflow stage, including replay input, artifacts, and verifier evidence",
+        advanced: true,
         workflowAware: true,
         availability: ["workflow"],
         queueBehavior: "queued",
@@ -203,6 +217,7 @@ export namespace Command {
       [Default.RERUN]: {
         name: Default.RERUN,
         description: "rerun only the failed or selected stage; do not restart successful earlier stages",
+        advanced: true,
         workflowAware: true,
         availability: ["workflow"],
         queueBehavior: "queued",
@@ -220,7 +235,7 @@ export namespace Command {
       },
       [Default.ARTIFACT]: {
         name: Default.ARTIFACT,
-        description: "list canonical parquet, diagnostics, numeric snapshots, audits, and report artifacts for the current workflow",
+        description: "列出当前分析的可信数据、诊断、表格和报告产物",
         workflowAware: true,
         availability: ["workflow"],
         queueBehavior: "queued",
@@ -236,7 +251,7 @@ export namespace Command {
       },
       [Default.DOCTOR]: {
         name: Default.DOCTOR,
-        description: "check workflow health, runtime python setup, MCP availability, and current workflow readiness",
+        description: "检查 Python、模型、依赖和工作流健康状态",
         workflowAware: true,
         availability: ["workflow"],
         queueBehavior: "immediate",
@@ -254,6 +269,7 @@ export namespace Command {
       [Default.VERIFY]: {
         name: Default.VERIFY,
         description: "run the structured workflow verifier against the current or selected stage",
+        advanced: true,
         workflowAware: true,
         availability: ["workflow"],
         queueBehavior: "queued",
@@ -271,6 +287,7 @@ export namespace Command {
       [Default.TASKS]: {
         name: Default.TASKS,
         description: "show persisted runtime tasks, queue state, current task, and failed task status",
+        advanced: true,
         workflowAware: true,
         availability: ["workflow", "task-ledger"],
         queueBehavior: "queued",
@@ -288,6 +305,7 @@ export namespace Command {
       [Default.TIMELINE]: {
         name: Default.TIMELINE,
         description: "show the task timeline with workflow, tool, verifier, checkpoint, and restore events",
+        advanced: true,
         workflowAware: true,
         availability: ["workflow", "task-ledger"],
         queueBehavior: "queued",
@@ -305,6 +323,7 @@ export namespace Command {
       [Default.RESTORE]: {
         name: Default.RESTORE,
         description: "restore workflow pointers to the latest trusted checkpoint or selected checkpoint/stage",
+        advanced: true,
         workflowAware: true,
         availability: ["workflow", "restore"],
         queueBehavior: "queued",
@@ -322,6 +341,7 @@ export namespace Command {
       [Default.TOOLS]: {
         name: Default.TOOLS,
         description: "explain currently available tools and why blocked tools are hidden",
+        advanced: true,
         workflowAware: true,
         availability: ["workflow", "tool-capability"],
         queueBehavior: "queued",
@@ -338,7 +358,7 @@ export namespace Command {
       },
       [Default.SKILLS]: {
         name: Default.SKILLS,
-        description: "show recommended skill bundles for the current workflow stage",
+        description: "查看当前阶段推荐使用的数据和计量分析技能",
         workflowAware: true,
         availability: ["workflow", "skills"],
         queueBehavior: "queued",
@@ -356,6 +376,7 @@ export namespace Command {
       [Default.DIAGNOSTICS]: {
         name: Default.DIAGNOSTICS,
         description: "show Python, MCP, LSP, dependency, workflow, and verifier diagnostics",
+        advanced: true,
         workflowAware: true,
         availability: ["workflow", "diagnostics"],
         queueBehavior: "immediate",
@@ -374,6 +395,7 @@ export namespace Command {
       [Default.AGENT]: {
         name: Default.AGENT,
         description: "show workflow coordinator and sub-agent control state",
+        advanced: true,
         workflowAware: true,
         availability: ["workflow", "agent-control"],
         queueBehavior: "queued",
@@ -403,6 +425,7 @@ export namespace Command {
         remoteSafe: command.remoteSafe,
         repairOnlyAllowed: command.repairOnlyAllowed,
         requiresTrustedArtifacts: command.requiresTrustedArtifacts,
+        advanced: command.advanced,
         visibleWhen: command.visibleWhen,
         blockedReason: command.blockedReason,
         get template() {
@@ -424,6 +447,7 @@ export namespace Command {
         name,
         mcp: true,
         description: prompt.description,
+        advanced: true,
         get template() {
           // since a getter can't be async we need to manually return a promise here
           return new Promise<string>(async (resolve, reject) => {
@@ -446,14 +470,16 @@ export namespace Command {
       }
     }
 
-    return applyDisabledCommands(result, cfg.disabled_commands)
+    return result
   })
 
   export async function get(name: string) {
-    return state().then((x) => x[name])
+    const [commands, cfg] = await Promise.all([state(), Config.get()])
+    return applyDisabledCommands(commands, cfg.disabled_commands)[name]
   }
 
   export async function list() {
-    return state().then((x) => Object.values(x))
+    const [commands, cfg] = await Promise.all([state(), Config.get()])
+    return Object.values(visibleCommands(commands, cfg))
   }
 }

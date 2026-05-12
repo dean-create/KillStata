@@ -53,13 +53,7 @@ function commandCapabilityDescription(command: {
   immediate?: boolean
   remoteSafe?: boolean
 }) {
-  const tags = [
-    command.workflowAware ? "workflow" : undefined,
-    ...(command.availability ?? []),
-    command.queueBehavior ?? (command.immediate ? "immediate" : undefined),
-    command.remoteSafe ? "remote-safe" : undefined,
-  ].filter((item, index, arr): item is string => typeof item === "string" && arr.indexOf(item) === index)
-  return [command.description, tags.length ? `[${tags.join("] [")}]` : undefined].filter(Boolean).join(" ")
+  return command.description ?? ""
 }
 
 export type AutocompleteRef = {

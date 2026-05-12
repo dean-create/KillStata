@@ -1,5 +1,6 @@
 ﻿import { Ripgrep } from "../file/ripgrep"
-import { formatSkillAliasXml, resolveSkillAliasAvailability } from "../skill"
+import { formatSkillAliasXml, resolveSkillAliasAvailability, Skill } from "../skill"
+import { ConfigMarkdown } from "../config/markdown"
 
 import { Instance } from "../project/instance"
 import path from "path"
@@ -192,6 +193,13 @@ async function buildSkillAliasSummary() {
   return formatSkillAliasXml(aliases)
 }
 
+type AutoSkillContext = {
+  intent: "ingest"
+  trigger: string
+  skills: string[]
+  files: string[]
+}
+
 export namespace SystemPrompt {
   export function agent(agent: Agent.Info) {
     if (agent.name === "analyst") {
@@ -268,6 +276,7 @@ export namespace SystemPrompt {
     const project = Instance.project
     const dataSummary = await buildDataSummary(input?.messages)
     const skillSummary = await buildSkillAliasSummary()
+    const autoSkillContext = await buildAutoSkillContext(input?.messages)
 
     return [
       [
@@ -280,6 +289,7 @@ export namespace SystemPrompt {
         `</env>`,
         dataSummary,
         skillSummary,
+        autoSkillContext,
         `<files>`,
         `  ${
           project.vcs === "git" && false
@@ -294,6 +304,96 @@ export namespace SystemPrompt {
         .filter(Boolean)
         .join("\n"),
     ]
+  }
+
+  function latestUserInputText(messages: MessageV2.WithParts[] = []) {
+    const latest = [...messages].reverse().find((message) => message.info.role === "user")
+    if (!latest) return ""
+    return latest.parts
+      .map((part) => {
+        if (part.type === "text") return part.text
+        if (part.type === "file") {
+          const sourcePath = part.source?.type === "file" ? part.source.path : ""
+          return [part.filename, part.url, sourcePath].filter(Boolean).join(" ")
+        }
+        return ""
+      })
+      .join("\n")
+  }
+
+  function detectAutoSkillContext(messages: MessageV2.WithParts[] = [], dataFiles: string[] = []): AutoSkillContext | undefined {
+    const latestText = latestUserInputText(messages)
+    const excelFiles = dataFiles.filter((file) => /\.(xlsx|xls)$/i.test(file))
+    const mentionedExcel =
+      /\.(xlsx|xls)\b/i.test(latestText) || /\b(excel|spreadsheet|workbook)\b/i.test(latestText) || /表格|工作簿/.test(latestText)
+    const asksForDataWork = /读取|导入|清洗|筛选|分析|回归|统计|数据|read|import|clean|analy[sz]e|regress/.test(latestText)
+
+    if (mentionedExcel || (excelFiles.length > 0 && asksForDataWork)) {
+      return {
+        intent: "ingest",
+        trigger: mentionedExcel ? "latest_user_excel_reference" : "workspace_excel_candidate",
+        skills: ["workflow-orchestrator", "xlsx-processor", "tabular-ingest"],
+        files: excelFiles.slice(0, 5),
+      }
+    }
+
+    if (/\.(csv|dta|sav)\b/i.test(latestText)) {
+      return {
+        intent: "ingest",
+        trigger: "latest_user_tabular_reference",
+        skills: ["workflow-orchestrator", "tabular-ingest"],
+        files: dataFiles.filter((file) => /\.(csv|dta|sav)$/i.test(file)).slice(0, 5),
+      }
+    }
+
+    return undefined
+  }
+
+  async function loadSkillPromptSnippet(skillName: string) {
+    const skill = await Skill.get(skillName).catch(() => undefined)
+    if (!skill) return undefined
+    const parsed = await ConfigMarkdown.parse(skill.location).catch(() => undefined)
+    if (!parsed) return undefined
+    // 这里不是替模型“执行 skill”，而是把匹配 skill 固化成当前 stage 的规则上下文。
+    // 这样 Excel 输入不会只靠模型自觉调用 skill，而是每轮 prompt 都能看到导入 SOP。
+    const content = parsed.content.trim()
+    const maxLength = 2_800
+    const safeContent = content.length > maxLength ? `${content.slice(0, maxLength)}\n[truncated]` : content
+    return [
+      `  <skill name="${skill.name}" source="${skill.source}">`,
+      safeContent
+        .split(/\r?\n/)
+        .map((line) => `    ${line}`)
+        .join("\n"),
+      "  </skill>",
+    ].join("\n")
+  }
+
+  async function buildAutoSkillContext(messages?: MessageV2.WithParts[]) {
+    const dataFiles = await scanDataFiles(Instance.directory)
+    const context = detectAutoSkillContext(messages, dataFiles)
+    if (!context) return ""
+    const snippets = (
+      await Promise.all(context.skills.map((skillName) => loadSkillPromptSnippet(skillName)))
+    ).filter((item): item is string => typeof item === "string" && item.length > 0)
+
+    if (snippets.length === 0) return ""
+
+    return [
+      "<auto_skill_context>",
+      `  Intent: ${context.intent}`,
+      `  Trigger: ${context.trigger}`,
+      context.files.length > 0 ? `  Candidate files: ${context.files.join(", ")}` : "",
+      "  Required execution contract:",
+      "  - Treat these loaded skills as stage prompt rules, not as executable readers.",
+      "  - For Excel intake, inspect sheet choices when needed, then call data_import with action=\"import\".",
+      "  - Use data_import/Python to create the canonical Parquet stage, schema, inspection files, and audit log.",
+      "  - Do not jump to econometrics/reporting before import and QA have produced trusted artifacts.",
+      ...snippets,
+      "</auto_skill_context>",
+    ]
+      .filter(Boolean)
+      .join("\n")
   }
 
   async function scanDataFiles(directory: string): Promise<string[]> {

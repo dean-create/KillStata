@@ -13,6 +13,18 @@ describe("session.system prompt contracts", () => {
     expect(source).toContain("original request, the failure reason, and the executed method")
   })
 
+  test("spreadsheet intake auto-injects skill context before data_import execution", () => {
+    const systemSource = fs.readFileSync(path.join(process.cwd(), "src", "session", "system.ts"), "utf-8")
+    const promptSource = fs.readFileSync(path.join(process.cwd(), "src", "session", "prompt.ts"), "utf-8")
+
+    expect(promptSource).toContain("return \"ingest\"")
+    expect(promptSource).toContain("autoSkillBundle")
+    expect(systemSource).toContain("<auto_skill_context>")
+    expect(systemSource).toContain("xlsx-processor")
+    expect(systemSource).toContain("tabular-ingest")
+    expect(systemSource).toContain("call data_import with action=\"import\"")
+  })
+
   test("econometrics tool contract documents rescue behavior for explicit method failures", () => {
     const sourcePath = path.join(process.cwd(), "src", "tool", "econometrics.txt")
     const source = fs.readFileSync(sourcePath, "utf-8")

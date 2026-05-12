@@ -398,7 +398,7 @@ export interface WorkflowRun {
   updatedAt: string
 }
 
-export type WorkflowInputIntent = "status" | "repair" | "verify" | "report" | "analysis"
+export type WorkflowInputIntent = "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
 
 export interface ToolAvailabilityPolicy {
   sessionID?: string

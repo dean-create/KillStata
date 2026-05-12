@@ -141,6 +141,19 @@ const STAGE_DEPENDENCIES: Record<WorkflowStageKind, WorkflowStageKind[]> = {
 }
 
 const INPUT_INTENT_TOOL_BUNDLES = {
+  ingest: [
+    "invalid",
+    "workflow",
+    "read",
+    "glob",
+    "grep",
+    "skill",
+    "data_import",
+    "data_batch",
+    "todoread",
+    "todowrite",
+    "todo_read",
+  ],
   status: ["invalid", "workflow", "read", "glob", "grep", "skill", "todoread", "todowrite", "todo_read"],
   verify: ["invalid", "workflow", "read", "glob", "grep", "regression_table", "skill", "todoread", "todowrite", "todo_read"],
   repair: [

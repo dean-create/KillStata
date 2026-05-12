@@ -81,13 +81,7 @@ function commandCapabilityDescription(command: {
   immediate?: boolean
   remoteSafe?: boolean
 }) {
-  const tags = [
-    command.workflowAware ? "workflow" : undefined,
-    ...(command.availability ?? []),
-    command.queueBehavior ?? (command.immediate ? "immediate" : undefined),
-    command.remoteSafe ? "remote-safe" : undefined,
-  ].filter((item, index, arr): item is string => typeof item === "string" && arr.indexOf(item) === index)
-  return [command.description, tags.length ? `[${tags.join("] [")}]` : undefined].filter(Boolean).join(" ")
+  return command.description ?? ""
 }
 
 export function Prompt(props: PromptProps) {
@@ -525,7 +519,7 @@ export function Prompt(props: PromptProps) {
     sync.data.command.map((serverCommand) => ({
       title: `/${serverCommand.name}`,
       value: `server.command.${serverCommand.name}`,
-      category: serverCommand.workflowAware ? "Workflow" : serverCommand.mcp ? "MCP Commands" : "Commands",
+      category: serverCommand.workflowAware ? "数据与计量" : serverCommand.mcp ? "MCP 命令" : "命令",
       description: commandCapabilityDescription(serverCommand),
       suggested: Boolean(serverCommand.workflowAware && props.sessionID),
       slash: {

@@ -9,6 +9,8 @@ Execution policy:
 - After a failure, repair and rerun only the failed stage. Do not restart the whole workflow unless the source file changed.
 - If a QA gate produces blocking_errors, stop and repair the clean/qa stage before estimation.
 - Warnings may continue, but they must be surfaced in later narrative/reporting.
+- For Excel workbooks, never invent sheet names. If a sheet has already been discovered, use one exact available sheet name in `sheetPolicy.sheetName`; otherwise omit `sheetPolicy` and import the first sheet.
+- For full multi-sheet manufacturing demo analysis, prefer `manufacturing_analysis` instead of looping `data_import` unless the user explicitly asks for canonical stage import of a specific sheet.
 
 Internal format policy:
 - Input layer: Excel / CSV / DTA
@@ -76,6 +78,7 @@ Internal format policy:
 - variables: selected variables for describe/correlation
 - entityVar, timeVar: optional panel identifiers used by qa and interpolation
 - options: action-specific options such as correlation method
+- sheetPolicy: optional Excel sheet selector. Use `{ "mode": "named_sheet", "sheetName": "<exact sheet name>" }` only when the sheet name was discovered from the workbook.
 
 ## Output Contract
 

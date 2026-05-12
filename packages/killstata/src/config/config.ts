@@ -591,6 +591,7 @@ export namespace Config {
     remoteSafe: z.boolean().optional(),
     repairOnlyAllowed: z.boolean().optional(),
     requiresTrustedArtifacts: z.boolean().optional(),
+    advanced: z.boolean().optional(),
     visibleWhen: z.array(z.string()).optional(),
     blockedReason: z.string().optional(),
   })
@@ -849,6 +850,14 @@ export namespace Config {
       .enum(["auto", "stacked"])
       .optional()
       .describe("Control diff rendering style: 'auto' adapts to terminal width, 'stacked' always shows single column"),
+    showAdvancedCommands: z
+      .boolean()
+      .optional()
+      .describe("Show internal/debug slash commands and MCP prompt commands in the TUI command menu"),
+    show_advanced_commands: z
+      .boolean()
+      .optional()
+      .describe("@deprecated Use showAdvancedCommands. Show internal/debug slash commands in the TUI command menu"),
   })
 
   export const Server = z
