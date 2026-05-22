@@ -1,9 +1,23 @@
 import z from "zod"
 import { Tool } from "./tool"
 import DESCRIPTION from "./batch.txt"
+import { toolExecutionTraits } from "@/runtime/tool-policy"
 
-const DISALLOWED = new Set(["batch"])
+const DISALLOWED = new Set(["batch", "invalid"])
 const FILTERED_FROM_SUGGESTIONS = new Set(["invalid", "patch", ...DISALLOWED])
+
+export function validateBatchableToolCall(toolName: string, args: unknown) {
+  if (DISALLOWED.has(toolName)) {
+    throw new Error(`Tool '${toolName}' is not allowed in batch. Disallowed tools: ${Array.from(DISALLOWED).join(", ")}`)
+  }
+
+  const traits = toolExecutionTraits(toolName, args)
+  if (!traits.concurrencySafe || traits.sideEffectLevel !== "none") {
+    throw new Error(
+      `Tool '${toolName}' is not safe for batch. Batch only supports read-only tools; this tool is '${traits.sideEffectLevel}'.`,
+    )
+  }
+}
 
 export const BatchTool = Tool.define("batch", async () => {
   return {
@@ -37,7 +51,28 @@ export const BatchTool = Tool.define("batch", async () => {
       const discardedCalls = params.tool_calls.slice(25)
 
       const { ToolRegistry } = await import("./registry")
-      const availableTools = await ToolRegistry.tools({ modelID: "", providerID: "" })
+      const { Flag } = await import("@/flag/flag")
+      const model = ctx.extra?.model as { api?: { id?: string }; providerID?: string } | undefined
+      const availableTools = await ToolRegistry.tools(
+        {
+          modelID: model?.api?.id ?? "",
+          providerID: model?.providerID ?? "",
+        },
+        undefined,
+        {
+          sessionID: ctx.sessionID,
+          agent: ctx.agent,
+          platformCapabilities: {
+            mcp: true,
+            images: true,
+            remote: Flag.KILLSTATA_CLIENT !== "cli",
+          },
+          modelCapabilities: {
+            supportsTools: true,
+            supportsImages: true,
+          },
+        },
+      )
       const toolMap = new Map(availableTools.map((t) => [t.id, t]))
 
       const executeCall = async (call: (typeof toolCalls)[0]) => {
@@ -45,12 +80,6 @@ export const BatchTool = Tool.define("batch", async () => {
         const partID = Identifier.ascending("part")
 
         try {
-          if (DISALLOWED.has(call.tool)) {
-            throw new Error(
-              `Tool '${call.tool}' is not allowed in batch. Disallowed tools: ${Array.from(DISALLOWED).join(", ")}`,
-            )
-          }
-
           const tool = toolMap.get(call.tool)
           if (!tool) {
             const availableToolsList = Array.from(toolMap.keys()).filter((name) => !FILTERED_FROM_SUGGESTIONS.has(name))
@@ -59,6 +88,7 @@ export const BatchTool = Tool.define("batch", async () => {
             )
           }
           const validatedParams = tool.parameters.parse(call.parameters)
+          validateBatchableToolCall(call.tool, validatedParams)
 
           await Session.updatePart({
             id: partID,

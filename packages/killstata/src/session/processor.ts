@@ -46,7 +46,7 @@ export namespace SessionProcessor {
         args: unknown,
         meta: {
           callID?: string
-          run: () => Promise<{
+          run: (args: unknown) => Promise<{
             title: string
             metadata: M
             output: string
@@ -61,14 +61,14 @@ export namespace SessionProcessor {
         })
         if (pre.block) throw new Error(pre.block)
         const finalArgs = pre.updatedInput ?? args
-        const traits = toolExecutionTraits(toolName)
+        const traits = toolExecutionTraits(toolName, finalArgs)
 
         return orchestrator.execute({
           callID: meta.callID ?? "",
           toolName,
           traits,
           run: async () => {
-            const executionResult = await meta.run()
+            const executionResult = await meta.run(finalArgs)
             const post = await RuntimeHooks.postTool({
               sessionID: input.sessionID,
               messageID: input.assistantMessage.id,

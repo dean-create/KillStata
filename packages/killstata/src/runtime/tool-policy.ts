@@ -1,35 +1,10 @@
 import type { SubagentContract, SubagentWriteIntent, ToolExecutionTraits } from "./types"
+import { toolSideEffectLevel } from "./tool-catalog"
 
-const READ_ONLY_TOOLS = new Set([
-  "read",
-  "list",
-  "glob",
-  "grep",
-  "webfetch",
-  "websearch",
-  "codesearch",
-  "todoread",
-  "question",
-  "skill",
-  "lsp",
-  "workflow",
-])
+export function toolExecutionTraits(toolName: string, args?: unknown): ToolExecutionTraits {
+  const sideEffectLevel = toolSideEffectLevel(toolName, args)
 
-const SESSION_TOOLS = new Set(["todowrite", "question", "plan_enter", "plan_exit"])
-const FILESYSTEM_TOOLS = new Set([
-  "bash",
-  "shell",
-  "edit",
-  "write",
-  "apply_patch",
-  "data_import",
-  "econometrics",
-  "regression_table",
-  "task",
-])
-
-export function toolExecutionTraits(toolName: string): ToolExecutionTraits {
-  if (READ_ONLY_TOOLS.has(toolName)) {
+  if (sideEffectLevel === "none") {
     return {
       concurrencySafe: true,
       sideEffectLevel: "none",
@@ -38,7 +13,7 @@ export function toolExecutionTraits(toolName: string): ToolExecutionTraits {
     }
   }
 
-  if (SESSION_TOOLS.has(toolName)) {
+  if (sideEffectLevel === "session") {
     return {
       concurrencySafe: false,
       sideEffectLevel: "session",
@@ -46,18 +21,10 @@ export function toolExecutionTraits(toolName: string): ToolExecutionTraits {
     }
   }
 
-  if (FILESYSTEM_TOOLS.has(toolName)) {
+  if (sideEffectLevel === "filesystem") {
     return {
       concurrencySafe: false,
-      sideEffectLevel: toolName === "task" ? "external" : "filesystem",
-      interruptBehavior: "continue",
-    }
-  }
-
-  if (toolName.startsWith("mcp_")) {
-    return {
-      concurrencySafe: false,
-      sideEffectLevel: "external",
+      sideEffectLevel: "filesystem",
       interruptBehavior: "continue",
     }
   }

@@ -28,6 +28,16 @@ import { RuntimeTaskLedger } from "./task-ledger"
 import { RuntimeProtocol } from "./protocol"
 import { AgentControl } from "./agent-control"
 import {
+  WORKFLOW_ANALYSIS_SHELL_TOOL_IDS,
+  WORKFLOW_ESTIMATE_TOOL_IDS,
+  WORKFLOW_IMPORT_TOOL_IDS,
+  WORKFLOW_INPUT_INTENT_TOOL_BUNDLES,
+  WORKFLOW_READ_CORE_TOOL_IDS,
+  WORKFLOW_REPAIR_ONLY_BUNDLES,
+  WORKFLOW_REPORT_TOOL_IDS,
+  uniqueToolIDs,
+} from "./tool-catalog"
+import {
   detectWorkflowLocaleFromText,
   inferWorkflowLocaleFromSession,
   workflowAnalysisPlanHeader,
@@ -140,84 +150,10 @@ const STAGE_DEPENDENCIES: Record<WorkflowStageKind, WorkflowStageKind[]> = {
   report: ["verifier"],
 }
 
-const INPUT_INTENT_TOOL_BUNDLES = {
-  ingest: [
-    "invalid",
-    "workflow",
-    "read",
-    "glob",
-    "grep",
-    "skill",
-    "data_import",
-    "data_batch",
-    "todoread",
-    "todowrite",
-    "todo_read",
-  ],
-  status: ["invalid", "workflow", "read", "glob", "grep", "skill", "todoread", "todowrite", "todo_read"],
-  verify: ["invalid", "workflow", "read", "glob", "grep", "regression_table", "skill", "todoread", "todowrite", "todo_read"],
-  repair: [
-    "invalid",
-    "workflow",
-    "read",
-    "glob",
-    "grep",
-    "bash",
-    "shell",
-    "skill",
-    "data_import",
-    "data_batch",
-    "econometrics",
-    "regression_table",
-    "todoread",
-    "todowrite",
-    "todo_read",
-  ],
-  report: [
-    "invalid",
-    "workflow",
-    "read",
-    "research_brief",
-    "paper_draft",
-    "slide_generator",
-    "regression_table",
-    "todoread",
-    "todowrite",
-    "todo_read",
-  ],
-  analysis: [
-    "invalid",
-    "workflow",
-    "read",
-    "glob",
-    "grep",
-    "bash",
-    "shell",
-    "skill",
-    "data_import",
-    "data_batch",
-    "econometrics",
-    "regression_table",
-    "todoread",
-    "todowrite",
-    "todo_read",
-  ],
-} as const
-
 const WORKFLOW_EXECUTION_POLICY = {
   autoVerifyStages: [...AUTO_VERIFY_STAGES],
   freshVerifierAgent: "verifier",
-  repairOnlyBundles: {
-    healthcheck: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch"],
-    import: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch"],
-    profile_or_schema_check: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch"],
-    qa_gate: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch"],
-    preprocess_or_filter: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch"],
-    describe_or_diagnostics: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch"],
-    baseline_estimate: ["workflow", "read", "glob", "grep", "skill", "data_import", "data_batch", "econometrics", "regression_table"],
-    verifier: ["workflow", "read", "glob", "grep", "skill", "regression_table"],
-    report: ["workflow", "read", "glob", "grep", "skill"],
-  },
+  repairOnlyBundles: WORKFLOW_REPAIR_ONLY_BUNDLES,
 } as const
 
 function nowIso() {
@@ -2738,14 +2674,16 @@ export function resolveToolAvailability(input: {
       if (input.policy.platformCapabilities?.mcp === false && ["codesearch", "websearch"].includes(toolID)) {
         reasons.push("blocked because MCP/search capability is unavailable")
       }
-      const exposure: ToolAvailabilityExplanation["exposure"] = bundleSet.has(toolID)
+      const blockedByReason = reasons.some((reason) => reason.startsWith("blocked"))
+      const direct = bundleSet.has(toolID) && !blockedByReason
+      const exposure: ToolAvailabilityExplanation["exposure"] = direct
         ? "direct"
-        : reasons.some((reason) => reason.startsWith("blocked"))
+        : blockedByReason
           ? "blocked"
           : "deferred"
       return {
         toolID,
-        available: bundleSet.has(toolID) && allowed.has(toolID),
+        available: direct && allowed.has(toolID),
         exposure,
         reasons,
       }
@@ -2753,7 +2691,10 @@ export function resolveToolAvailability(input: {
   }
   const finalize = (bundle: string[]): ToolAvailabilityResolution => {
     const explanations = explain(bundle)
-    const directToolIDs = bundle.filter((tool) => allowed.has(tool))
+    const directSet = new Set(
+      explanations.filter((item) => item.exposure === "direct" && item.available).map((item) => item.toolID),
+    )
+    const directToolIDs = bundle.filter((tool) => directSet.has(tool))
     const deferredToolIDs = explanations
       .filter((item) => item.exposure === "deferred")
       .map((item) => item.toolID)
@@ -2788,31 +2729,19 @@ export function resolveToolAvailability(input: {
   const repairOnly = input.policy.repairOnly === true
   const approvalStatus = input.policy.approvalStatus
 
-  const readCore = [
-    "invalid",
-    "question",
-    "read",
-    "list",
-    "glob",
-    "grep",
-    "skill",
-    "workflow",
-    "webfetch",
-    "websearch",
-    "codesearch",
-    "task",
-    "todo_read",
-    "todoread",
-    "todowrite",
-  ]
+  const readCore: string[] = [...WORKFLOW_READ_CORE_TOOL_IDS]
+  const analysisShellTools: string[] = [...WORKFLOW_ANALYSIS_SHELL_TOOL_IDS]
+  const importBundle: string[] = uniqueToolIDs([...readCore, ...analysisShellTools, ...WORKFLOW_IMPORT_TOOL_IDS])
+  const estimateBundle: string[] = uniqueToolIDs([...readCore, ...analysisShellTools, ...WORKFLOW_ESTIMATE_TOOL_IDS])
+  const verifyBundle: string[] = uniqueToolIDs([...readCore, "regression_table"])
+  const reportBundle: string[] = uniqueToolIDs([...readCore, ...WORKFLOW_REPORT_TOOL_IDS])
 
-  const analysisShellTools = ["bash", "shell"]
-  const importBundle = [...readCore, ...analysisShellTools, "data_import", "data_batch"]
-  const estimateBundle = [...readCore, ...analysisShellTools, "econometrics", "regression_table"]
-  const verifyBundle = [...readCore, "regression_table"]
-  const reportBundle = [...readCore, "regression_table", "research_brief", "paper_draft", "slide_generator"]
-
-  const repairBundle = [...readCore, ...analysisShellTools, "data_import", "data_batch", "econometrics", "regression_table"]
+  const repairBundle: string[] = uniqueToolIDs([
+    ...readCore,
+    ...analysisShellTools,
+    ...WORKFLOW_IMPORT_TOOL_IDS,
+    ...WORKFLOW_ESTIMATE_TOOL_IDS,
+  ])
   const applyCapabilityFilters = (tools: string[]) => {
     let filtered = tools
     if (input.policy.modelCapabilities?.supportsTools === false) {
@@ -2829,7 +2758,7 @@ export function resolveToolAvailability(input: {
     }
     return filtered
   }
-  let bundle = readCore
+  let bundle: string[] = readCore
   if (!stage) {
     bundle =
       input.policy.workflowMode === "econometrics" || inputIntent === "analysis" || inputIntent === "repair"
@@ -2919,7 +2848,7 @@ export function resolveToolAvailability(input: {
   if (inputIntent) {
     bundle = [
       ...new Set([
-        ...bundle.filter((tool) => INPUT_INTENT_TOOL_BUNDLES[inputIntent].includes(tool as never)),
+        ...bundle.filter((tool) => WORKFLOW_INPUT_INTENT_TOOL_BUNDLES[inputIntent].includes(tool as never)),
         "workflow",
       ]),
     ]
@@ -2934,20 +2863,71 @@ export function filterToolsForWorkflow(input: { policy: ToolAvailabilityPolicy; 
   return resolveToolAvailability(input).allowedToolIDs
 }
 
-export function allowMcpToolForWorkflow(input: { toolName: string; policy: ToolAvailabilityPolicy }) {
+const MCP_SAFE_SIDE_CAR_HINTS = /(^|_)(read|get|list|search|fetch|find|query|inspect|lookup|resolve|status|diagnose|diagnostics|metadata|schema)(_|$)/i
+const MCP_MUTATING_SIDE_CAR_HINTS = /(^|_)(write|create|update|delete|remove|patch|apply|edit|run|exec|execute|shell|bash|command|upload|download|install|publish|deploy|commit|push|merge|restore|rerun)(_|$)/i
+
+function explainMcpSidecarIntent(toolName: string) {
+  if (MCP_MUTATING_SIDE_CAR_HINTS.test(toolName)) {
+    return "blocked because MCP sidecars are limited to read-only lookup/search/status tools"
+  }
+  if (!MCP_SAFE_SIDE_CAR_HINTS.test(toolName)) {
+    return "blocked because the MCP tool name does not advertise a read-only lookup/search/status intent"
+  }
+  return undefined
+}
+
+export function explainMcpToolForWorkflow(input: {
+  toolName: string
+  policy: ToolAvailabilityPolicy
+}): ToolAvailabilityExplanation {
   const stage = input.policy.currentStage
   const repairOnly = input.policy.repairOnly === true
   const agent = input.policy.agent
+  const reasons: string[] = []
 
-  if (input.toolName.startsWith("context7_")) return false
-  if (input.toolName.startsWith("stata_")) return false
-  if (repairOnly) return false
-  if (agent === "verifier") return false
+  if (input.policy.platformCapabilities?.mcp === false) {
+    reasons.push("blocked because MCP/search capability is unavailable")
+  }
+  if (input.policy.modelCapabilities?.supportsTools === false) {
+    reasons.push("blocked because the selected model does not support tool calling")
+  }
+  if (input.toolName.startsWith("context7_")) {
+    reasons.push("blocked because documentation MCP tools are not part of the econometrics workflow")
+  }
+  if (input.toolName.startsWith("stata_")) {
+    reasons.push("blocked because Stata MCP is sidecar-only and must not replace core killstata tools")
+  }
+  const sidecarIntentReason = explainMcpSidecarIntent(input.toolName)
+  if (sidecarIntentReason) {
+    reasons.push(sidecarIntentReason)
+  }
+  if (repairOnly) {
+    reasons.push("blocked while repairOnly is active")
+  }
+  if (agent === "verifier") {
+    reasons.push("blocked for verifier read-only isolation")
+  }
+  if (!stage) {
+    reasons.push("blocked until the active workflow stage is known")
+  }
   if (stage === "healthcheck" || stage === "import" || stage === "profile_or_schema_check" || stage === "qa_gate") {
-    return false
+    reasons.push("blocked during early data-readiness stages")
   }
 
-  return false
+  if (reasons.length === 0) {
+    reasons.push("available as a non-Stata MCP sidecar after the core workflow has reached a safe stage")
+  }
+
+  return {
+    toolID: input.toolName,
+    available: reasons.length === 1 && reasons[0].startsWith("available"),
+    exposure: reasons.length === 1 && reasons[0].startsWith("available") ? "direct" : "blocked",
+    reasons,
+  }
+}
+
+export function allowMcpToolForWorkflow(input: { toolName: string; policy: ToolAvailabilityPolicy }) {
+  return explainMcpToolForWorkflow(input).available
 }
 
 export function datasetStageSnapshot(datasetId: string, stageId?: string) {

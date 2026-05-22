@@ -990,10 +990,10 @@ export namespace SessionPrompt {
           // 规范化工具参数：兼容 JSON 字符串或纯字符串输入
           const normalizedArgs = normalizeToolArgs(item.id, args)
 
-          const ctx = context(normalizedArgs, options)
           return input.processor.executeTool(item.id, normalizedArgs, {
             callID: options.toolCallId,
-            run: async () => {
+            run: async (finalArgs) => {
+              const ctx = context(finalArgs, options)
               await Plugin.trigger(
                 "tool.execute.before",
                 {
@@ -1002,10 +1002,10 @@ export namespace SessionPrompt {
                   callID: ctx.callID,
                 },
                 {
-                  args: normalizedArgs,
+                  args: finalArgs,
                 },
               )
-              const result = await item.execute(normalizedArgs, ctx)
+              const result = await item.execute(finalArgs, ctx)
               await Plugin.trigger(
                 "tool.execute.after",
                 {
@@ -1032,11 +1032,10 @@ export namespace SessionPrompt {
         // 规范化工具参数：兼容 JSON 字符串或纯字符串输入
         const normalizedArgs = normalizeToolArgs(key, args)
 
-        const ctx = context(normalizedArgs, opts)
-
         return input.processor.executeTool(key, normalizedArgs, {
           callID: opts.toolCallId,
-          run: async () => {
+          run: async (finalArgs) => {
+            const ctx = context(finalArgs, opts)
             await Plugin.trigger(
               "tool.execute.before",
               {
@@ -1045,7 +1044,7 @@ export namespace SessionPrompt {
                 callID: opts.toolCallId,
               },
               {
-                args: normalizedArgs,
+                args: finalArgs,
               },
             )
 
@@ -1056,7 +1055,7 @@ export namespace SessionPrompt {
               always: ["*"],
             })
 
-            const result = await execute(normalizedArgs, opts)
+            const result = await execute(finalArgs, opts)
 
             await Plugin.trigger(
               "tool.execute.after",

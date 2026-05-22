@@ -8,6 +8,7 @@ import {
   buildRerunPlan,
   buildVerifierReport,
   executeRerunPlan,
+  explainMcpToolForWorkflow,
   recommendedSkillBundle,
   resolveToolAvailability,
   restoreWorkflowCheckpoint,
@@ -18,6 +19,7 @@ import {
   workflowStatusSummary,
   workflowToolPolicy,
 } from "@/runtime/workflow"
+import { WORKFLOW_KNOWN_TOOL_IDS } from "@/runtime/tool-catalog"
 
 const parameters = z.object({
   action: z.enum([
@@ -56,36 +58,28 @@ function metadata(input: WorkflowToolMetadata): WorkflowToolMetadata {
   return input
 }
 
-const KNOWN_TOOL_IDS = [
-  "invalid",
-  "question",
-  "read",
-  "list",
-  "glob",
-  "grep",
-  "skill",
-  "workflow",
-  "webfetch",
-  "websearch",
-  "codesearch",
-  "task",
-  "todo_read",
-  "todoread",
-  "todowrite",
-  "bash",
-  "shell",
-  "edit",
-  "write",
-  "apply_patch",
-  "data_import",
-  "data_batch",
-  "econometrics",
-  "regression_table",
-  "research_brief",
-  "paper_draft",
-  "slide_generator",
-  "heterogeneity_runner",
-]
+async function registeredToolIDs() {
+  try {
+    const { ToolRegistry } = await import("./registry")
+    return await ToolRegistry.ids()
+  } catch {
+    return [...WORKFLOW_KNOWN_TOOL_IDS]
+  }
+}
+
+async function mcpExposure(policy: Parameters<typeof explainMcpToolForWorkflow>[0]["policy"]) {
+  const mcpToolIDs = Object.keys(await MCP.tools())
+  const explanations = mcpToolIDs.map((toolName) => explainMcpToolForWorkflow({ toolName, policy }))
+  const exposedToolIDs = explanations.filter((item) => item.available).map((item) => item.toolID)
+  const blockedToolIDs = explanations.filter((item) => !item.available).map((item) => item.toolID)
+  return {
+    toolCount: mcpToolIDs.length,
+    exposedToolCount: exposedToolIDs.length,
+    exposedToolIDs,
+    blockedToolIDs,
+    explanations,
+  }
+}
 
 export const WorkflowTool = Tool.define("workflow", async () => ({
   description:
@@ -137,7 +131,20 @@ export const WorkflowTool = Tool.define("workflow", async () => ({
     if (params.action === "doctor") {
       const workflow = workflowStatusSummary(ctx.sessionID)
       const python = await getRuntimePythonStatus()
-      const mcpTools = Object.keys(await MCP.tools()).length
+      const policy = workflowToolPolicy({
+        sessionID: ctx.sessionID,
+        agent: ctx.agent,
+        platformCapabilities: {
+          mcp: true,
+          images: true,
+          remote: false,
+        },
+        modelCapabilities: {
+          supportsTools: true,
+          supportsImages: true,
+        },
+      })
+      const mcp = await mcpExposure(policy)
       return {
         title: "Workflow Doctor",
         metadata: metadata({
@@ -149,9 +156,7 @@ export const WorkflowTool = Tool.define("workflow", async () => ({
         output: jsonBlock({
           workflow,
           python,
-          mcp: {
-            toolCount: mcpTools,
-          },
+          mcp,
         }),
       }
     }
@@ -159,7 +164,21 @@ export const WorkflowTool = Tool.define("workflow", async () => ({
     if (params.action === "diagnostics") {
       const workflow = workflowStatusSummary(ctx.sessionID)
       const python = await getRuntimePythonStatus()
-      const mcpTools = Object.keys(await MCP.tools()).length
+      const policy = workflowToolPolicy({
+        sessionID: ctx.sessionID,
+        agent: ctx.agent,
+        platformCapabilities: {
+          mcp: true,
+          images: true,
+          remote: false,
+        },
+        modelCapabilities: {
+          supportsTools: true,
+          supportsImages: true,
+        },
+      })
+      const mcp = await mcpExposure(policy)
+      const registeredTools = await registeredToolIDs()
       const ledger = workflowTaskLedger(ctx.sessionID)
       const latestTask = ledger.tasks.at(-1)
       return {
@@ -173,7 +192,11 @@ export const WorkflowTool = Tool.define("workflow", async () => ({
         output: jsonBlock({
           workflow,
           python,
-          mcp: { toolCount: mcpTools },
+          tools: {
+            registeredToolIDs: registeredTools,
+            registeredToolCount: registeredTools.length,
+          },
+          mcp,
           execPolicy: {
             profile: DEFAULT_EXEC_POLICY.profile,
             networkRequiresApproval: DEFAULT_EXEC_POLICY.networkRequiresApproval,
@@ -262,7 +285,9 @@ export const WorkflowTool = Tool.define("workflow", async () => ({
           supportsImages: true,
         },
       })
-      const resolution = resolveToolAvailability({ policy, toolIDs: KNOWN_TOOL_IDS })
+      const registeredTools = await registeredToolIDs()
+      const resolution = resolveToolAvailability({ policy, toolIDs: registeredTools })
+      const mcp = await mcpExposure(policy)
       return {
         title: "Workflow Tools",
         metadata: metadata({
@@ -272,6 +297,7 @@ export const WorkflowTool = Tool.define("workflow", async () => ({
           artifactRefs: workflow.activeStage?.artifactRefs ?? [],
         }),
         output: jsonBlock({
+          registeredToolIDs: registeredTools,
           policy: resolution.policy,
           allowedToolIDs: resolution.allowedToolIDs,
           directToolIDs: resolution.directToolIDs,
@@ -279,6 +305,7 @@ export const WorkflowTool = Tool.define("workflow", async () => ({
           blockedToolIDs: resolution.blockedToolIDs,
           exposurePlan: resolution.exposurePlan,
           explanations: resolution.explanations,
+          mcp,
         }),
       }
     }
