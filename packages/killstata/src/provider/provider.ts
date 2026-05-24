@@ -5,7 +5,6 @@ import { mapValues, mergeDeep, omit, pickBy, sortBy } from "remeda"
 import { NoSuchModelError, type Provider as SDK } from "ai"
 import { Log } from "../util/log"
 import { BunProc } from "../bun"
-import { Plugin } from "../plugin"
 import { ModelsDev } from "./models"
 import { NamedError } from "@killstata/util/error"
 import { Auth } from "../auth"
@@ -39,6 +38,19 @@ import { createPerplexity } from "@ai-sdk/perplexity"
 import { createVercel } from "@ai-sdk/vercel"
 import { createGitLab } from "@gitlab/gitlab-ai-provider"
 import { ProviderTransform } from "./transform"
+import {
+  DEEPSEEK_API_KEY_ENV,
+  DEEPSEEK_BASE_URL,
+  DEEPSEEK_DEFAULT_MODEL_ID,
+  DEEPSEEK_MODEL_IDS,
+  DEEPSEEK_PRO_MODEL_ID,
+  DEEPSEEK_PROVIDER_ID,
+  DEEPSEEK_V4_CONTEXT_WINDOW_TOKENS,
+  DEEPSEEK_V4_MAX_OUTPUT_TOKENS,
+  deepSeekOnlyMessage,
+  isDeepSeekProvider,
+  normalizeDeepSeekModelID,
+} from "./deepseek-policy"
 
 export namespace Provider {
   const log = Log.create({ service: "provider" })
@@ -762,6 +774,85 @@ export namespace Provider {
     }
   }
 
+  function deepSeekModel(modelID: (typeof DEEPSEEK_MODEL_IDS)[number], name: string): Model {
+    return {
+      id: modelID,
+      providerID: DEEPSEEK_PROVIDER_ID,
+      name,
+      family: "deepseek",
+      api: {
+        id: modelID,
+        url: DEEPSEEK_BASE_URL,
+        npm: "@ai-sdk/openai-compatible",
+      },
+      status: "active",
+      headers: {},
+      options: {},
+      cost: {
+        input: 0,
+        output: 0,
+        cache: {
+          read: 0,
+          write: 0,
+        },
+      },
+      limit: {
+        context: DEEPSEEK_V4_CONTEXT_WINDOW_TOKENS,
+        output: DEEPSEEK_V4_MAX_OUTPUT_TOKENS,
+      },
+      capabilities: {
+        temperature: true,
+        reasoning: true,
+        attachment: false,
+        toolcall: true,
+        input: {
+          text: true,
+          audio: false,
+          image: false,
+          video: false,
+          pdf: false,
+        },
+        output: {
+          text: true,
+          audio: false,
+          image: false,
+          video: false,
+          pdf: false,
+        },
+        interleaved: false,
+      },
+      release_date: "2026-04-24",
+      variants: {},
+    }
+  }
+
+  function deepSeekProvider(apiKey?: string, existing?: Partial<Info>): Info {
+    const options = { ...(existing?.options ?? {}) }
+    delete options["apiKey"]
+    options["baseURL"] = DEEPSEEK_BASE_URL
+    return {
+      id: DEEPSEEK_PROVIDER_ID,
+      name: "DeepSeek",
+      source: apiKey ? "env" : (existing?.source ?? "custom"),
+      env: [DEEPSEEK_API_KEY_ENV],
+      key: apiKey,
+      options,
+      models: {
+        [DEEPSEEK_DEFAULT_MODEL_ID]: deepSeekModel(DEEPSEEK_DEFAULT_MODEL_ID, "DeepSeek V4 Flash"),
+        [DEEPSEEK_PRO_MODEL_ID]: deepSeekModel(DEEPSEEK_PRO_MODEL_ID, "DeepSeek V4 Pro"),
+      },
+    }
+  }
+
+  function enforceDeepSeekOnlyProviders(providers: Record<string, Info>) {
+    const apiKey = Env.get(DEEPSEEK_API_KEY_ENV)?.trim()
+    const existing = providers[DEEPSEEK_PROVIDER_ID]
+    for (const providerID of Object.keys(providers)) {
+      delete providers[providerID]
+    }
+    providers[DEEPSEEK_PROVIDER_ID] = deepSeekProvider(apiKey || undefined, existing)
+  }
+
   function providerApiKey(provider: Info) {
     const apiKey = provider.options["apiKey"]
     if (typeof apiKey === "string" && apiKey.trim()) return apiKey.trim()
@@ -925,11 +1016,13 @@ export namespace Provider {
     const config = await Config.get()
     const modelsDev = await ModelsDev.get()
     const database = mapValues(modelsDev, fromModelsDevProvider)
+    database[DEEPSEEK_PROVIDER_ID] = deepSeekProvider()
 
     const disabled = new Set(config.disabled_providers ?? [])
     const enabled = config.enabled_providers ? new Set(config.enabled_providers) : null
 
     function isProviderAllowed(providerID: string): boolean {
+      if (!isDeepSeekProvider(providerID)) return false
       if (enabled && !enabled.has(providerID)) return false
       if (disabled.has(providerID)) return false
       return true
@@ -975,12 +1068,13 @@ export namespace Provider {
 
     // extend database from config
     for (const [providerID, provider] of configProviders) {
+      if (!isDeepSeekProvider(providerID)) continue
       const existing = database[providerID]
       const parsed: Info = {
         id: providerID,
         name: provider.name ?? existing?.name ?? providerID,
-        env: provider.env ?? existing?.env ?? [],
-        options: mergeDeep(existing?.options ?? {}, provider.options ?? {}),
+        env: [DEEPSEEK_API_KEY_ENV],
+        options: mergeDeep(existing?.options ?? {}, omit(provider.options ?? {}, ["apiKey", "baseURL"])),
         source: "config",
         models: existing?.models ?? {},
       }
@@ -1059,6 +1153,7 @@ export namespace Provider {
     // load env
     const env = Env.all()
     for (const [providerID, provider] of Object.entries(database)) {
+      if (!isDeepSeekProvider(providerID)) continue
       if (disabled.has(providerID)) continue
       const apiKey = provider.env.map((item) => env[item]).find(Boolean)
       if (!apiKey) continue
@@ -1070,63 +1165,13 @@ export namespace Provider {
 
     // load apikeys
     for (const [providerID, provider] of Object.entries(await Auth.all())) {
+      if (!isDeepSeekProvider(providerID)) continue
       if (disabled.has(providerID)) continue
-      if (provider.type === "api") {
-        mergeProvider(providerID, {
-          source: "api",
-          key: provider.key,
-        })
-      }
-    }
-
-    for (const plugin of await Plugin.list()) {
-      if (!plugin.auth) continue
-      const providerID = plugin.auth.provider
-      if (disabled.has(providerID)) continue
-
-      // For github-copilot plugin, check if auth exists for either github-copilot or github-copilot-enterprise
-      let hasAuth = false
-      const auth = await Auth.get(providerID)
-      if (auth) hasAuth = true
-
-      // Special handling for github-copilot: also check for enterprise auth
-      if (providerID === "github-copilot" && !hasAuth) {
-        const enterpriseAuth = await Auth.get("github-copilot-enterprise")
-        if (enterpriseAuth) hasAuth = true
-      }
-
-      if (!hasAuth) continue
-      if (!plugin.auth.loader) continue
-
-      // Load for the main provider if auth exists
-      if (auth) {
-        const options = await plugin.auth.loader(() => Auth.get(providerID) as any, database[plugin.auth.provider])
-        mergeProvider(plugin.auth.provider, {
-          source: "custom",
-          options: options,
-        })
-      }
-
-      // If this is github-copilot plugin, also register for github-copilot-enterprise if auth exists
-      if (providerID === "github-copilot") {
-        const enterpriseProviderID = "github-copilot-enterprise"
-        if (!disabled.has(enterpriseProviderID)) {
-          const enterpriseAuth = await Auth.get(enterpriseProviderID)
-          if (enterpriseAuth) {
-            const enterpriseOptions = await plugin.auth.loader(
-              () => Auth.get(enterpriseProviderID) as any,
-              database[enterpriseProviderID],
-            )
-            mergeProvider(enterpriseProviderID, {
-              source: "custom",
-              options: enterpriseOptions,
-            })
-          }
-        }
-      }
+      if (provider.type === "api") continue
     }
 
     for (const [providerID, fn] of Object.entries(CUSTOM_LOADERS)) {
+      if (!isDeepSeekProvider(providerID)) continue
       if (disabled.has(providerID)) continue
       const data = database[providerID]
       if (!data) {
@@ -1145,10 +1190,11 @@ export namespace Provider {
 
     // load config
     for (const [providerID, provider] of configProviders) {
+      if (!isDeepSeekProvider(providerID)) continue
       const partial: Partial<Info> = { source: "config" }
-      if (provider.env) partial.env = provider.env
+      partial.env = [DEEPSEEK_API_KEY_ENV]
       if (provider.name) partial.name = provider.name
-      if (provider.options) partial.options = provider.options
+      if (provider.options) partial.options = omit(provider.options, ["apiKey", "baseURL"])
       mergeProvider(providerID, partial)
     }
 
@@ -1162,6 +1208,7 @@ export namespace Provider {
 
     for (const [providerID, provider] of Object.entries(providers)) {
       if (!isProviderAllowed(providerID)) continue
+      if (isDeepSeekProvider(providerID)) continue
       const discoveredModels = await discoverProviderModels(provider)
       if (discoveredModels.length === 0) continue
 
@@ -1218,6 +1265,8 @@ export namespace Provider {
 
       log.info("found", { providerID })
     }
+
+    enforceDeepSeekOnlyProviders(providers)
 
     return {
       models: languages,
@@ -1345,6 +1394,13 @@ export namespace Provider {
   }
 
   export async function getModel(providerID: string, modelID: string) {
+    if (!isDeepSeekProvider(providerID)) {
+      throw new Error(deepSeekOnlyMessage(providerID, modelID))
+    }
+    const resolvedModelID = normalizeDeepSeekModelID(modelID)
+    if (!resolvedModelID) {
+      throw new Error(deepSeekOnlyMessage(providerID, modelID))
+    }
     const s = await state()
     const provider = s.providers[providerID]
     if (!provider) {
@@ -1354,7 +1410,7 @@ export namespace Provider {
       throw new ModelNotFoundError({ providerID, modelID, suggestions })
     }
 
-    const info = provider.models[modelID]
+    const info = provider.models[resolvedModelID]
     if (!info) {
       const availableModels = Object.keys(provider.models)
       const matches = fuzzysort.go(modelID, availableModels, { limit: 3, threshold: -10000 })
@@ -1406,44 +1462,29 @@ export namespace Provider {
     }
   }
 
-  export async function getSmallModel(providerID: string) {
+  export async function getSmallModel(_providerID: string) {
     const cfg = await Config.get()
 
     if (cfg.small_model) {
       const parsed = parseModel(cfg.small_model)
-      return getModel(parsed.providerID, parsed.modelID)
+      if (!isDeepSeekProvider(parsed.providerID)) throw new Error(deepSeekOnlyMessage(parsed.providerID, parsed.modelID))
+      const modelID = normalizeDeepSeekModelID(parsed.modelID)
+      if (!modelID) throw new Error(deepSeekOnlyMessage(parsed.providerID, parsed.modelID))
+      return getModel(parsed.providerID, modelID)
     }
 
-    const provider = await state().then((state) => state.providers[providerID])
-    if (provider) {
-      let priority = [
-        "claude-haiku-4-5",
-        "claude-haiku-4.5",
-        "3-5-haiku",
-        "3.5-haiku",
-        "gemini-3-flash",
-        "gemini-2.5-flash",
-        "gpt-5-nano",
-      ]
-      if (providerID.startsWith("github-copilot")) {
-        // prioritize free models for github copilot
-        priority = ["gpt-5-mini", "claude-haiku-4.5", ...priority]
-      }
-      for (const item of priority) {
-        for (const model of Object.keys(provider.models)) {
-          if (model.includes(item)) return getModel(providerID, model)
-        }
-      }
-    }
-
-    return undefined
+    return getModel(DEEPSEEK_PROVIDER_ID, DEEPSEEK_DEFAULT_MODEL_ID)
   }
 
-  const priority = ["gpt-5", "claude-sonnet-4", "big-pickle", "gemini-3-pro"]
+  const priority = [DEEPSEEK_DEFAULT_MODEL_ID, DEEPSEEK_PRO_MODEL_ID]
   export function sort(models: Model[]) {
+    const priorityRank = (model: Model) => {
+      const index = priority.findIndex((filter) => model.id.includes(filter))
+      return index === -1 ? 999 : index
+    }
     return sortBy(
       models,
-      [(model) => priority.findIndex((filter) => model.id.includes(filter)), "desc"],
+      [priorityRank, "asc"],
       [(model) => (model.id.includes("latest") ? 0 : 1), "asc"],
       [(model) => model.id, "desc"],
     )
@@ -1453,8 +1494,10 @@ export namespace Provider {
     for (const configured of [cfg?.model, cfg?.small_model]) {
       if (!configured) continue
       const parsed = parseModel(configured)
+      if (!isDeepSeekProvider(parsed.providerID)) continue
       if (parsed.providerID !== provider.id) continue
-      if (provider.models[parsed.modelID]) return parsed.modelID
+      const modelID = normalizeDeepSeekModelID(parsed.modelID)
+      if (modelID && provider.models[modelID]) return modelID
     }
 
     const [model] = sort(Object.values(provider.models))
@@ -1464,20 +1507,21 @@ export namespace Provider {
 
   export async function defaultModel() {
     const cfg = await Config.get()
-    if (cfg.model) return parseModel(cfg.model)
+    if (cfg.model) {
+      const parsed = parseModel(cfg.model)
+      if (!isDeepSeekProvider(parsed.providerID)) throw new Error(deepSeekOnlyMessage(parsed.providerID, parsed.modelID))
+      const modelID = normalizeDeepSeekModelID(parsed.modelID)
+      if (!modelID) throw new Error(deepSeekOnlyMessage(parsed.providerID, parsed.modelID))
+      return {
+        providerID: parsed.providerID,
+        modelID,
+      }
+    }
 
-    const configuredProviderIDs = cfg.provider ? Object.keys(cfg.provider) : undefined
-    const provider = await list()
-      .then((val) => Object.values(val))
-      .then((providers) =>
-        providers.find((item) => {
-          if (configuredProviderIDs?.length) return configuredProviderIDs.includes(item.id)
-          return item.id !== "killstata"
-        }),
-      )
+    const provider = await getProvider(DEEPSEEK_PROVIDER_ID)
     if (!provider) throw new Error("no providers found")
     return {
-      providerID: provider.id,
+      providerID: DEEPSEEK_PROVIDER_ID,
       modelID: defaultModelID(provider, cfg),
     }
   }

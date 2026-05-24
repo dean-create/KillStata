@@ -1,11 +1,11 @@
 import { Instance } from "@/project/instance"
 import { Plugin } from "../plugin"
-import { map, filter, pipe, fromEntries, mapValues } from "remeda"
+import { map, filter, pipe, fromEntries } from "remeda"
 import z from "zod"
 import { fn } from "@/util/fn"
 import type { AuthOuathResult, Hooks } from "@killstata/plugin"
 import { NamedError } from "@killstata/util/error"
-import { Auth } from "@/auth"
+import { DEEPSEEK_PROVIDER_ID, deepSeekEnvOnlyAuthMessage } from "./deepseek-policy"
 
 export namespace ProviderAuth {
   const state = Instance.state(async () => {
@@ -30,14 +30,16 @@ export namespace ProviderAuth {
 
   export async function methods() {
     const s = await state().then((x) => x.methods)
-    return mapValues(s, (x) =>
-      x.methods.map(
+    const deepSeek = s[DEEPSEEK_PROVIDER_ID]
+    if (!deepSeek) return {}
+    return {
+      [DEEPSEEK_PROVIDER_ID]: deepSeek.methods.map(
         (y): Method => ({
           type: y.type,
           label: y.label,
         }),
       ),
-    )
+    }
   }
 
   export const Authorization = z
@@ -57,17 +59,7 @@ export namespace ProviderAuth {
       method: z.number(),
     }),
     async (input): Promise<Authorization | undefined> => {
-      const auth = await state().then((s) => s.methods[input.providerID])
-      const method = auth.methods[input.method]
-      if (method.type === "oauth") {
-        const result = await method.authorize()
-        await state().then((s) => (s.pending[input.providerID] = result))
-        return {
-          url: result.url,
-          method: result.method,
-          instructions: result.instructions,
-        }
-      }
+      throw new Error(deepSeekEnvOnlyAuthMessage(input.providerID))
     },
   )
 
@@ -92,25 +84,7 @@ export namespace ProviderAuth {
       }
 
       if (result?.type === "success") {
-        if ("key" in result) {
-          await Auth.set(input.providerID, {
-            type: "api",
-            key: result.key,
-          })
-        }
-        if ("refresh" in result) {
-          const info: Auth.Info = {
-            type: "oauth",
-            access: result.access,
-            refresh: result.refresh,
-            expires: result.expires,
-          }
-          if (result.accountId) {
-            info.accountId = result.accountId
-          }
-          await Auth.set(input.providerID, info)
-        }
-        return
+        throw new Error(deepSeekEnvOnlyAuthMessage(input.providerID))
       }
 
       throw new OauthCallbackFailed({})
@@ -123,10 +97,7 @@ export namespace ProviderAuth {
       key: z.string(),
     }),
     async (input) => {
-      await Auth.set(input.providerID, {
-        type: "api",
-        key: input.key,
-      })
+      throw new Error(deepSeekEnvOnlyAuthMessage(input.providerID))
     },
   )
 

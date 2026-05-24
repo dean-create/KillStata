@@ -41,6 +41,11 @@ import type { Event, KillstataClient, SessionMessageResponse } from "@killstata/
 import { applyPatch } from "diff"
 import { Command } from "@/command"
 import { renderToolDisplay } from "@/tool/analysis-display"
+import {
+  DEEPSEEK_DEFAULT_MODEL_ID,
+  DEEPSEEK_PROVIDER_ID,
+  isDeepSeekModel,
+} from "@/provider/deepseek-policy"
 
 export namespace ACP {
   const log = Log.create({ service: "acp-agent" })
@@ -1526,7 +1531,7 @@ export namespace ACP {
   async function defaultModel(config: ACPConfig, cwd?: string) {
     const sdk = config.sdk
     const configured = config.defaultModel
-    if (configured) return configured
+    if (configured && isDeepSeekModel(configured)) return configured
 
     const directory = cwd ?? process.cwd()
 
@@ -1556,26 +1561,19 @@ export namespace ACP {
 
     if (specified && providers.length) {
       const provider = providers.find((p) => p.id === specified.providerID)
-      if (provider && provider.models[specified.modelID]) return specified
+      if (provider && provider.models[specified.modelID] && isDeepSeekModel(specified)) return specified
     }
 
-    if (specified && !providers.length) return specified
+    if (specified && !providers.length && isDeepSeekModel(specified)) return specified
 
-    const killstataProvider = providers.find((p) => p.id === "killstata")
-    if (killstataProvider) {
-      if (killstataProvider.models["big-pickle"]) {
-        return { providerID: "killstata", modelID: "big-pickle" }
-      }
-      const [best] = Provider.sort(Object.values(killstataProvider.models))
-      if (best) {
-        return {
-          providerID: best.providerID,
-          modelID: best.id,
-        }
-      }
+    const deepSeekProvider = providers.find((p) => p.id === DEEPSEEK_PROVIDER_ID)
+    if (deepSeekProvider?.models[DEEPSEEK_DEFAULT_MODEL_ID]) {
+      return { providerID: DEEPSEEK_PROVIDER_ID, modelID: DEEPSEEK_DEFAULT_MODEL_ID }
     }
 
-    const models = providers.flatMap((p) => Object.values(p.models))
+    const models = providers
+      .filter((provider) => provider.id === DEEPSEEK_PROVIDER_ID)
+      .flatMap((provider) => Object.values(provider.models))
     const [best] = Provider.sort(models)
     if (best) {
       return {
@@ -1584,9 +1582,7 @@ export namespace ACP {
       }
     }
 
-    if (specified) return specified
-
-    return { providerID: "killstata", modelID: "big-pickle" }
+    return { providerID: DEEPSEEK_PROVIDER_ID, modelID: DEEPSEEK_DEFAULT_MODEL_ID }
   }
 
   function parseUri(

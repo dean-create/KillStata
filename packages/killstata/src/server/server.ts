@@ -17,6 +17,7 @@ import { Vcs } from "../project/vcs"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill/skill"
 import { Auth } from "../auth"
+import { deepSeekEnvOnlyAuthMessage } from "../provider/deepseek-policy"
 import { Flag } from "../flag/flag"
 import { Command } from "../command"
 import { Global } from "../global"
@@ -433,9 +434,8 @@ export namespace Server {
           validator("json", Auth.Info),
           async (c) => {
             const providerID = c.req.valid("param").providerID
-            const info = c.req.valid("json")
-            await Auth.set(providerID, info)
-            return c.json(true)
+            c.req.valid("json")
+            throw new Error(deepSeekEnvOnlyAuthMessage(providerID))
           },
         )
         .get(
