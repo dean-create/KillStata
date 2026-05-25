@@ -365,11 +365,12 @@ export function Session() {
   const command = useCommandDialog()
   command.register(() => [
     {
-      title: "Share session",
+      title: "分享会话",
+      description: "生成并复制当前会话分享链接",
       value: "session.share",
       suggested: route.type === "session",
       keybind: "session_share",
-      category: "Session",
+      category: "会话",
       enabled: sync.data.config.share !== "disabled" && !session()?.share?.url,
       slash: {
         name: "share",
@@ -380,20 +381,19 @@ export function Session() {
             sessionID: route.sessionID,
           })
           .then((res) =>
-            Clipboard.copy(res.data!.share!.url).catch(() =>
-              toast.show({ message: "Failed to copy URL to clipboard", variant: "error" }),
-            ),
+            Clipboard.copy(res.data!.share!.url).catch(() => toast.show({ message: "复制链接到剪贴板失败", variant: "error" })),
           )
-          .then(() => toast.show({ message: "Share URL copied to clipboard!", variant: "success" }))
-          .catch(() => toast.show({ message: "Failed to share session", variant: "error" }))
+          .then(() => toast.show({ message: "分享链接已复制到剪贴板", variant: "success" }))
+          .catch(() => toast.show({ message: "分享会话失败", variant: "error" }))
         dialog.clear()
       },
     },
     {
-      title: "Rename session",
+      title: "重命名会话",
+      description: "修改当前会话标题",
       value: "session.rename",
       keybind: "session_rename",
-      category: "Session",
+      category: "会话",
       slash: {
         name: "rename",
       },
@@ -402,10 +402,11 @@ export function Session() {
       },
     },
     {
-      title: "Jump to message",
+      title: "跳转到消息",
+      description: "打开时间线并跳转到指定消息",
       value: "session.timeline",
       keybind: "session_timeline",
-      category: "Session",
+      category: "会话",
       slash: {
         name: "timeline",
       },
@@ -425,10 +426,11 @@ export function Session() {
       },
     },
     {
-      title: "Fork from message",
+      title: "从消息创建分支",
+      description: "从选中的历史消息派生一个新会话",
       value: "session.fork",
       keybind: "session_fork",
-      category: "Session",
+      category: "会话",
       slash: {
         name: "fork",
       },
@@ -447,10 +449,11 @@ export function Session() {
       },
     },
     {
-      title: "Compact session",
+      title: "压缩会话上下文",
+      description: "总结当前会话，减少后续上下文占用",
       value: "session.compact",
       keybind: "session_compact",
-      category: "Session",
+      category: "会话",
       slash: {
         name: "compact",
         aliases: ["summarize"],
@@ -460,7 +463,7 @@ export function Session() {
         if (!selectedModel) {
           toast.show({
             variant: "warning",
-            message: "Connect a provider to summarize this session",
+            message: "请先连接模型提供商再压缩会话",
             duration: 3000,
           })
           return
@@ -474,10 +477,11 @@ export function Session() {
       },
     },
     {
-      title: "Unshare session",
+      title: "取消分享会话",
+      description: "撤销当前会话的分享链接",
       value: "session.unshare",
       keybind: "session_unshare",
-      category: "Session",
+      category: "会话",
       enabled: !!session()?.share?.url,
       slash: {
         name: "unshare",
@@ -487,16 +491,17 @@ export function Session() {
           .unshare({
             sessionID: route.sessionID,
           })
-          .then(() => toast.show({ message: "Session unshared successfully", variant: "success" }))
-          .catch(() => toast.show({ message: "Failed to unshare session", variant: "error" }))
+          .then(() => toast.show({ message: "已取消会话分享", variant: "success" }))
+          .catch(() => toast.show({ message: "取消分享会话失败", variant: "error" }))
         dialog.clear()
       },
     },
     {
-      title: "Undo previous message",
+      title: "撤销上一条消息",
+      description: "回退到上一条用户消息之前的状态",
       value: "session.undo",
       keybind: "messages_undo",
-      category: "Session",
+      category: "会话",
       slash: {
         name: "undo",
       },
@@ -531,10 +536,11 @@ export function Session() {
       },
     },
     {
-      title: "Redo",
+      title: "重做",
+      description: "恢复刚才撤销的消息状态",
       value: "session.redo",
       keybind: "messages_redo",
-      category: "Session",
+      category: "会话",
       enabled: !!session()?.revert?.messageID,
       slash: {
         name: "redo",
@@ -558,10 +564,10 @@ export function Session() {
       },
     },
     {
-      title: sidebarVisible() ? "Hide sidebar" : "Show sidebar",
+      title: sidebarVisible() ? "隐藏侧边栏" : "显示侧边栏",
       value: "session.sidebar.toggle",
       keybind: "sidebar_toggle",
-      category: "Session",
+      category: "会话",
       onSelect: (dialog) => {
         batch(() => {
           const isVisible = sidebarVisible()
@@ -572,19 +578,20 @@ export function Session() {
       },
     },
     {
-      title: "Toggle code concealment",
+      title: "切换代码折叠显示",
       value: "session.toggle.conceal",
       keybind: "messages_toggle_conceal" as any,
-      category: "Session",
+      category: "会话",
       onSelect: (dialog) => {
         setConceal((prev) => !prev)
         dialog.clear()
       },
     },
     {
-      title: showTimestamps() ? "Hide timestamps" : "Show timestamps",
+      title: showTimestamps() ? "隐藏时间戳" : "显示时间戳",
+      description: "切换消息时间戳显示",
       value: "session.toggle.timestamps",
-      category: "Session",
+      category: "会话",
       slash: {
         name: "timestamps",
         aliases: ["toggle-timestamps"],
@@ -595,9 +602,10 @@ export function Session() {
       },
     },
     {
-      title: showThinking() ? "Hide thinking" : "Show thinking",
+      title: showThinking() ? "隐藏思考过程" : "显示思考过程",
+      description: "切换模型思考过程显示",
       value: "session.toggle.thinking",
-      category: "Session",
+      category: "会话",
       slash: {
         name: "thinking",
         aliases: ["toggle-thinking"],
@@ -608,9 +616,10 @@ export function Session() {
       },
     },
     {
-      title: "Toggle diff wrapping",
+      title: "切换 diff 自动换行",
+      description: "切换代码差异视图的自动换行",
       value: "session.toggle.diffwrap",
-      category: "Session",
+      category: "会话",
       slash: {
         name: "diffwrap",
       },
@@ -620,19 +629,20 @@ export function Session() {
       },
     },
     {
-      title: showDetails() ? "Hide tool details" : "Show tool details",
+      title: showDetails() ? "隐藏工具详情" : "显示工具详情",
       value: "session.toggle.actions",
       keybind: "tool_details",
-      category: "Session",
+      category: "会话",
       onSelect: (dialog) => {
         setShowDetails((prev) => !prev)
         dialog.clear()
       },
     },
     {
-      title: showGenericToolOutput() ? "Hide generic tool output" : "Show generic tool output",
+      title: showGenericToolOutput() ? "隐藏通用工具输出" : "显示通用工具输出",
+      description: "切换通用工具输出内容显示",
       value: "session.toggle.generic_tool_output",
-      category: "Session",
+      category: "会话",
       slash: {
         name: "tool-output",
         aliases: ["generic-tool-output"],
@@ -643,29 +653,29 @@ export function Session() {
       },
     },
     {
-      title: showScrollbar() ? "Auto-hide session scrollbar" : "Always show session scrollbar",
+      title: showScrollbar() ? "自动隐藏会话滚动条" : "始终显示会话滚动条",
       value: "session.toggle.scrollbar",
       keybind: "scrollbar_toggle",
-      category: "Session",
+      category: "会话",
       onSelect: (dialog) => {
         setShowScrollbar((prev) => !prev)
         dialog.clear()
       },
     },
     {
-      title: animationsEnabled() ? "Disable animations" : "Enable animations",
+      title: animationsEnabled() ? "关闭动画" : "开启动画",
       value: "session.toggle.animations",
-      category: "Session",
+      category: "会话",
       onSelect: (dialog) => {
         setAnimationsEnabled((prev) => !prev)
         dialog.clear()
       },
     },
     {
-      title: "Page up",
+      title: "向上翻页",
       value: "session.page.up",
       keybind: "messages_page_up",
-      category: "Session",
+      category: "会话",
       hidden: true,
       onSelect: (dialog) => {
         scroll.scrollBy(-scroll.height / 2)
@@ -673,10 +683,10 @@ export function Session() {
       },
     },
     {
-      title: "Page down",
+      title: "向下翻页",
       value: "session.page.down",
       keybind: "messages_page_down",
-      category: "Session",
+      category: "会话",
       hidden: true,
       onSelect: (dialog) => {
         scroll.scrollBy(scroll.height / 2)
@@ -684,10 +694,10 @@ export function Session() {
       },
     },
     {
-      title: "Line up",
+      title: "向上滚动一行",
       value: "session.line.up",
       keybind: "messages_line_up",
-      category: "Session",
+      category: "会话",
       disabled: true,
       onSelect: (dialog) => {
         scroll.scrollBy(-1)
@@ -695,10 +705,10 @@ export function Session() {
       },
     },
     {
-      title: "Line down",
+      title: "向下滚动一行",
       value: "session.line.down",
       keybind: "messages_line_down",
-      category: "Session",
+      category: "会话",
       disabled: true,
       onSelect: (dialog) => {
         scroll.scrollBy(1)
@@ -706,10 +716,10 @@ export function Session() {
       },
     },
     {
-      title: "Half page up",
+      title: "向上滚动半页",
       value: "session.half.page.up",
       keybind: "messages_half_page_up",
-      category: "Session",
+      category: "会话",
       hidden: true,
       onSelect: (dialog) => {
         scroll.scrollBy(-scroll.height / 4)
@@ -717,10 +727,10 @@ export function Session() {
       },
     },
     {
-      title: "Half page down",
+      title: "向下滚动半页",
       value: "session.half.page.down",
       keybind: "messages_half_page_down",
-      category: "Session",
+      category: "会话",
       hidden: true,
       onSelect: (dialog) => {
         scroll.scrollBy(scroll.height / 4)
@@ -728,10 +738,10 @@ export function Session() {
       },
     },
     {
-      title: "First message",
+      title: "跳到第一条消息",
       value: "session.first",
       keybind: "messages_first",
-      category: "Session",
+      category: "会话",
       hidden: true,
       onSelect: (dialog) => {
         scroll.scrollTo(0)
@@ -739,10 +749,10 @@ export function Session() {
       },
     },
     {
-      title: "Last message",
+      title: "跳到最后一条消息",
       value: "session.last",
       keybind: "messages_last",
-      category: "Session",
+      category: "会话",
       hidden: true,
       onSelect: (dialog) => {
         scroll.scrollTo(scroll.scrollHeight)
@@ -750,10 +760,10 @@ export function Session() {
       },
     },
     {
-      title: "Jump to last user message",
+      title: "跳到最后一条用户消息",
       value: "session.messages_last_user",
       keybind: "messages_last_user",
-      category: "Session",
+      category: "会话",
       hidden: true,
       onSelect: () => {
         const messages = sync.data.message[route.sessionID]
@@ -782,26 +792,26 @@ export function Session() {
       },
     },
     {
-      title: "Next message",
+      title: "下一条消息",
       value: "session.message.next",
       keybind: "messages_next",
-      category: "Session",
+      category: "会话",
       hidden: true,
       onSelect: (dialog) => scrollToMessage("next", dialog),
     },
     {
-      title: "Previous message",
+      title: "上一条消息",
       value: "session.message.previous",
       keybind: "messages_previous",
-      category: "Session",
+      category: "会话",
       hidden: true,
       onSelect: (dialog) => scrollToMessage("prev", dialog),
     },
     {
-      title: "Copy last assistant message",
+      title: "复制最后一条助手消息",
       value: "messages.copy",
       keybind: "messages_copy",
-      category: "Session",
+      category: "会话",
       onSelect: (dialog) => {
         const revertID = session()?.revert?.messageID
         const lastAssistantMessage = messages().findLast(
@@ -831,9 +841,10 @@ export function Session() {
       },
     },
     {
-      title: "Copy session transcript",
+      title: "复制会话记录",
+      description: "复制当前会话的完整文本记录",
       value: "session.copy",
-      category: "Session",
+      category: "会话",
       slash: {
         name: "copy",
       },
@@ -853,18 +864,19 @@ export function Session() {
             },
           )
           await Clipboard.copy(transcript)
-          toast.show({ message: "Session transcript copied to clipboard!", variant: "success" })
+          toast.show({ message: "会话记录已复制到剪贴板", variant: "success" })
         } catch (error) {
-          toast.show({ message: "Failed to copy session transcript", variant: "error" })
+          toast.show({ message: "复制会话记录失败", variant: "error" })
         }
         dialog.clear()
       },
     },
     {
-      title: "Export session transcript",
+      title: "导出会话记录",
+      description: "将当前会话记录导出为文件",
       value: "session.export",
       keybind: "session_export",
-      category: "Session",
+      category: "会话",
       slash: {
         name: "export",
       },
@@ -907,19 +919,19 @@ export function Session() {
               await Bun.write(filepath, result)
             }
 
-            toast.show({ message: `Session exported to ${filename}`, variant: "success" })
+            toast.show({ message: `会话记录已导出到 ${filename}`, variant: "success" })
           }
         } catch (error) {
-          toast.show({ message: "Failed to export session", variant: "error" })
+          toast.show({ message: "导出会话记录失败", variant: "error" })
         }
         dialog.clear()
       },
     },
     {
-      title: "Next child session",
+      title: "下一个子会话",
       value: "session.child.next",
       keybind: "session_child_cycle",
-      category: "Session",
+      category: "会话",
       hidden: true,
       onSelect: (dialog) => {
         moveChild(1)
@@ -927,10 +939,10 @@ export function Session() {
       },
     },
     {
-      title: "Previous child session",
+      title: "上一个子会话",
       value: "session.child.previous",
       keybind: "session_child_cycle_reverse",
-      category: "Session",
+      category: "会话",
       hidden: true,
       onSelect: (dialog) => {
         moveChild(-1)
@@ -938,10 +950,10 @@ export function Session() {
       },
     },
     {
-      title: "Go to parent session",
+      title: "返回父会话",
       value: "session.parent",
       keybind: "session_parent",
-      category: "Session",
+      category: "会话",
       hidden: true,
       onSelect: (dialog) => {
         const parentID = session()?.parentID

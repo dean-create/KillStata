@@ -1,6 +1,8 @@
 import path from "path"
 import { pathToFileURL } from "url"
 import type { KillstataClient } from "@killstata/sdk/v2"
+import { Filesystem } from "../util/filesystem"
+import { Redact } from "../util/redact"
 
 export type KausalPromptInput = {
   workspaceRoot: string
@@ -36,12 +38,13 @@ export async function runKausalPrompt(input: KausalPromptInput, onEvent: (event:
 
   const workspaceRoot = path.resolve(input.workspaceRoot)
   const model = input.model ? Provider.parseModel(input.model) : undefined
-  const fileParts = input.activeFile && isTextAttachable(input.activeFile)
+  const activeFile = input.activeFile ? resolveWorkspaceFile(workspaceRoot, input.activeFile) : undefined
+  const fileParts = activeFile && isTextAttachable(activeFile)
     ? [
         {
           type: "file",
-          url: pathToFileURL(path.resolve(workspaceRoot, input.activeFile)).toString(),
-          filename: path.basename(input.activeFile),
+          url: pathToFileURL(activeFile).toString(),
+          filename: path.basename(activeFile),
           mime: "text/plain",
         },
       ]
@@ -282,6 +285,11 @@ function isTextAttachable(filePath: string) {
   return !new Set([".dta", ".sav", ".xls", ".xlsx", ".parquet", ".feather"]).has(ext)
 }
 
+function resolveWorkspaceFile(workspaceRoot: string, filePath: string) {
+  const resolved = path.resolve(workspaceRoot, filePath)
+  return Filesystem.contains(workspaceRoot, resolved) ? resolved : undefined
+}
+
 function getDefaultQuestionAnswers(questions: any[]) {
   return questions.map((question) => [question.options?.[0]?.label || "Yes"])
 }
@@ -296,6 +304,6 @@ function normalizeQuestionAnswers(questions: any[], answers: string[][]) {
 
 function readErrorMessage(error: any) {
   if (!error) return "运行失败"
-  if (typeof error === "string") return error
-  return error.data?.message || error.message || error.name || JSON.stringify(error)
+  const message = typeof error === "string" ? error : error.data?.message || error.message || error.name || JSON.stringify(error)
+  return Redact.text(message, 1_000)
 }

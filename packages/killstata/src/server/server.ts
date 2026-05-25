@@ -17,7 +17,7 @@ import { Vcs } from "../project/vcs"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill/skill"
 import { Auth } from "../auth"
-import { deepSeekEnvOnlyAuthMessage } from "../provider/deepseek-policy"
+import { deepSeekEnvOnlyAuthMessage, isDeepSeekProvider } from "../provider/deepseek-policy"
 import { Flag } from "../flag/flag"
 import { Command } from "../command"
 import { Global } from "../global"
@@ -40,6 +40,7 @@ import { QuestionRoutes } from "./routes/question"
 import { PermissionRoutes } from "./routes/permission"
 import { GlobalRoutes } from "./routes/global"
 import { MDNS } from "./mdns"
+import { Redact } from "../util/redact"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -72,7 +73,7 @@ export namespace Server {
             return c.json(err.toObject(), { status })
           }
           if (err instanceof HTTPException) return err.getResponse()
-          const message = err instanceof Error && err.stack ? err.stack : err.toString()
+          const message = Redact.text(err instanceof Error ? err.message : String(err), 500)
           return c.json(new NamedError.Unknown({ message }).toObject(), {
             status: 500,
           })
@@ -434,8 +435,14 @@ export namespace Server {
           validator("json", Auth.Info),
           async (c) => {
             const providerID = c.req.valid("param").providerID
-            c.req.valid("json")
-            throw new Error(deepSeekEnvOnlyAuthMessage(providerID))
+            const auth = c.req.valid("json")
+            if (!isDeepSeekProvider(providerID)) {
+              throw new Error(deepSeekEnvOnlyAuthMessage(providerID))
+            }
+            await Auth.set(providerID, auth)
+            // /connect 通过 HTTP 保存密钥后，刷新当前实例，避免继续使用旧 provider 缓存。
+            await Instance.dispose()
+            return c.json(true)
           },
         )
         .get(

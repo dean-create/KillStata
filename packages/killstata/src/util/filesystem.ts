@@ -1,5 +1,5 @@
 import { realpathSync } from "fs"
-import { dirname, join, relative } from "path"
+import { dirname, isAbsolute, join, relative, resolve } from "path"
 
 export namespace Filesystem {
   export const exists = (p: string) =>
@@ -32,8 +32,17 @@ export namespace Filesystem {
     return !relA || !relA.startsWith("..") || !relB || !relB.startsWith("..")
   }
 
+  function canonicalPath(p: string) {
+    try {
+      return realpathSync.native(resolve(p))
+    } catch {
+      return resolve(p)
+    }
+  }
+
   export function contains(parent: string, child: string) {
-    return !relative(parent, child).startsWith("..")
+    const rel = relative(canonicalPath(parent), canonicalPath(child))
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
   }
 
   export async function findUp(target: string, start: string, stop?: string) {

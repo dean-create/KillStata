@@ -46,7 +46,7 @@ describe("DeepSeek-only provider policy", () => {
     })
   })
 
-  test("non-DeepSeek models and saved auth credentials are rejected", async () => {
+  test("non-DeepSeek models are rejected but DeepSeek API auth can be saved", async () => {
     await Instance.provide({
       directory: process.cwd(),
       fn: async () => {
@@ -55,9 +55,21 @@ describe("DeepSeek-only provider policy", () => {
           DEEPSEEK_API_KEY_ENV,
         )
         await expect(ProviderAuth.api({ providerID: "openai", key: "test-key" })).rejects.toThrow(DEEPSEEK_API_KEY_ENV)
-        await expect(ProviderAuth.api({ providerID: DEEPSEEK_PROVIDER_ID, key: "test-key" })).rejects.toThrow(
-          DEEPSEEK_API_KEY_ENV,
-        )
+        await expect(ProviderAuth.api({ providerID: DEEPSEEK_PROVIDER_ID, key: "test-key" })).resolves.toBeUndefined()
+      },
+    })
+  })
+
+  test("saved DeepSeek API auth is loaded into the provider", async () => {
+    await Instance.provide({
+      directory: process.cwd(),
+      fn: async () => {
+        await ProviderAuth.api({ providerID: DEEPSEEK_PROVIDER_ID, key: "test-key" })
+
+        const provider = await Provider.getProvider(DEEPSEEK_PROVIDER_ID)
+
+        expect(provider.key).toBe("test-key")
+        expect(provider.source).toBe("api")
       },
     })
   })

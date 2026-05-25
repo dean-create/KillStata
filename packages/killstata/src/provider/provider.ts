@@ -828,14 +828,15 @@ export namespace Provider {
 
   function deepSeekProvider(apiKey?: string, existing?: Partial<Info>): Info {
     const options = { ...(existing?.options ?? {}) }
+    const key = existing?.key || apiKey
     delete options["apiKey"]
     options["baseURL"] = DEEPSEEK_BASE_URL
     return {
       id: DEEPSEEK_PROVIDER_ID,
       name: "DeepSeek",
-      source: apiKey ? "env" : (existing?.source ?? "custom"),
+      source: key === existing?.key ? (existing?.source ?? "custom") : "env",
       env: [DEEPSEEK_API_KEY_ENV],
-      key: apiKey,
+      key,
       options,
       models: {
         [DEEPSEEK_DEFAULT_MODEL_ID]: deepSeekModel(DEEPSEEK_DEFAULT_MODEL_ID, "DeepSeek V4 Flash"),
@@ -1167,7 +1168,11 @@ export namespace Provider {
     for (const [providerID, provider] of Object.entries(await Auth.all())) {
       if (!isDeepSeekProvider(providerID)) continue
       if (disabled.has(providerID)) continue
-      if (provider.type === "api") continue
+      if (provider.type !== "api") continue
+      mergeProvider(providerID, {
+        source: "api",
+        key: provider.key,
+      })
     }
 
     for (const [providerID, fn] of Object.entries(CUSTOM_LOADERS)) {

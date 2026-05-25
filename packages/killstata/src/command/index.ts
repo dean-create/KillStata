@@ -164,7 +164,7 @@ export namespace Command {
     const result: Record<string, Info> = {
       [Default.INIT]: {
         name: Default.INIT,
-        description: "create/update AGENTS.md",
+        description: "创建或更新 AGENTS.md 项目说明",
         advanced: true,
         get template() {
           return PROMPT_INITIALIZE.replace("${path}", Instance.worktree)
@@ -173,7 +173,7 @@ export namespace Command {
       },
       [Default.REVIEW]: {
         name: Default.REVIEW,
-        description: "review changes [commit|branch|pr], defaults to uncommitted",
+        description: "审查代码改动，可指定 commit、branch 或 PR，默认审查未提交改动",
         advanced: true,
         get template() {
           return PROMPT_REVIEW.replace("${path}", Instance.worktree)
@@ -199,7 +199,7 @@ export namespace Command {
       },
       [Default.STAGE]: {
         name: Default.STAGE,
-        description: "inspect a workflow stage, including replay input, artifacts, and verifier evidence",
+        description: "查看工作流阶段详情，包括回放输入、产物和校验依据",
         advanced: true,
         workflowAware: true,
         availability: ["workflow"],
@@ -216,7 +216,7 @@ export namespace Command {
       },
       [Default.RERUN]: {
         name: Default.RERUN,
-        description: "rerun only the failed or selected stage; do not restart successful earlier stages",
+        description: "只重跑失败或选中的阶段，不重新执行已经成功的上游阶段",
         advanced: true,
         workflowAware: true,
         availability: ["workflow"],
@@ -268,7 +268,7 @@ export namespace Command {
       },
       [Default.VERIFY]: {
         name: Default.VERIFY,
-        description: "run the structured workflow verifier against the current or selected stage",
+        description: "对当前或选中的阶段运行结构化工作流校验",
         advanced: true,
         workflowAware: true,
         availability: ["workflow"],
@@ -286,7 +286,7 @@ export namespace Command {
       },
       [Default.TASKS]: {
         name: Default.TASKS,
-        description: "show persisted runtime tasks, queue state, current task, and failed task status",
+        description: "查看已保存的运行任务、队列状态、当前任务和失败任务",
         advanced: true,
         workflowAware: true,
         availability: ["workflow", "task-ledger"],
@@ -304,7 +304,7 @@ export namespace Command {
       },
       [Default.TIMELINE]: {
         name: Default.TIMELINE,
-        description: "show the task timeline with workflow, tool, verifier, checkpoint, and restore events",
+        description: "查看任务时间线，包括工作流、工具、校验、检查点和恢复事件",
         advanced: true,
         workflowAware: true,
         availability: ["workflow", "task-ledger"],
@@ -322,7 +322,7 @@ export namespace Command {
       },
       [Default.RESTORE]: {
         name: Default.RESTORE,
-        description: "restore workflow pointers to the latest trusted checkpoint or selected checkpoint/stage",
+        description: "将工作流指针恢复到最新可信检查点或指定检查点/阶段",
         advanced: true,
         workflowAware: true,
         availability: ["workflow", "restore"],
@@ -340,7 +340,7 @@ export namespace Command {
       },
       [Default.TOOLS]: {
         name: Default.TOOLS,
-        description: "explain currently available tools and why blocked tools are hidden",
+        description: "查看当前可用工具，并说明被隐藏或拦截工具的原因",
         advanced: true,
         workflowAware: true,
         availability: ["workflow", "tool-capability"],
@@ -375,7 +375,7 @@ export namespace Command {
       },
       [Default.DIAGNOSTICS]: {
         name: Default.DIAGNOSTICS,
-        description: "show Python, MCP, LSP, dependency, workflow, and verifier diagnostics",
+        description: "查看 Python、MCP、LSP、依赖、工作流和校验器诊断",
         advanced: true,
         workflowAware: true,
         availability: ["workflow", "diagnostics"],
@@ -394,7 +394,7 @@ export namespace Command {
       },
       [Default.AGENT]: {
         name: Default.AGENT,
-        description: "show workflow coordinator and sub-agent control state",
+        description: "查看工作流协调智能体和子智能体控制状态",
         advanced: true,
         workflowAware: true,
         availability: ["workflow", "agent-control"],

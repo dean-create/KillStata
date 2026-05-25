@@ -5,7 +5,8 @@ import z from "zod"
 import { fn } from "@/util/fn"
 import type { AuthOuathResult, Hooks } from "@killstata/plugin"
 import { NamedError } from "@killstata/util/error"
-import { DEEPSEEK_PROVIDER_ID, deepSeekEnvOnlyAuthMessage } from "./deepseek-policy"
+import { Auth } from "../auth"
+import { DEEPSEEK_PROVIDER_ID, deepSeekEnvOnlyAuthMessage, isDeepSeekProvider } from "./deepseek-policy"
 
 export namespace ProviderAuth {
   const state = Instance.state(async () => {
@@ -97,7 +98,15 @@ export namespace ProviderAuth {
       key: z.string(),
     }),
     async (input) => {
-      throw new Error(deepSeekEnvOnlyAuthMessage(input.providerID))
+      if (!isDeepSeekProvider(input.providerID)) {
+        throw new Error(deepSeekEnvOnlyAuthMessage(input.providerID))
+      }
+      await Auth.set(DEEPSEEK_PROVIDER_ID, {
+        type: "api",
+        key: input.key,
+      })
+      // /connect 保存密钥后，清掉当前项目实例缓存，后续模型调用会重新读取 auth.json。
+      await Instance.dispose()
     },
   )
 

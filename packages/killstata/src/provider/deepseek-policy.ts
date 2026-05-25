@@ -36,5 +36,5 @@ export function deepSeekOnlyMessage(providerID?: string, modelID?: string) {
 
 export function deepSeekEnvOnlyAuthMessage(providerID?: string) {
   const requested = providerID ? ` Requested provider: ${providerID}.` : ""
-  return `Killstata DeepSeek-only mode reads API credentials only from ${DEEPSEEK_API_KEY_ENV}.${requested} Set ${DEEPSEEK_API_KEY_ENV} in the environment instead of saving provider credentials.`
+  return `Killstata DeepSeek-only mode supports API credentials from ${DEEPSEEK_API_KEY_ENV} or local auth.json saved by /connect; ${DEEPSEEK_API_KEY_ENV} takes priority.${requested}`
 }

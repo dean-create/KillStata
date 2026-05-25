@@ -13,6 +13,7 @@ import { Provider } from "../../provider/provider"
 import { Agent } from "../../agent/agent"
 import { decideNonInteractivePermission, decideNonInteractiveQuestion, shouldAutoHandleRunPermissions } from "./run-permission"
 import { readToolDisplay } from "../../tool/analysis-display"
+import { Redact } from "../../util/redact"
 
 const TOOL: Record<string, [string, string]> = {
   todowrite: ["Todo", UI.Style.TEXT_WARNING_BOLD],
@@ -171,9 +172,29 @@ export const RunCommand = cmd({
     const execute = async (sdk: KillstataClient, sessionID: string) => {
       let finalText: string | undefined
       let lastToolSignature: string | undefined
+      let lastToolRunningSignature: string | undefined
+      let lastToolErrorSignature: string | undefined
+      let streamedAnyText = false
+      let textStreamOpenLine = false
       const eventsAbort = new AbortController()
 
+      const flushTextStreamLine = () => {
+        if (args.format === "default" && textStreamOpenLine) {
+          process.stdout.write(EOL)
+          textStreamOpenLine = false
+        }
+      }
+
+      const writeTextDelta = (delta: string | undefined) => {
+        if (args.format !== "default" || !delta) return false
+        process.stdout.write(delta)
+        streamedAnyText = true
+        textStreamOpenLine = !delta.endsWith("\n")
+        return true
+      }
+
       const printEvent = (color: string, type: string, title: string) => {
+        flushTextStreamLine()
         UI.println(
           color + `|`,
           UI.Style.TEXT_NORMAL + UI.Style.TEXT_DIM + ` ${type.padEnd(7, " ")}`,
@@ -200,7 +221,7 @@ export const RunCommand = cmd({
       const toolTitle = (part: any) => {
         const display = readToolDisplay(part.state?.metadata)
         if (display?.summary) return display.summary
-        return part.state.title || (Object.keys(part.state.input).length > 0 ? JSON.stringify(part.state.input) : "Unknown")
+        return part.state.title || "Unknown"
       }
 
       const events = await sdk.event.subscribe(undefined, {
@@ -214,10 +235,47 @@ export const RunCommand = cmd({
           if (rawEvent.type === "runtime.workflow.state" && rawEvent.properties?.sessionID === sessionID) {
             if (outputJsonEvent("runtime.workflow.state", { properties: rawEvent.properties })) continue
           }
+          if (rawEvent.type === "runtime.tool.batch" && rawEvent.properties?.sessionID === sessionID) {
+            if (outputJsonEvent("runtime.tool.batch", { properties: rawEvent.properties })) continue
+          }
+          if (rawEvent.type === "runtime.tool.lifecycle" && rawEvent.properties?.sessionID === sessionID) {
+            if (outputJsonEvent("runtime.tool.lifecycle", { properties: rawEvent.properties })) continue
+          }
 
           if (event.type === "message.part.updated") {
             const part = event.properties.part
             if (part.sessionID !== sessionID) continue
+
+            if (part.type === "text") {
+              const delta = typeof (event.properties as any).delta === "string" ? (event.properties as any).delta : undefined
+              if (delta) {
+                if (outputJsonEvent("text_delta", { part, delta })) continue
+                writeTextDelta(delta)
+              }
+            }
+
+            if (part.type === "tool" && part.state.status === "running") {
+              if (outputJsonEvent("tool_running", { part })) continue
+              if (!shouldPrintTool(part)) continue
+              const [tool, color] = TOOL[part.tool] ?? [part.tool, UI.Style.TEXT_INFO_BOLD]
+              const title = toolTitle(part)
+              const signature = `${part.callID ?? part.id}:${part.tool}:${title}:running`
+              if (signature === lastToolRunningSignature) continue
+              lastToolRunningSignature = signature
+              printEvent(color, tool, `Running ${title}`)
+            }
+
+            if (part.type === "tool" && part.state.status === "error") {
+              if (outputJsonEvent("tool_error", { part })) continue
+              if (!shouldPrintTool(part)) continue
+              const [tool] = TOOL[part.tool] ?? [part.tool, UI.Style.TEXT_INFO_BOLD]
+              const title = toolTitle(part)
+              const signature = `${part.callID ?? part.id}:${part.tool}:${title}:error`
+              if (signature === lastToolErrorSignature) continue
+              lastToolErrorSignature = signature
+              const error = part.state.error ? `: ${Redact.text(part.state.error, 500)}` : ""
+              printEvent(UI.Style.TEXT_DANGER_BOLD, tool, `Failed ${title}${error}`)
+            }
 
             if (part.type === "tool" && part.state.status === "completed") {
               if (outputJsonEvent("tool_use", { part })) continue
@@ -230,7 +288,7 @@ export const RunCommand = cmd({
               printEvent(color, tool, title)
               if ((part.tool === "bash" || part.tool === "shell") && part.state.output?.trim()) {
                 UI.println()
-                UI.println(part.state.output)
+                UI.println(Redact.text(part.state.output, 4_000))
               }
             }
 
@@ -257,11 +315,14 @@ export const RunCommand = cmd({
             }
             errorMsg = errorMsg ? errorMsg + EOL + err : err
             if (outputJsonEvent("error", { error: props.error })) continue
+            flushTextStreamLine()
             UI.error(err)
           }
 
           if (event.type === "session.idle" && event.properties.sessionID === sessionID) {
-            if (args.format === "default" && finalText?.trim()) {
+            if (args.format === "default" && streamedAnyText) {
+              flushTextStreamLine()
+            } else if (args.format === "default" && finalText?.trim()) {
               const isPiped = !process.stdout.isTTY
               if (!isPiped) UI.println()
               process.stdout.write((isPiped ? finalText : UI.markdown(finalText)) + EOL)
@@ -298,6 +359,7 @@ export const RunCommand = cmd({
                 continue
               }
               if (decision.response === "reject") {
+                flushTextStreamLine()
                 UI.println(
                   UI.Style.TEXT_WARNING_BOLD + "!",
                   UI.Style.TEXT_NORMAL,
@@ -362,6 +424,7 @@ export const RunCommand = cmd({
                 })
                 continue
               }
+              flushTextStreamLine()
               UI.println(
                 UI.Style.TEXT_WARNING_BOLD + "!",
                 UI.Style.TEXT_NORMAL,
@@ -376,6 +439,7 @@ export const RunCommand = cmd({
               requestID: question.id,
             })
             if (outputJsonEvent("question_rejected", { question })) continue
+            flushTextStreamLine()
             UI.println(
               UI.Style.TEXT_WARNING_BOLD + "!",
               UI.Style.TEXT_NORMAL,

@@ -110,7 +110,7 @@ export function Prompt(props: PromptProps) {
   function promptModelWarning() {
     toast.show({
       variant: "warning",
-      message: "Connect a provider to send prompts",
+      message: "请先连接模型提供商再发送消息",
       duration: 3000,
     })
     if (sync.data.provider.length === 0) {
@@ -200,9 +200,9 @@ export function Prompt(props: PromptProps) {
   command.register(() => {
     return [
       {
-        title: "Clear prompt",
+        title: "清空输入框",
         value: "prompt.clear",
-        category: "Prompt",
+        category: "输入",
         hidden: true,
         onSelect: (dialog) => {
           input.extmarks.clear()
@@ -211,10 +211,10 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Submit prompt",
+        title: "提交输入",
         value: "prompt.submit",
         keybind: "input_submit",
-        category: "Prompt",
+        category: "输入",
         hidden: true,
         onSelect: async (dialog) => {
           if (!input.focused) return
@@ -224,10 +224,10 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Paste",
+        title: "粘贴",
         value: "prompt.paste",
         keybind: "input_paste",
-        category: "Prompt",
+        category: "输入",
         hidden: true,
         onSelect: async () => {
           const content = await Clipboard.read()
@@ -241,10 +241,10 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Interrupt session",
+        title: "中断当前会话",
         value: "session.interrupt",
         keybind: "session_interrupt",
-        category: "Session",
+        category: "会话",
         hidden: true,
         enabled: status().type !== "idle",
         onSelect: (dialog) => {
@@ -273,8 +273,9 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Open editor",
-        category: "Session",
+        title: "打开编辑器",
+        description: "打开外部编辑器编辑当前输入",
+        category: "会话",
         keybind: "editor_open",
         value: "prompt.editor",
         slash: {
@@ -539,9 +540,9 @@ export function Prompt(props: PromptProps) {
 
   command.register(() => [
     {
-      title: "Stash prompt",
+      title: "暂存当前输入",
       value: "prompt.stash",
-      category: "Prompt",
+      category: "输入",
       enabled: !!store.prompt.input,
       onSelect: (dialog) => {
         if (!store.prompt.input) return
@@ -557,9 +558,9 @@ export function Prompt(props: PromptProps) {
       },
     },
     {
-      title: "Stash pop",
+      title: "恢复最近暂存输入",
       value: "prompt.stash.pop",
-      category: "Prompt",
+      category: "输入",
       enabled: stash.list().length > 0,
       onSelect: (dialog) => {
         const entry = stash.pop()
@@ -573,9 +574,9 @@ export function Prompt(props: PromptProps) {
       },
     },
     {
-      title: "Stash list",
+      title: "查看暂存输入列表",
       value: "prompt.stash.list",
-      category: "Prompt",
+      category: "输入",
       enabled: stash.list().length > 0,
       onSelect: (dialog) => {
         dialog.replace(() => (
@@ -903,10 +904,10 @@ export function Prompt(props: PromptProps) {
                 props.showPlaceholder === false
                   ? undefined
                   : store.mode === "shell"
-                    ? `Run a command... "${shell()[store.placeholder % shell().length]}"`
+                    ? `输入要运行的命令... "${shell()[store.placeholder % shell().length]}"`
                     : props.sessionID
                       ? undefined
-                      : `Ask anything... "${list()[store.placeholder % list().length]}"`
+                    : `输入你的问题... "${list()[store.placeholder % list().length]}"`
               }
               textColor={keybind.leader ? theme.textMuted : theme.text}
               focusedTextColor={keybind.leader ? theme.textMuted : theme.text}
@@ -1224,10 +1225,10 @@ export function Prompt(props: PromptProps) {
                     </text>
                   </Show>
                   <text fg={theme.text}>
-                    {keybind.print("agent_cycle")} <span style={{ fg: theme.textMuted }}>agents</span>
+                    {keybind.print("agent_cycle")} <span style={{ fg: theme.textMuted }}>智能体</span>
                   </text>
                   <text fg={theme.text}>
-                    {keybind.print("command_list")} <span style={{ fg: theme.textMuted }}>commands</span>
+                    {keybind.print("command_list")} <span style={{ fg: theme.textMuted }}>命令</span>
                   </text>
                 </Match>
                 <Match when={store.mode === "shell"}>
