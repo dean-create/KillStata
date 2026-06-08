@@ -151,6 +151,46 @@ describe("tool.econometrics", () => {
     })
   })
 
+  test("runs static DID with panel identifiers and treatment timing", async () => {
+    if (!(await supportsEconometricsRuntime())) return
+    await withInstance(async (root) => {
+      const csvPath = path.join(root, "did_static.csv")
+      const rows = ["firm_id,year,y,treated_entity,post,x1"]
+      for (let firm = 1; firm <= 6; firm += 1) {
+        const treated = firm <= 3 ? 1 : 0
+        for (let year = 2018; year <= 2021; year += 1) {
+          const post = year >= 2020 ? 1 : 0
+          const x1 = firm * 0.2 + (year - 2018) * 0.1
+          const y = 2 + firm * 0.3 + (year - 2018) * 0.2 + treated * post * 1.4 + x1 * 0.5
+          rows.push(`${firm},${year},${y.toFixed(4)},${treated},${post},${x1.toFixed(4)}`)
+        }
+      }
+      fs.writeFileSync(csvPath, rows.join("\n"), "utf-8")
+
+      const tool = await EconometricsTool.init()
+      const result = await tool.execute(
+        {
+          methodName: "did_static",
+          dataPath: "did_static.csv",
+          dependentVar: "y",
+          treatmentVar: "treated_entity",
+          entityVar: "firm_id",
+          timeVar: "year",
+          outputDir: "outputs/did_static_case",
+          options: {
+            treatment_entity_dummy: "treated_entity",
+            treatment_finished_dummy: "post",
+          },
+        },
+        ctx as any,
+      )
+
+      expect(result.metadata.result).toBeDefined()
+      expect(result.metadata.result!.effective_method).toBe("did_static")
+      expect(result.output).toContain("Econometrics result - did_static")
+    })
+  }, 15_000)
+
   test("auto upgrades OLS inference to HC1 under strong heteroskedasticity", async () => {
     if (!(await supportsEconometricsRuntime())) return
     await withInstance(async (root) => {

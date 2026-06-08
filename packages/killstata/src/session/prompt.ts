@@ -97,6 +97,16 @@ export namespace SessionPrompt {
       .join("\n")
       .toLowerCase()
 
+    // 如果用户已经明确要做回归或计量分析，这是“导入 + 估计”的复合任务；
+    // analysis 工具包会同时暴露 data_import 与 econometrics，避免导入后回归工具被延迟。
+    if (
+      /\b(regression|econometric|econometrics|panel_fe|smart_baseline|auto_recommend|did|ols|2sls|iv|psm|rdd)\b/.test(
+        text,
+      ) ||
+      /计量|回归|固定效应|面板|基准模型|双重差分|工具变量|倾向得分/.test(text)
+    )
+      return "analysis"
+
     // Excel/CSV/DTA 这类原始表格输入必须先走 intake 阶段，避免模型跳过 data_import 直接回归。
     if (/\.(xlsx|xls|csv|dta|sav)\b/.test(text) || /\b(excel|spreadsheet|workbook)\b/.test(text)) return "ingest"
     return undefined

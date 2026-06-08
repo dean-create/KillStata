@@ -2742,6 +2742,12 @@ export function resolveToolAvailability(input: {
     ...WORKFLOW_IMPORT_TOOL_IDS,
     ...WORKFLOW_ESTIMATE_TOOL_IDS,
   ])
+  const bundleForInputIntent = () => {
+    if (!inputIntent) return undefined
+    // 当还没有 active stage 时，用户意图就是唯一可靠的工具暴露信号；
+    // 这里必须直接使用对应意图工具包，不能先给 readCore 再做交集过滤。
+    return [...WORKFLOW_INPUT_INTENT_TOOL_BUNDLES[inputIntent]]
+  }
   const applyCapabilityFilters = (tools: string[]) => {
     let filtered = tools
     if (input.policy.modelCapabilities?.supportsTools === false) {
@@ -2761,11 +2767,10 @@ export function resolveToolAvailability(input: {
   let bundle: string[] = readCore
   if (!stage) {
     bundle =
-      input.policy.workflowMode === "econometrics" || inputIntent === "analysis" || inputIntent === "repair"
-        ? inputIntent === "analysis" || inputIntent === "repair"
-          ? [...new Set([...readCore, ...analysisShellTools, "data_import", "data_batch", "econometrics", "regression_table"])]
-          : [...readCore, ...analysisShellTools, "data_import", "data_batch"]
-        : readCore
+      bundleForInputIntent() ??
+      (input.policy.workflowMode === "econometrics"
+        ? [...readCore, ...analysisShellTools, "data_import", "data_batch"]
+        : readCore)
     if (agent === "explorer") {
       bundle = [...new Set([...readCore, "data_import", "data_batch", "workflow"])]
     }
@@ -2785,7 +2790,7 @@ export function resolveToolAvailability(input: {
           ].includes(tool) && (tool !== "regression_table" || allowRegressionTable),
       )
     }
-    bundle = applyCapabilityFilters(bundle)
+    bundle = applyCapabilityFilters(uniqueToolIDs(bundle))
     return finalize(bundle)
   }
 

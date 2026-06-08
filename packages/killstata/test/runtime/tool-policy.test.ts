@@ -4,7 +4,7 @@ import {
   WORKFLOW_KNOWN_TOOL_IDS,
 } from "@/runtime/tool-catalog"
 import { toolExecutionTraits } from "@/runtime/tool-policy"
-import { allowMcpToolForWorkflow, explainMcpToolForWorkflow } from "@/runtime/workflow"
+import { allowMcpToolForWorkflow, explainMcpToolForWorkflow, resolveToolAvailability } from "@/runtime/workflow"
 import { validateBatchableToolCall } from "@/tool/batch"
 
 describe("runtime tool policy", () => {
@@ -78,5 +78,20 @@ describe("runtime tool policy", () => {
     })
     expect(early.available).toBe(false)
     expect(early.reasons.join("\n")).toContain("early data-readiness")
+  })
+
+  test("ingest intent exposes data import tools before a workflow stage exists", () => {
+    const available = resolveToolAvailability({
+      policy: {
+        inputIntent: "ingest",
+        platformCapabilities: { mcp: true, images: true, remote: false },
+        modelCapabilities: { supportsTools: true, supportsImages: true },
+      },
+      toolIDs: ["read", "workflow", "data_import", "data_batch", "econometrics"],
+    })
+
+    expect(available.directToolIDs).toContain("data_import")
+    expect(available.directToolIDs).toContain("data_batch")
+    expect(available.deferredToolIDs).toContain("econometrics")
   })
 })

@@ -16,6 +16,9 @@ const ctx = {
   ask: async () => undefined,
 }
 
+// 这个用例会真实启动项目实例并执行 auto_recommend 管线；Windows 上初始化和文件 IO 偶尔会超过 Bun 默认 5 秒。
+const AUTO_RECOMMEND_TEST_TIMEOUT_MS = 15_000
+
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "killstata-econometrics-smart-"))
 }
@@ -134,5 +137,5 @@ describe("tool.econometrics-smart", () => {
       expect(fs.existsSync(path.join(outputDir, "recommendation.json"))).toBe(true)
       expect(fs.existsSync(path.join(outputDir, "results.json"))).toBe(true)
     })
-  })
+  }, AUTO_RECOMMEND_TEST_TIMEOUT_MS)
 })
