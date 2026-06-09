@@ -2965,6 +2965,24 @@ required_option_columns = {
     "rdd_fuzzy_global": ["running_variable"],
 }
 
+def prepare_panel_inputs(df, payload, covariate_names):
+    entity_var = payload.get("entity_var")
+    time_var = payload.get("time_var")
+    if not entity_var or not time_var:
+        raise ValueError(f"Method {method} requires entity_var and time_var")
+    required = [entity_var, time_var, payload["dependent_var"], *covariate_names]
+    treatment_name = payload.get("treatment_var")
+    if treatment_name:
+        required.append(treatment_name)
+    missing = sorted(set([col for col in required if col not in df.columns]))
+    if missing:
+        raise ValueError(f"Missing panel columns in dataset: {missing}")
+    panel_df = df.set_index([entity_var, time_var]).sort_index()
+    dependent_var = panel_df[payload["dependent_var"]]
+    treatment_var = panel_df[treatment_name] if treatment_name else None
+    covariates = panel_df[covariate_names] if covariate_names else None
+    return panel_df, dependent_var, treatment_var, covariates
+
 def save_json(file_path, payload):
     Path(file_path).parent.mkdir(parents=True, exist_ok=True)
     with open(file_path, "w", encoding="utf-8") as f:

@@ -102,6 +102,11 @@ describe("tool.econometrics", () => {
     expect(source).toContain("running_variable_bandwidth=options.get(\"bandwidth\", None)")
     expect(source).toContain("max_order=polynomial_degree")
     expect(source).toContain("target_type = options.get(\"target_type\", \"ATE\")")
+    const generalTemplateStart = source.indexOf("required_option_columns = {")
+    const generalPanelHelper = source.indexOf("def prepare_panel_inputs(df, payload, covariate_names):", generalTemplateStart)
+    const didPanelUse = source.indexOf("prepare_panel_inputs(df, payload, covariate_names)", generalPanelHelper + 1)
+    expect(generalPanelHelper).toBeGreaterThan(generalTemplateStart)
+    expect(didPanelUse).toBeGreaterThan(generalPanelHelper)
   })
 
   test("configures econometric_algorithm for headless matplotlib imports", () => {
