@@ -1,0 +1,10 @@
+Run explicit heterogeneity, mechanism, placebo, and alternative-specification analyses from a baseline econometric result.
+
+Use this after a baseline model already exists and only when the user has explicitly named the subgroup or mechanism variables to test.
+
+Behavior:
+- Read baseline `results.json`, `diagnostics.json`, and `numeric_snapshot.json` first.
+- Refuse to continue if the baseline already has blocking QA or diagnostic failures.
+- Create one structured result directory per specification.
+- Save unified summaries, narratives, and a publication-style comparison table.
+- Every narrative claim must be grounded in each specification's own structured outputs.

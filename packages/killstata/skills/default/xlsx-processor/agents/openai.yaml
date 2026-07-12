@@ -1,0 +1,8 @@
+interface:
+  display_name: "XLSX Processor"
+  short_description: "Inspect sheets, normalize workbook structure, and select the canonical Excel table"
+  default_prompt: "Use $xlsx-processor to inspect this workbook and choose the correct analysis sheet."
+
+policy:
+  allow_implicit_invocation: true
+

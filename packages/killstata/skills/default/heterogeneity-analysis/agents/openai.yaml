@@ -1,0 +1,8 @@
+interface:
+  display_name: "Heterogeneity Analysis"
+  short_description: "Run structured heterogeneity and mechanism extensions after a baseline"
+  default_prompt: "Use $heterogeneity-analysis to extend the baseline with explicit subgroup, mechanism, placebo, and alternative-spec analysis."
+
+policy:
+  allow_implicit_invocation: true
+

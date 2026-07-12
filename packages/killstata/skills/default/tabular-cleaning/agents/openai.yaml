@@ -1,0 +1,8 @@
+interface:
+  display_name: "Tabular Cleaning"
+  short_description: "Clean, filter, recode, and preprocess tabular data before estimation"
+  default_prompt: "Use $tabular-cleaning to clean this dataset before running the model."
+
+policy:
+  allow_implicit_invocation: true
+

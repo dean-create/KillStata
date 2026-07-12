@@ -1,0 +1,8 @@
+interface:
+  display_name: "IV Estimation"
+  short_description: "Run 2SLS with explicit instrument setup and weak-IV diagnostics"
+  default_prompt: "Use $iv-estimation to estimate this model with an instrument and report the IV diagnostics."
+
+policy:
+  allow_implicit_invocation: true
+

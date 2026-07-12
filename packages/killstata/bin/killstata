@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+
+import { execSync, spawn } from "child_process"
+import fs from "fs"
+import os from "os"
+import path from "path"
+import { fileURLToPath } from "url"
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+const PACKAGE_ROOT = path.resolve(__dirname, "..")
+const PACKAGE_NAME = "killstata"
+
+function commandExists(cmd) {
+  try {
+    const check = os.platform() === "win32" ? "where" : "which"
+    execSync(`${check} ${cmd}`, { stdio: "ignore" })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function launch(runtime, entryFile) {
+  const args = entryFile ? [entryFile, ...process.argv.slice(2)] : [...process.argv.slice(2)]
+
+  if (runtime === "bun" && entryFile.endsWith(".ts")) {
+    args.unshift("run", "--conditions=browser")
+  }
+
+  const desktopClient = process.env.KILLSTATA_CLIENT === "desktop"
+  const child = spawn(runtime, args, {
+    stdio: desktopClient ? ["ignore", "pipe", "pipe"] : "inherit",
+    cwd: PACKAGE_ROOT,
+    shell: false,
+    windowsHide: true,
+    env: {
+      ...process.env,
+      KILLSTATA: "1",
+    },
+  })
+
+  if (desktopClient) {
+    child.stdout?.on("data", (chunk) => process.stdout.write(chunk))
+    child.stderr?.on("data", (chunk) => process.stderr.write(chunk))
+  }
+
+  child.on("exit", (code) => {
+    process.exit(code ?? 0)
+  })
+
+  child.on("error", (err) => {
+    console.error(`Failed to launch killstata: ${err.message}`)
+    process.exit(1)
+  })
+}
+
+function installedBinaryCandidates() {
+  const platform = os.platform() === "win32" ? "windows" : os.platform()
+  const arch = os.arch() === "x64" || os.arch() === "arm64" ? os.arch() : "x64"
+  const names = [`${PACKAGE_NAME}-${platform}-${arch}`]
+  const nodeModulesRoots = [path.join(PACKAGE_ROOT, "node_modules"), path.resolve(PACKAGE_ROOT, "..")]
+
+  if (platform === "linux") {
+    names.push(
+      `${PACKAGE_NAME}-${platform}-${arch}-musl`,
+      `${PACKAGE_NAME}-${platform}-${arch}-baseline`,
+      `${PACKAGE_NAME}-${platform}-${arch}-baseline-musl`,
+    )
+  } else if (arch === "x64") {
+    names.push(`${PACKAGE_NAME}-${platform}-${arch}-baseline`)
+  }
+
+  return nodeModulesRoots.flatMap((root) =>
+    names.flatMap((name) => {
+      const base = path.join(root, name, "bin")
+      return [path.join(base, `${PACKAGE_NAME}.exe`), path.join(base, PACKAGE_NAME)]
+    }),
+  )
+}
+
+if (process.env.KILLSTATA_BIN_PATH) {
+  launch(process.env.KILLSTATA_BIN_PATH, "")
+} else {
+  let launched = false
+
+  for (const binaryPath of installedBinaryCandidates()) {
+    if (!fs.existsSync(binaryPath)) continue
+    launch(binaryPath, "")
+    launched = true
+    break
+  }
+
+  if (!launched) {
+    const tsEntry = path.join(PACKAGE_ROOT, "src", "index.ts")
+    if (commandExists("bun") && fs.existsSync(tsEntry)) {
+      launch("bun", tsEntry)
+      launched = true
+    }
+  }
+
+  if (!launched) {
+    const jsEntry = path.join(PACKAGE_ROOT, "dist", "index.js")
+    if (fs.existsSync(jsEntry)) {
+      launch("node", jsEntry)
+      launched = true
+    }
+  }
+
+  if (!launched) {
+    console.error(`
+  killstata could not find a bundled native binary, a local dist build, or a Bun runtime.
+  Windows users should retry:
+    npm i -g killstata@latest
+  For source-mode development on unsupported platforms, install Bun:
+    https://bun.sh
+`)
+    process.exit(1)
+  }
+}

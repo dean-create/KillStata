@@ -1,0 +1,444 @@
+{
+  "success": true,
+  "profile": {
+    "rowCount": 4709,
+    "columnCount": 35,
+    "columns": [
+      {
+        "name": "year",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 17,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": true,
+        "nonnegative": true
+      },
+      {
+        "name": "省份",
+        "dtypeFamily": "categorical",
+        "nonNullCount": 4709,
+        "uniqueCount": 26,
+        "binary": false,
+        "numeric": false,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": false
+      },
+      {
+        "name": "地区",
+        "dtypeFamily": "categorical",
+        "nonNullCount": 4709,
+        "uniqueCount": 277,
+        "binary": false,
+        "numeric": false,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": false
+      },
+      {
+        "name": "did",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 2,
+        "binary": true,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": true,
+        "nonnegative": true
+      },
+      {
+        "name": "time",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 1666,
+        "uniqueCount": 3,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": true,
+        "nonnegative": true
+      },
+      {
+        "name": "人口规模",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 3592,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "人口密度",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4567,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "经济发展水平",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4568,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "金融发展程度",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4709,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "城镇化水平",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 3088,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "政府干预程度",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4709,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "财政投资力度",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4709,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "财政分权度",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4707,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "产业结构整体升级",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 3181,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "产业结构高级化",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4703,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "产业结构合理化",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4708,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": false
+      },
+      {
+        "name": "教育水平支出",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4706,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "科学技术水平",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4706,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "科教支出",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4694,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": true,
+        "nonnegative": true
+      },
+      {
+        "name": "人力资本",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 641,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": true,
+        "nonnegative": true
+      },
+      {
+        "name": "人力资本存量",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4546,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": true,
+        "nonnegative": true
+      },
+      {
+        "name": "环境规制",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 2585,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "基础设施",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 304,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": true,
+        "nonnegative": true
+      },
+      {
+        "name": "市场化水平",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4708,
+        "uniqueCount": 4706,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "高质量发展指数",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4364,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "产业结构高级化2",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4709,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "产业结构合理化2",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4709,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "生产性服务业占比",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4708,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "包容性TFP指数",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4707,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "创新指数",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4708,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "二氧化硫去除率",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4709,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "工业固废综合利用率",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4708,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "pm25",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4708,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "人均GDP",
+        "dtypeFamily": "numeric",
+        "nonNullCount": 4709,
+        "uniqueCount": 4707,
+        "binary": false,
+        "numeric": true,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": true
+      },
+      {
+        "name": "city",
+        "dtypeFamily": "categorical",
+        "nonNullCount": 4709,
+        "uniqueCount": 277,
+        "binary": false,
+        "numeric": false,
+        "datetime": false,
+        "integerLike": false,
+        "nonnegative": false
+      }
+    ],
+    "explicitDependentVar": "经济发展水平",
+    "candidateEntityVars": [
+      "省份",
+      "地区",
+      "did",
+      "city"
+    ],
+    "candidateTimeVars": [
+      "year",
+      "time"
+    ],
+    "candidateTreatmentVars": [
+      "did"
+    ],
+    "candidateInstrumentVars": [],
+    "entityCount": null,
+    "timeCount": null,
+    "duplicatePanelKeys": null,
+    "avgPeriodsPerEntity": null,
+    "balancedRatio": null,
+    "dataStructure": "repeated_cross_section",
+    "dependentVarType": "continuous",
+    "treatmentVarType": "binary"
+  },
+  "recommendation": {
+    "dataStructure": "repeated_cross_section",
+    "recommendedMethod": "ols_regression",
+    "covariance": "robust",
+    "preferredEntityVar": "省份",
+    "preferredTimeVar": "year",
+    "preferredTreatmentVar": "did",
+    "confidence": "medium",
+    "reasons": [
+      "Detected repeated observations over time without a stable entity identifier, which fits repeated cross-section OLS as a baseline."
+    ],
+    "warnings": [],
+    "nextBestMethods": [
+      "psm_double_robust",
+      "ols_regression"
+    ],
+    "postEstimationRules": [
+      "If heteroskedasticity tests fail, switch nonrobust inference to robust standard errors.",
+      "If clustered SE are requested but the cluster count is too low, keep the warning and add a robust-SE comparison.",
+      "If panel keys are incomplete or duplicate entity-time rows remain unresolved, downgrade FE to pooled OLS and report the downgrade clearly.",
+      "If multicollinearity is severe, reduce overlapping controls before adding more robustness layers."
+    ]
+  },
+  "output_path": "D:\\SMWPD\\Project_all\\openstata\\killstata\\analysis\\auto_recommend\\results.json",
+  "profile_path": "D:\\SMWPD\\Project_all\\openstata\\killstata\\analysis\\auto_recommend\\profile.json",
+  "recommendation_path": "D:\\SMWPD\\Project_all\\openstata\\killstata\\analysis\\auto_recommend\\recommendation.json",
+  "narrative_path": "D:\\SMWPD\\Project_all\\openstata\\killstata\\analysis\\auto_recommend\\narrative.md"
+}

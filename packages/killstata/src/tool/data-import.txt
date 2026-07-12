@@ -1,0 +1,152 @@
+The DataImport tool handles tabular data ingestion, stage-based cleaning, QA, and descriptive analysis for killstata.
+
+Use it to build a reproducible Excel/CSV/Stata preprocessing pipeline before any econometric model.
+
+Execution policy:
+- For non-trivial data cleaning, plan internally before calling tools.
+- Keep user-facing text concise and report-like; do not narrate every intermediate read, retry, or background check unless the user explicitly asks for details.
+- Prefer the canonical artifact workflow: import -> preprocess/filter -> qa -> describe/correlation when needed.
+- After a failure, repair and rerun only the failed stage. Do not restart the whole workflow unless the source file changed.
+- If a QA gate produces blocking_errors, stop and repair the clean/qa stage before estimation.
+- Warnings may continue, but they must be surfaced in later narrative/reporting.
+- For Excel workbooks, never invent sheet names. If a sheet has already been discovered, use one exact available sheet name in `sheetPolicy.sheetName`; otherwise omit `sheetPolicy` and import the first sheet.
+- For full multi-sheet manufacturing demo analysis, prefer `manufacturing_analysis` instead of looping `data_import` unless the user explicitly asks for canonical stage import of a specific sheet.
+
+Internal format policy:
+- Input layer: Excel / CSV / DTA
+- Internal working layer: Parquet + metadata sidecar
+- User inspection/export layer: CSV / XLSX
+- Compatibility export layer: DTA
+- `.killstata/` stores canonical internal stages, inspection files, runtime state, and audit metadata
+- Cleaning-stage inspection files stay in `.killstata`; the final user-facing econometric delivery bundle is produced by the econometrics tool after a complete estimation run
+
+## Supported Actions
+
+1. import
+- Convert Excel (.xlsx/.xls), Stata (.dta), or CSV into a canonical Parquet working dataset
+- Always create a Parquet stage plus inspection CSV/XLSX
+- Return datasetId/stageId and save schema, labels, audit files, and inspection tables
+
+2. export
+- Convert a working dataset back to CSV, Excel, Stata, or Parquet
+- Prefer CSV/XLSX/DTA for user-facing delivery; Parquet remains the internal canonical format
+
+3. preprocess
+- Apply explicit cleaning operations such as drop_missing, fill_constant, fill_mean, fill_median, forward_fill, backward_fill, linear_interpolate, group_linear_interpolate, regression_impute, log_transform, standardize, winsorize, and create_dummies
+- These operations are backed by the Python preprocessing library and return audit-ready summaries for each step
+- Save the processed dataset as a new Parquet stage plus audit files and inspection tables
+
+4. filter
+- Apply explicit row filtering rules such as in/not_in/eq/neq/gt/gte/lt/lte/contains/not_contains
+- Save the filtered dataset as a new Parquet stage plus filter audit files and inspection tables
+
+5. describe
+- Produce descriptive statistics tables for selected variables
+- Save CSV, workbook, summary JSON, and numeric_snapshot.json artifacts
+
+6. correlation
+- Produce a correlation matrix for selected numeric variables
+- Save CSV, workbook, summary JSON, and numeric_snapshot.json artifacts
+
+7. qa
+- Run a structured data-quality gate
+- Check missingness, duplicate panel keys, numeric availability, outlier flags, and panel-balance signals when panel identifiers are provided
+- Return status, warnings, blocking_errors, and suggested_repairs in JSON
+- QA gate behavior:
+  - blocking_errors -> block downstream estimation
+  - warnings only -> allow continuation with explicit risk disclosure
+  - no warnings/errors -> pass
+
+8. healthcheck
+- Check Python module readiness for the data/econometrics pipeline
+- Report missing or broken modules and the exact install command
+- `pyarrow` is required because Parquet is the canonical working format
+
+## Key Parameters
+
+- action: import | export | preprocess | filter | describe | correlation | qa | healthcheck | rollback
+- inputPath: source file path, required for every action except healthcheck when datasetId/stageId is not provided
+- datasetId, stageId: canonical Parquet stage reference; prefer this after import
+- runId: optional run identifier; reuse the same runId across multi-step workflows to group visible outputs
+- branch: branch name for split preprocessing / estimation workflows
+- outputPath: optional target artifact path
+- format:
+  - export: csv | xlsx | dta | parquet
+  - import | filter | preprocess | rollback: canonical output is always parquet; non-parquet values are ignored with a note
+- operations: preprocess operation list
+- filters: filter rule list
+- variables: selected variables for describe/correlation
+- entityVar, timeVar: optional panel identifiers used by qa and interpolation
+- options: action-specific options such as correlation method
+- sheetPolicy: optional Excel sheet selector. Use `{ "mode": "named_sheet", "sheetName": "<exact sheet name>" }` only when the sheet name was discovered from the workbook.
+
+## Output Contract
+
+Every action returns a structured artifact trail when applicable:
+- datasetId / stageId / parentStageId for canonical artifact workflows
+- input path
+- output path
+- inspection CSV / workbook paths for stage-producing data steps
+- row/column counts before and after
+- summary JSON path
+- audit log path or workbook path when relevant
+- numeric_snapshot.json for describe/correlation so statistical values can be grounded
+- metadata suitable for grounding:
+  - numericSnapshotPath
+  - numericSnapshotPreview
+  - groundingScope
+  - datasetId / stageId / runId
+- QA warnings and blocking errors when relevant
+- QA gate metadata when relevant:
+  - qaGateStatus
+  - qaGateReason
+  - qaSource
+
+Front-end delivery rule:
+- Do not add cleaning-stage artifacts directly to `killstata_output_YYYYMMDD_HHMM`; that folder is reserved for the five-file econometric delivery bundle after a complete estimation run
+
+## Planning And Skill Guidance
+
+- Before spreadsheet-heavy or CSV/XLSX-oriented tasks, load `workflow-orchestrator` first, then the most relevant specialist skill.
+- Prefer project-local skills under `.killstata/skills` when the same skill exists at multiple tiers.
+- If no project-local override exists, prefer user-installed skills before `builtin`.
+- Prefer skill aliases rather than hallucinating unavailable names:
+  - Excel/XLSX processing -> `xlsx-processor`
+  - Raw file intake -> `tabular-ingest`
+  - Cleaning, missing-data handling, or variable engineering -> `tabular-cleaning`
+  - Panel integrity checks -> `panel-data-qa`
+- Use explicit column names and explicit operation parameters.
+- Preserve the canonical Parquet stage as the working source of truth after import.
+
+## Example Usage
+
+Import a DTA file into the canonical artifact workflow:
+{
+  "action": "import",
+  "inputPath": "../test/did高质量发展.dta",
+  "format": "parquet"
+}
+
+Filter out Heilongjiang on a dataset stage:
+{
+  "action": "filter",
+  "datasetId": "did_dataset_xxxxxx",
+  "stageId": "stage_000",
+  "branch": "cleaning",
+  "filters": [
+    {
+      "column": "省份",
+      "operator": "neq",
+      "value": "黑龙江省"
+    }
+  ]
+}
+
+Run QA before panel estimation:
+{
+  "action": "qa",
+  "datasetId": "did_dataset_xxxxxx",
+  "stageId": "stage_000",
+  "entityVar": "地区",
+  "timeVar": "year"
+}

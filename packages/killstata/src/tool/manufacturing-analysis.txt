@@ -1,0 +1,20 @@
+Run a manufacturing-process AI demo analysis for a multi-sheet Excel workbook.
+
+Use this tool when the user wants Killstata to analyze manufacturing, quality,
+process, MES/EAP, chamber, equipment, wafer, glass, or high-dimensional process
+data. It is designed for demo-ready analysis rather than causal inference.
+
+The tool reads all sheets in an Excel workbook, detects common demo scenarios
+such as missing-value diagnostics, chamber/equipment differences, PCA-style
+dimension reduction, PLS-style key-factor screening, ANOVA-style group
+comparison, row/column reshape hints, and simple data-join demos. It generates
+Chinese outputs suitable for a desktop demo video:
+
+- console summary
+- structured JSON
+- Excel workbook
+- Word report
+
+Do not use this tool to claim normal/abnormal classification when the source
+data contains only one outcome class. In that case, frame the result as
+within-abnormal-sample factor screening and process-difference diagnosis.

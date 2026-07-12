@@ -1,0 +1,8 @@
+interface:
+  display_name: "DID Estimation"
+  short_description: "Run static DID, staggered DID, or event-study workflows with explicit timing checks"
+  default_prompt: "Use $did-estimation to estimate this treatment-timing design as a DID workflow."
+
+policy:
+  allow_implicit_invocation: true
+

@@ -1,0 +1,8 @@
+interface:
+  display_name: "PSM Estimation"
+  short_description: "Run propensity-score matching, weighting, and overlap diagnostics"
+  default_prompt: "Use $psm-estimation to estimate this selection-on-observables design with propensity scores."
+
+policy:
+  allow_implicit_invocation: true
+

@@ -1,0 +1,8 @@
+interface:
+  display_name: "Paper Drafting"
+  short_description: "Generate a grounded empirical paper draft from saved artifacts"
+  default_prompt: "Use $paper-drafting to generate a paper draft from the saved empirical artifacts."
+
+policy:
+  allow_implicit_invocation: true
+

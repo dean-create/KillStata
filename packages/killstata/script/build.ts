@@ -1,0 +1,238 @@
+#!/usr/bin/env bun
+
+import solidPlugin from "../node_modules/@opentui/solid/scripts/solid-plugin"
+import path from "path"
+import fs from "fs"
+import { $ } from "bun"
+import { fileURLToPath } from "url"
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const dir = path.resolve(__dirname, "..")
+
+process.chdir(dir)
+
+import pkg from "../package.json"
+import { Script } from "@killstata/script"
+
+const singleFlag = process.argv.includes("--single")
+const baselineFlag = process.argv.includes("--baseline")
+const skipInstall = process.argv.includes("--skip-install")
+const windowsPriorityFlag = process.argv.includes("--windows-priority")
+const cliBinaryName = "killstata"
+
+function errorMessage(error: unknown): string {
+  if (error instanceof AggregateError) {
+    return error.errors.map(errorMessage).join("\n")
+  }
+  if (error instanceof Error) return error.stack || error.message
+  return String(error)
+}
+
+function shouldRetryBuild(error: unknown) {
+  const message = errorMessage(error).toLowerCase()
+  return (
+    message.includes("failed to extract executable") ||
+    message.includes("download may be incomplete") ||
+    message.includes("econnreset") ||
+    message.includes("etimedout") ||
+    message.includes("network")
+  )
+}
+
+async function buildTarget(
+  name: string,
+  item: {
+    os: string
+    arch: "arm64" | "x64"
+    abi?: "musl"
+    avx2?: false
+  },
+  attempts = 3,
+) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const parserWorker = fs.realpathSync(path.resolve(dir, "./node_modules/@opentui/core/parser.worker.js"))
+      const workerPath = "./src/cli/cmd/tui/worker.ts"
+
+      // Use platform-specific bunfs root path based on target OS
+      const bunfsRoot = item.os === "win32" ? "B:/~BUN/root/" : "/$bunfs/root/"
+      const workerRelativePath = path.relative(dir, parserWorker).replaceAll("\\", "/")
+
+      const result = await Bun.build({
+        conditions: ["browser"],
+        tsconfig: "./tsconfig.json",
+        plugins: [solidPlugin],
+        sourcemap: "external",
+        compile: {
+          autoloadBunfig: false,
+          autoloadDotenv: false,
+          //@ts-ignore (bun types aren't up to date)
+          autoloadTsconfig: true,
+          autoloadPackageJson: true,
+          target: name.replace(pkg.name, "bun") as any,
+          outfile: `dist/${name}/bin/${cliBinaryName}`,
+          execArgv: [`--user-agent=killstata/${Script.version}`, "--use-system-ca", "--"],
+          windows: {},
+        },
+        entrypoints: ["./src/index.ts", parserWorker, workerPath],
+        define: {
+          KILLSTATA_VERSION: `'${Script.version}'`,
+          OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
+          KILLSTATA_WORKER_PATH: workerPath,
+          KILLSTATA_CHANNEL: `'${Script.channel}'`,
+          KILLSTATA_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
+        },
+      })
+
+      if (!result.success) {
+        throw new AggregateError(result.logs, `Build failed for ${name}`)
+      }
+
+      return
+    } catch (error) {
+      if (attempt === attempts || !shouldRetryBuild(error)) {
+        throw error
+      }
+      console.warn(`build ${name} failed on attempt ${attempt}/${attempts}, retrying...`)
+      await Bun.sleep(2000 * attempt)
+    }
+  }
+}
+
+const allTargets: {
+  os: string
+  arch: "arm64" | "x64"
+  abi?: "musl"
+  avx2?: false
+}[] = [
+  {
+    os: "linux",
+    arch: "arm64",
+  },
+  {
+    os: "linux",
+    arch: "x64",
+  },
+  {
+    os: "linux",
+    arch: "x64",
+    avx2: false,
+  },
+  {
+    os: "linux",
+    arch: "arm64",
+    abi: "musl",
+  },
+  {
+    os: "linux",
+    arch: "x64",
+    abi: "musl",
+  },
+  {
+    os: "linux",
+    arch: "x64",
+    abi: "musl",
+    avx2: false,
+  },
+  {
+    os: "darwin",
+    arch: "arm64",
+  },
+  {
+    os: "darwin",
+    arch: "x64",
+  },
+  {
+    os: "darwin",
+    arch: "x64",
+    avx2: false,
+  },
+  {
+    os: "win32",
+    arch: "x64",
+  },
+  {
+    os: "win32",
+    arch: "x64",
+    avx2: false,
+  },
+]
+
+const targets = (() => {
+  if (windowsPriorityFlag) {
+    return allTargets.filter((item) => item.os === "win32" && item.arch === "x64" && item.avx2 !== false)
+  }
+
+  if (singleFlag) {
+    return allTargets.filter((item) => {
+      if (item.os !== process.platform || item.arch !== process.arch) {
+        return false
+      }
+
+      // When building for the current platform, prefer a single native binary by default.
+      // Baseline binaries require additional Bun artifacts and can be flaky to download.
+      if (item.avx2 === false) {
+        return baselineFlag
+      }
+
+      // also skip abi-specific builds for the same reason
+      if (item.abi !== undefined) {
+        return false
+      }
+
+      return true
+    })
+  }
+
+  return allTargets
+})()
+
+await $`rm -rf dist`
+
+const binaries: Record<string, string> = {}
+if (!skipInstall) {
+  await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`
+  await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
+}
+for (const item of targets) {
+  const name = [
+    pkg.name,
+    // changing to win32 flags npm for some reason
+    item.os === "win32" ? "windows" : item.os,
+    item.arch,
+    item.avx2 === false ? "baseline" : undefined,
+    item.abi === undefined ? undefined : item.abi,
+  ]
+    .filter(Boolean)
+    .join("-")
+  console.log(`building ${name}`)
+  await $`mkdir -p dist/${name}/bin`
+  await buildTarget(name, item)
+
+  await $`rm -rf ./dist/${name}/bin/tui`
+  const binaryEntry = [`./bin/${cliBinaryName}.exe`, `./bin/${cliBinaryName}`].find((item) =>
+    fs.existsSync(path.join(dir, "dist", name, item.replace("./", ""))),
+  )
+  if (!binaryEntry) {
+    throw new Error(`Failed to locate compiled ${cliBinaryName} binary for ${name}`)
+  }
+  await Bun.file(`dist/${name}/package.json`).write(
+    JSON.stringify(
+      {
+        name,
+        version: Script.version,
+        os: [item.os],
+        cpu: [item.arch],
+        bin: {
+          [cliBinaryName]: binaryEntry,
+        },
+      },
+      null,
+      2,
+    ),
+  )
+  binaries[name] = Script.version
+}
+
+export { binaries }

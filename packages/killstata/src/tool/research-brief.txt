@@ -1,0 +1,14 @@
+Generate a standardized empirical research brief from an idea, research question, theory/mechanism hints, design options, data hints, and optional web-grounding.
+
+Use this before running econometric models when the user is still shaping the topic, identification strategy, or data plan.
+
+Outputs:
+- `research_brief.md`
+- `research_brief.json`
+- `research_brief_sources.json`
+
+Rules:
+- Separate the recommended design from alternative designs.
+- State identifying assumptions, minimum data requirements, feasibility risks, and validity risks explicitly.
+- Web grounding may only support public facts, policy background, and literature-style context. It must not invent causal identification.
+- If web grounding fails, still produce the brief and mark `grounding_mode=offline_fallback`.

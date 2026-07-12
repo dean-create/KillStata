@@ -1,0 +1,8 @@
+interface:
+  display_name: "Workflow Orchestrator"
+  short_description: "Route spreadsheet and econometric work through the full staged workflow"
+  default_prompt: "Use $workflow-orchestrator to run this empirical analysis in the correct stage order."
+
+policy:
+  allow_implicit_invocation: true
+
