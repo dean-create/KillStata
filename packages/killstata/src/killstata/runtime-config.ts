@@ -205,10 +205,6 @@ export function userLogsRoot() {
   return path.join(userRoot(), "logs")
 }
 
-export function userMemoryRoot() {
-  return path.join(userRoot(), "memory")
-}
-
 export function userTmpRoot() {
   return path.join(userRoot(), "tmp")
 }
@@ -253,7 +249,6 @@ export function userPaths() {
     subagents: userSubagentsRoot(),
     subagentRuns: userSubagentRunsPath(),
     logs: userLogsRoot(),
-    memory: userMemoryRoot(),
     tmp: userTmpRoot(),
     state: userStateRoot(),
     workspaceState: userWorkspaceStatePath(),
@@ -729,7 +724,6 @@ export async function ensureKillstataHomeDirectories() {
     paths.mainAgentSessions,
     paths.subagents,
     paths.logs,
-    paths.memory,
     paths.tmp,
     paths.state,
     paths.downloads,

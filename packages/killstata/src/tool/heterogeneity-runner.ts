@@ -43,7 +43,6 @@ const PlaceboSchema = z.union([
   z
     .object({
       variables: z.array(z.string()).optional(),
-      policyTimes: z.array(z.string()).optional(),
       notes: z.string().optional(),
     })
     .passthrough(),
@@ -644,8 +643,6 @@ def main():
     placebo_vars = []
     if isinstance(placebo, dict):
         placebo_vars = placebo.get("variables") or []
-        if placebo.get("policyTimes"):
-            warnings.append("policyTimes placebo placeholders were provided but are not executed in v1; variable placebos only.")
     elif placebo is True:
         warnings.append("placebo=true received without explicit variables; skipped.")
     for placebo_var in placebo_vars:

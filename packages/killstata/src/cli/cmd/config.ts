@@ -41,7 +41,6 @@ import {
   userLogsRoot,
   userMainAgentSessionsRoot,
   userMainAgentStateRoot,
-  userMemoryRoot,
   userSkillRoot,
   userStateRoot,
   userSubagentRunsPath,
@@ -387,7 +386,6 @@ function printPathSummary() {
   prompts.log.info(`  subagents: ${paths.user.subagents}`)
   prompts.log.info(`  subagent index: ${paths.user.subagentRuns}`)
   prompts.log.info(`  logs: ${paths.user.logs}`)
-  prompts.log.info(`  memory: ${paths.user.memory}`)
   prompts.log.info(`  tmp: ${paths.user.tmp}`)
   prompts.log.info(`  state: ${paths.user.state}`)
   prompts.log.info(`  downloads: ${paths.user.downloads}`)
@@ -940,9 +938,6 @@ export async function runKillstataConfigWizard(input?: { intro?: string }) {
       },
       logs: {
         root: userLogsRoot(),
-      },
-      memory: {
-        root: userMemoryRoot(),
       },
       tmp: {
         root: userTmpRoot(),

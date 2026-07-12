@@ -3,6 +3,7 @@ import * as fs from "fs"
 import * as path from "path"
 import { spawn, exec } from "child_process"
 import DESCRIPTION from "./data-import.txt"
+import { PY_READ_CSV_FALLBACK } from "./python-snippets"
 import { Instance } from "../project/instance"
 import { Log } from "../util/log"
 import { Tool } from "./tool"
@@ -208,10 +209,10 @@ export function schemaLooksLikeMojibake(schemaPath?: string) {
   try {
     const raw = fs.readFileSync(schemaPath, "utf-8")
     const parsed = JSON.parse(raw) as {
-      columns?: Array<{ name?: string; label?: string }>
+      schema?: Array<{ name?: string }>
     }
-    const columns = Array.isArray(parsed.columns) ? parsed.columns : []
-    return columns.some((column) => looksLikeMojibake(column.name) || looksLikeMojibake(column.label))
+    const columns = Array.isArray(parsed.schema) ? parsed.schema : []
+    return columns.some((column) => looksLikeMojibake(column.name))
   } catch {
     return false
   }
@@ -1138,10 +1139,12 @@ def build_schema(df):
         )
     return schema
 
+${PY_READ_CSV_FALLBACK}
+
 def read_table(file_path):
     suffix = Path(file_path).suffix.lower()
     if suffix == ".csv":
-        return pd.read_csv(file_path)
+        return read_csv_with_fallback(file_path)
     if suffix in [".xlsx", ".xls"]:
         sheet_policy = payload.get("sheet_policy") or {}
         mode = sheet_policy.get("mode") or "first_sheet"
@@ -1254,14 +1257,23 @@ def apply_filter(df, rule):
         return df[series == value]
     if operator == "neq":
         return df[series != value]
-    if operator == "gt":
-        return df[pd.to_numeric(series, errors="coerce") > value]
-    if operator == "gte":
-        return df[pd.to_numeric(series, errors="coerce") >= value]
-    if operator == "lt":
-        return df[pd.to_numeric(series, errors="coerce") < value]
-    if operator == "lte":
-        return df[pd.to_numeric(series, errors="coerce") <= value]
+    if operator in ["gt", "gte", "lt", "lte"]:
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"Filter value for operator '{operator}' must be numeric, got: {value!r}")
+        numeric_series = pd.to_numeric(series, errors="coerce")
+        if numeric_series.isna().all() and series.notna().any():
+            samples = series.dropna().astype(str).head(3).tolist()
+            raise ValueError(f"Column '{column}' does not look numeric, so operator '{operator}' cannot be applied. Sample values: {samples}")
+        if operator == "gt":
+            return df[numeric_series > numeric_value]
+        if operator == "gte":
+            return df[numeric_series >= numeric_value]
+        if operator == "lt":
+            return df[numeric_series < numeric_value]
+        if operator == "lte":
+            return df[numeric_series <= numeric_value]
 
     text_series = series.astype(str)
     needle = str(value)

@@ -34,4 +34,12 @@ describe("session.system prompt contracts", () => {
     expect(source).toContain("keep that estimator unless it is not executable")
     expect(source).toContain("rescue to `smart_baseline`")
   })
+
+  test("environment prompt no longer injects an always-empty <files> block", () => {
+    const sourcePath = path.join(process.cwd(), "src", "session", "system.ts")
+    const source = fs.readFileSync(sourcePath, "utf-8")
+
+    expect(source).not.toContain("<files>")
+    expect(source).not.toContain("Ripgrep.tree")
+  })
 })

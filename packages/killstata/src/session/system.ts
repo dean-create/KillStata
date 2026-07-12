@@ -1,5 +1,4 @@
-﻿import { Ripgrep } from "../file/ripgrep"
-import { formatSkillAliasXml, resolveSkillAliasAvailability, Skill } from "../skill"
+﻿import { formatSkillAliasXml, resolveSkillAliasAvailability, Skill } from "../skill"
 import { ConfigMarkdown } from "../config/markdown"
 
 import { Instance } from "../project/instance"
@@ -290,16 +289,6 @@ export namespace SystemPrompt {
         dataSummary,
         skillSummary,
         autoSkillContext,
-        `<files>`,
-        `  ${
-          project.vcs === "git" && false
-            ? await Ripgrep.tree({
-                cwd: Instance.directory,
-                limit: 200,
-              })
-            : ""
-        }`,
-        `</files>`,
       ]
         .filter(Boolean)
         .join("\n"),

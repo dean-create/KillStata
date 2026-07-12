@@ -237,7 +237,7 @@ export namespace PermissionNext {
     return match ?? { action: "ask", permission, pattern: "*" }
   }
 
-  const EDIT_TOOLS = ["edit", "write", "patch", "multiedit"]
+  const EDIT_TOOLS = ["edit", "write", "patch"]
 
   function permissionForTool(tool: string) {
     if (EDIT_TOOLS.includes(tool)) return "edit"
