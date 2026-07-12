@@ -6,7 +6,8 @@ import { fn } from "@/util/fn"
 import type { AuthOuathResult, Hooks } from "@killstata/plugin"
 import { NamedError } from "@killstata/util/error"
 import { Auth } from "../auth"
-import { DEEPSEEK_PROVIDER_ID, deepSeekEnvOnlyAuthMessage, isDeepSeekProvider } from "./deepseek-policy"
+import { DEEPSEEK_PROVIDER_ID, deepSeekEnvOnlyAuthMessage } from "./deepseek-policy"
+import { allowedProvidersMessage, isAllowedProvider } from "./model-policy"
 
 export namespace ProviderAuth {
   const state = Instance.state(async () => {
@@ -98,10 +99,10 @@ export namespace ProviderAuth {
       key: z.string(),
     }),
     async (input) => {
-      if (!isDeepSeekProvider(input.providerID)) {
-        throw new Error(deepSeekEnvOnlyAuthMessage(input.providerID))
+      if (!isAllowedProvider(input.providerID)) {
+        throw new Error(allowedProvidersMessage(input.providerID))
       }
-      await Auth.set(DEEPSEEK_PROVIDER_ID, {
+      await Auth.set(input.providerID, {
         type: "api",
         key: input.key,
       })

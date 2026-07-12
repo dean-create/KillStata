@@ -15,28 +15,10 @@ import { iife } from "@/util/iife"
 import { Global } from "../global"
 import path from "path"
 
-// Direct imports for bundled providers
-import { createAmazonBedrock, type AmazonBedrockProviderSettings } from "@ai-sdk/amazon-bedrock"
-import { createAnthropic } from "@ai-sdk/anthropic"
-import { createAzure } from "@ai-sdk/azure"
-import { createGoogleGenerativeAI } from "@ai-sdk/google"
-import { createVertex } from "@ai-sdk/google-vertex"
-import { createVertexAnthropic } from "@ai-sdk/google-vertex/anthropic"
-import { createOpenAI } from "@ai-sdk/openai"
+// Killstata bundles exactly one SDK: the OpenAI-compatible client. It serves both the
+// built-in DeepSeek provider and any user-declared custom endpoint (Qwen / Kimi / GLM / vLLM).
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
-import { createOpenRouter, type LanguageModelV2 } from "@openrouter/ai-sdk-provider"
-import { createOpenaiCompatible as createGitHubCopilotOpenAICompatible } from "./sdk/openai-compatible/src"
-import { createXai } from "@ai-sdk/xai"
-import { createMistral } from "@ai-sdk/mistral"
-import { createGroq } from "@ai-sdk/groq"
-import { createDeepInfra } from "@ai-sdk/deepinfra"
-import { createCerebras } from "@ai-sdk/cerebras"
-import { createCohere } from "@ai-sdk/cohere"
-import { createGateway } from "@ai-sdk/gateway"
-import { createTogetherAI } from "@ai-sdk/togetherai"
-import { createPerplexity } from "@ai-sdk/perplexity"
-import { createVercel } from "@ai-sdk/vercel"
-import { createGitLab } from "@gitlab/gitlab-ai-provider"
+import type { LanguageModelV2 } from "@ai-sdk/provider"
 import { ProviderTransform } from "./transform"
 import {
   DEEPSEEK_API_KEY_ENV,
@@ -47,565 +29,26 @@ import {
   DEEPSEEK_PROVIDER_ID,
   DEEPSEEK_V4_CONTEXT_WINDOW_TOKENS,
   DEEPSEEK_V4_MAX_OUTPUT_TOKENS,
-  deepSeekOnlyMessage,
   isDeepSeekProvider,
   normalizeDeepSeekModelID,
 } from "./deepseek-policy"
+import {
+  CUSTOM_API_KEY_ENV,
+  CUSTOM_PROVIDER_ID,
+  OPENAI_COMPATIBLE_NPM,
+  allowedProvidersMessage,
+  isAllowedProvider,
+  isCustomProvider,
+} from "./model-policy"
 
 export namespace Provider {
   const log = Log.create({ service: "provider" })
 
-  function normalizeGoogleToolCallIndexesChunk(line: string) {
-    if (!line.startsWith("data: ")) return line
-
-    const payload = line.slice(6).trim()
-    if (!payload || payload === "[DONE]") return line
-
-    try {
-      const parsed = JSON.parse(payload)
-      if (!Array.isArray(parsed?.choices)) return line
-
-      for (const choice of parsed.choices) {
-        const toolCalls = choice?.delta?.tool_calls
-        if (!Array.isArray(toolCalls)) continue
-        for (const [index, toolCall] of toolCalls.entries()) {
-          if (toolCall && typeof toolCall === "object" && toolCall.index === undefined) {
-            toolCall.index = index
-          }
-        }
-      }
-
-      return `data: ${JSON.stringify(parsed)}`
-    } catch {
-      return line
-    }
-  }
-
-  function normalizeGoogleStreamingResponse(response: Response) {
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? ""
-    if (!response.body || !contentType.includes("text/event-stream")) return response
-
-    const source = response.body
-    const reader = source.getReader()
-    const decoder = new TextDecoder()
-    const encoder = new TextEncoder()
-    let buffer = ""
-
-    const body = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        const flushLines = (final = false) => {
-          const parts = buffer.split("\n")
-          const trailing = final ? "" : (parts.pop() ?? "")
-          if (!final) {
-            buffer = trailing
-          } else {
-            buffer = ""
-          }
-
-          for (const part of parts) {
-            const line = part.endsWith("\r") ? part.slice(0, -1) : part
-            controller.enqueue(encoder.encode(`${normalizeGoogleToolCallIndexesChunk(line)}\n`))
-          }
-
-          if (final && trailing) {
-            const line = trailing.endsWith("\r") ? trailing.slice(0, -1) : trailing
-            controller.enqueue(encoder.encode(normalizeGoogleToolCallIndexesChunk(line)))
-          }
-        }
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            buffer += decoder.decode(value, { stream: true })
-            flushLines(false)
-          }
-
-          buffer += decoder.decode()
-          flushLines(true)
-          controller.close()
-        } catch (error) {
-          controller.error(error)
-        } finally {
-          reader.releaseLock()
-        }
-      },
-      async cancel(reason) {
-        await reader.cancel(reason).catch(() => {})
-      },
-    })
-
-    return new Response(body, {
-      headers: response.headers,
-      status: response.status,
-      statusText: response.statusText,
-    })
-  }
-
-  function isGpt5OrLater(modelID: string): boolean {
-    const match = /^gpt-(\d+)/.exec(modelID)
-    if (!match) {
-      return false
-    }
-    return Number(match[1]) >= 5
-  }
-
-  function shouldUseCopilotResponsesApi(modelID: string): boolean {
-    return isGpt5OrLater(modelID) && !modelID.startsWith("gpt-5-mini")
-  }
-
   const BUNDLED_PROVIDERS: Record<string, (options: any) => SDK> = {
-    "@ai-sdk/amazon-bedrock": createAmazonBedrock,
-    "@ai-sdk/anthropic": createAnthropic,
-    "@ai-sdk/azure": createAzure,
-    "@ai-sdk/google": createGoogleGenerativeAI,
-    "@ai-sdk/google-vertex": createVertex,
-    "@ai-sdk/google-vertex/anthropic": createVertexAnthropic,
-    "@ai-sdk/openai": createOpenAI,
-    "@ai-sdk/openai-compatible": createOpenAICompatible,
-    "@openrouter/ai-sdk-provider": createOpenRouter,
-    "@ai-sdk/xai": createXai,
-    "@ai-sdk/mistral": createMistral,
-    "@ai-sdk/groq": createGroq,
-    "@ai-sdk/deepinfra": createDeepInfra,
-    "@ai-sdk/cerebras": createCerebras,
-    "@ai-sdk/cohere": createCohere,
-    "@ai-sdk/gateway": createGateway,
-    "@ai-sdk/togetherai": createTogetherAI,
-    "@ai-sdk/perplexity": createPerplexity,
-    "@ai-sdk/vercel": createVercel,
-    "@gitlab/gitlab-ai-provider": createGitLab,
-    // @ts-ignore (TODO: kill this code so we dont have to maintain it)
-    "@ai-sdk/github-copilot": createGitHubCopilotOpenAICompatible,
+    [OPENAI_COMPATIBLE_NPM]: createOpenAICompatible,
   }
 
   type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>) => Promise<any>
-  type CustomLoader = (provider: Info) => Promise<{
-    autoload: boolean
-    getModel?: CustomModelLoader
-    options?: Record<string, any>
-  }>
-
-  const CUSTOM_LOADERS: Record<string, CustomLoader> = {
-    async anthropic() {
-      return {
-        autoload: false,
-        options: {
-          headers: {
-            "anthropic-beta":
-              "claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
-          },
-        },
-      }
-    },
-    async killstata(input) {
-      const hasKey = await (async () => {
-        const env = Env.all()
-        if (input.env.some((item) => env[item])) return true
-        if (await Auth.get(input.id)) return true
-        const config = await Config.get()
-        if (config.provider?.["killstata"]?.options?.apiKey) return true
-        return false
-      })()
-
-      if (!hasKey) {
-        for (const [key, value] of Object.entries(input.models)) {
-          if (value.cost.input === 0) continue
-          delete input.models[key]
-        }
-      }
-
-      return {
-        autoload: Object.keys(input.models).length > 0,
-        options: hasKey ? {} : { apiKey: "public" },
-      }
-    },
-    openai: async () => {
-      return {
-        autoload: false,
-        async getModel(sdk: any, modelID: string, _options?: Record<string, any>) {
-          return sdk.responses(modelID)
-        },
-        options: {},
-      }
-    },
-    "github-copilot": async () => {
-      return {
-        autoload: false,
-        async getModel(sdk: any, modelID: string, _options?: Record<string, any>) {
-          return shouldUseCopilotResponsesApi(modelID) ? sdk.responses(modelID) : sdk.chat(modelID)
-        },
-        options: {},
-      }
-    },
-    "github-copilot-enterprise": async () => {
-      return {
-        autoload: false,
-        async getModel(sdk: any, modelID: string, _options?: Record<string, any>) {
-          return shouldUseCopilotResponsesApi(modelID) ? sdk.responses(modelID) : sdk.chat(modelID)
-        },
-        options: {},
-      }
-    },
-    azure: async () => {
-      return {
-        autoload: false,
-        async getModel(sdk: any, modelID: string, options?: Record<string, any>) {
-          if (options?.["useCompletionUrls"]) {
-            return sdk.chat(modelID)
-          } else {
-            return sdk.responses(modelID)
-          }
-        },
-        options: {},
-      }
-    },
-    "azure-cognitive-services": async () => {
-      const resourceName = Env.get("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME")
-      return {
-        autoload: false,
-        async getModel(sdk: any, modelID: string, options?: Record<string, any>) {
-          if (options?.["useCompletionUrls"]) {
-            return sdk.chat(modelID)
-          } else {
-            return sdk.responses(modelID)
-          }
-        },
-        options: {
-          baseURL: resourceName ? `https://${resourceName}.cognitiveservices.azure.com/openai` : undefined,
-        },
-      }
-    },
-    "amazon-bedrock": async () => {
-      const config = await Config.get()
-      const providerConfig = config.provider?.["amazon-bedrock"]
-
-      const auth = await Auth.get("amazon-bedrock")
-
-      // Region precedence: 1) config file, 2) env var, 3) default
-      const configRegion = providerConfig?.options?.region
-      const envRegion = Env.get("AWS_REGION")
-      const defaultRegion = configRegion ?? envRegion ?? "us-east-1"
-
-      // Profile: config file takes precedence over env var
-      const configProfile = providerConfig?.options?.profile
-      const envProfile = Env.get("AWS_PROFILE")
-      const profile = configProfile ?? envProfile
-
-      const awsAccessKeyId = Env.get("AWS_ACCESS_KEY_ID")
-
-      const awsBearerToken = iife(() => {
-        const envToken = Env.get("AWS_BEARER_TOKEN_BEDROCK")
-        if (envToken) return envToken
-        if (auth?.type === "api") {
-          Env.set("AWS_BEARER_TOKEN_BEDROCK", auth.key)
-          return auth.key
-        }
-        return undefined
-      })
-
-      const awsWebIdentityTokenFile = Env.get("AWS_WEB_IDENTITY_TOKEN_FILE")
-
-      if (!profile && !awsAccessKeyId && !awsBearerToken && !awsWebIdentityTokenFile) return { autoload: false }
-
-      const providerOptions: AmazonBedrockProviderSettings = {
-        region: defaultRegion,
-      }
-
-      // Only use credential chain if no bearer token exists
-      // Bearer token takes precedence over credential chain (profiles, access keys, IAM roles, web identity tokens)
-      if (!awsBearerToken) {
-        const { fromNodeProviderChain } = await import(await BunProc.install("@aws-sdk/credential-providers"))
-
-        // Build credential provider options (only pass profile if specified)
-        const credentialProviderOptions = profile ? { profile } : {}
-
-        providerOptions.credentialProvider = fromNodeProviderChain(credentialProviderOptions)
-      }
-
-      // Add custom endpoint if specified (endpoint takes precedence over baseURL)
-      const endpoint = providerConfig?.options?.endpoint ?? providerConfig?.options?.baseURL
-      if (endpoint) {
-        providerOptions.baseURL = endpoint
-      }
-
-      return {
-        autoload: true,
-        options: providerOptions,
-        async getModel(sdk: any, modelID: string, options?: Record<string, any>) {
-          // Skip region prefixing if model already has a cross-region inference profile prefix
-          if (modelID.startsWith("global.") || modelID.startsWith("jp.")) {
-            return sdk.languageModel(modelID)
-          }
-
-          // Region resolution precedence (highest to lowest):
-          // 1. options.region from killstata.json provider config
-          // 2. defaultRegion from AWS_REGION environment variable
-          // 3. Default "us-east-1" (baked into defaultRegion)
-          const region = options?.region ?? defaultRegion
-
-          let regionPrefix = region.split("-")[0]
-
-          switch (regionPrefix) {
-            case "us": {
-              const modelRequiresPrefix = [
-                "nova-micro",
-                "nova-lite",
-                "nova-pro",
-                "nova-premier",
-                "nova-2",
-                "claude",
-                "deepseek",
-              ].some((m) => modelID.includes(m))
-              const isGovCloud = region.startsWith("us-gov")
-              if (modelRequiresPrefix && !isGovCloud) {
-                modelID = `${regionPrefix}.${modelID}`
-              }
-              break
-            }
-            case "eu": {
-              const regionRequiresPrefix = [
-                "eu-west-1",
-                "eu-west-2",
-                "eu-west-3",
-                "eu-north-1",
-                "eu-central-1",
-                "eu-south-1",
-                "eu-south-2",
-              ].some((r) => region.includes(r))
-              const modelRequiresPrefix = ["claude", "nova-lite", "nova-micro", "llama3", "pixtral"].some((m) =>
-                modelID.includes(m),
-              )
-              if (regionRequiresPrefix && modelRequiresPrefix) {
-                modelID = `${regionPrefix}.${modelID}`
-              }
-              break
-            }
-            case "ap": {
-              const isAustraliaRegion = ["ap-southeast-2", "ap-southeast-4"].includes(region)
-              const isTokyoRegion = region === "ap-northeast-1"
-              if (
-                isAustraliaRegion &&
-                ["anthropic.claude-sonnet-4-5", "anthropic.claude-haiku"].some((m) => modelID.includes(m))
-              ) {
-                regionPrefix = "au"
-                modelID = `${regionPrefix}.${modelID}`
-              } else if (isTokyoRegion) {
-                // Tokyo region uses jp. prefix for cross-region inference
-                const modelRequiresPrefix = ["claude", "nova-lite", "nova-micro", "nova-pro"].some((m) =>
-                  modelID.includes(m),
-                )
-                if (modelRequiresPrefix) {
-                  regionPrefix = "jp"
-                  modelID = `${regionPrefix}.${modelID}`
-                }
-              } else {
-                // Other APAC regions use apac. prefix
-                const modelRequiresPrefix = ["claude", "nova-lite", "nova-micro", "nova-pro"].some((m) =>
-                  modelID.includes(m),
-                )
-                if (modelRequiresPrefix) {
-                  regionPrefix = "apac"
-                  modelID = `${regionPrefix}.${modelID}`
-                }
-              }
-              break
-            }
-          }
-
-          return sdk.languageModel(modelID)
-        },
-      }
-    },
-    openrouter: async () => {
-      return {
-        autoload: false,
-        options: {
-          headers: {
-            "HTTP-Referer": "https://killstata.ai/",
-            "X-Title": "killstata",
-          },
-        },
-      }
-    },
-    vercel: async () => {
-      return {
-        autoload: false,
-        options: {
-          headers: {
-            "http-referer": "https://killstata.ai/",
-            "x-title": "killstata",
-          },
-        },
-      }
-    },
-    "google-vertex": async () => {
-      const project = Env.get("GOOGLE_CLOUD_PROJECT") ?? Env.get("GCP_PROJECT") ?? Env.get("GCLOUD_PROJECT")
-      const location = Env.get("GOOGLE_CLOUD_LOCATION") ?? Env.get("VERTEX_LOCATION") ?? "us-east5"
-      const autoload = Boolean(project)
-      if (!autoload) return { autoload: false }
-      return {
-        autoload: true,
-        options: {
-          project,
-          location,
-        },
-        async getModel(sdk: any, modelID: string) {
-          const id = String(modelID).trim()
-          return sdk.languageModel(id)
-        },
-      }
-    },
-    "google-vertex-anthropic": async () => {
-      const project = Env.get("GOOGLE_CLOUD_PROJECT") ?? Env.get("GCP_PROJECT") ?? Env.get("GCLOUD_PROJECT")
-      const location = Env.get("GOOGLE_CLOUD_LOCATION") ?? Env.get("VERTEX_LOCATION") ?? "global"
-      const autoload = Boolean(project)
-      if (!autoload) return { autoload: false }
-      return {
-        autoload: true,
-        options: {
-          project,
-          location,
-        },
-        async getModel(sdk: any, modelID) {
-          const id = String(modelID).trim()
-          return sdk.languageModel(id)
-        },
-      }
-    },
-    "sap-ai-core": async () => {
-      const auth = await Auth.get("sap-ai-core")
-      const envServiceKey = iife(() => {
-        const envAICoreServiceKey = Env.get("AICORE_SERVICE_KEY")
-        if (envAICoreServiceKey) return envAICoreServiceKey
-        if (auth?.type === "api") {
-          Env.set("AICORE_SERVICE_KEY", auth.key)
-          return auth.key
-        }
-        return undefined
-      })
-      const deploymentId = Env.get("AICORE_DEPLOYMENT_ID")
-      const resourceGroup = Env.get("AICORE_RESOURCE_GROUP")
-
-      return {
-        autoload: !!envServiceKey,
-        options: envServiceKey ? { deploymentId, resourceGroup } : {},
-        async getModel(sdk: any, modelID: string) {
-          return sdk(modelID)
-        },
-      }
-    },
-    zenmux: async () => {
-      return {
-        autoload: false,
-        options: {
-          headers: {
-            "HTTP-Referer": "https://killstata.ai/",
-            "X-Title": "killstata",
-          },
-        },
-      }
-    },
-    gitlab: async (input) => {
-      const instanceUrl = Env.get("GITLAB_INSTANCE_URL") || "https://gitlab.com"
-
-      const auth = await Auth.get(input.id)
-      const apiKey = await (async () => {
-        if (auth?.type === "oauth") return auth.access
-        if (auth?.type === "api") return auth.key
-        return Env.get("GITLAB_TOKEN")
-      })()
-
-      const config = await Config.get()
-      const providerConfig = config.provider?.["gitlab"]
-
-      return {
-        autoload: !!apiKey,
-        options: {
-          instanceUrl,
-          apiKey,
-          featureFlags: {
-            duo_agent_platform_agentic_chat: true,
-            duo_agent_platform: true,
-            ...(providerConfig?.options?.featureFlags || {}),
-          },
-        },
-        async getModel(sdk: ReturnType<typeof createGitLab>, modelID: string) {
-          return sdk.agenticChat(modelID, {
-            featureFlags: {
-              duo_agent_platform_agentic_chat: true,
-              duo_agent_platform: true,
-              ...(providerConfig?.options?.featureFlags || {}),
-            },
-          })
-        },
-      }
-    },
-    "cloudflare-ai-gateway": async (input) => {
-      const accountId = Env.get("CLOUDFLARE_ACCOUNT_ID")
-      const gateway = Env.get("CLOUDFLARE_GATEWAY_ID")
-
-      if (!accountId || !gateway) return { autoload: false }
-
-      // Get API token from env or auth prompt
-      const apiToken = await (async () => {
-        const envToken = Env.get("CLOUDFLARE_API_TOKEN")
-        if (envToken) return envToken
-        const auth = await Auth.get(input.id)
-        if (auth?.type === "api") return auth.key
-        return undefined
-      })()
-
-      return {
-        autoload: true,
-        async getModel(sdk: any, modelID: string, _options?: Record<string, any>) {
-          return sdk.languageModel(modelID)
-        },
-        options: {
-          baseURL: `https://gateway.ai.cloudflare.com/v1/${accountId}/${gateway}/compat`,
-          headers: {
-            // Cloudflare AI Gateway uses cf-aig-authorization for authenticated gateways
-            // This enables Unified Billing where Cloudflare handles upstream provider auth
-            ...(apiToken ? { "cf-aig-authorization": `Bearer ${apiToken}` } : {}),
-            "HTTP-Referer": "https://killstata.ai/",
-            "X-Title": "killstata",
-          },
-          // Custom fetch to handle parameter transformation and auth
-          fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
-            const headers = new Headers(init?.headers)
-            // Strip Authorization header - AI Gateway uses cf-aig-authorization instead
-            headers.delete("Authorization")
-
-            // Transform max_tokens to max_completion_tokens for newer models
-            if (init?.body && init.method === "POST") {
-              try {
-                const body = JSON.parse(init.body as string)
-                if (body.max_tokens !== undefined && !body.max_completion_tokens) {
-                  body.max_completion_tokens = body.max_tokens
-                  delete body.max_tokens
-                  init = { ...init, body: JSON.stringify(body) }
-                }
-              } catch (e) {
-                // If body parsing fails, continue with original request
-              }
-            }
-
-            return fetch(input, { ...init, headers })
-          },
-        },
-      }
-    },
-    cerebras: async () => {
-      return {
-        autoload: false,
-        options: {
-          headers: {
-            "X-Cerebras-3rd-Party-Integration": "killstata",
-          },
-        },
-      }
-    },
-  }
 
   export const Model = z
     .object({
@@ -702,10 +145,7 @@ export namespace Provider {
       api: {
         id: model.id,
         url: provider.api!,
-        npm: iife(() => {
-          if (provider.id.startsWith("github-copilot")) return "@ai-sdk/github-copilot"
-          return model.provider?.npm ?? provider.npm ?? "@ai-sdk/openai-compatible"
-        }),
+        npm: model.provider?.npm ?? provider.npm ?? OPENAI_COMPATIBLE_NPM,
       },
       status: model.status ?? "active",
       headers: model.headers ?? {},
@@ -845,13 +285,32 @@ export namespace Provider {
     }
   }
 
-  function enforceDeepSeekOnlyProviders(providers: Record<string, Info>) {
-    const apiKey = Env.get(DEEPSEEK_API_KEY_ENV)?.trim()
-    const existing = providers[DEEPSEEK_PROVIDER_ID]
+  // Guarantees the final provider set is exactly what killstata supports:
+  //   - deepseek is always present (it is the default, and works from DEEPSEEK_API_KEY alone)
+  //   - custom survives only if the user actually configured a usable endpoint (baseURL + models)
+  //   - anything else that leaked through is dropped
+  function enforceAllowedProviders(providers: Record<string, Info>) {
+    // Capture both before we clear the map: `existing` carries the key merged in from
+    // auth.json / config, which must win over the env var (see deepSeekProvider).
+    const existingDeepSeek = providers[DEEPSEEK_PROVIDER_ID]
+    const custom = providers[CUSTOM_PROVIDER_ID]
+    const customUsable =
+      custom && typeof custom.options["baseURL"] === "string" && Object.keys(custom.models).length > 0
+
     for (const providerID of Object.keys(providers)) {
       delete providers[providerID]
     }
-    providers[DEEPSEEK_PROVIDER_ID] = deepSeekProvider(apiKey || undefined, existing)
+
+    const apiKey = Env.get(DEEPSEEK_API_KEY_ENV)?.trim()
+    providers[DEEPSEEK_PROVIDER_ID] = deepSeekProvider(apiKey || undefined, existingDeepSeek)
+
+    if (customUsable) {
+      const customKey = Env.get(CUSTOM_API_KEY_ENV)?.trim()
+      providers[CUSTOM_PROVIDER_ID] = {
+        ...custom,
+        key: custom.key ?? customKey,
+      }
+    }
   }
 
   function providerApiKey(provider: Info) {
@@ -1023,7 +482,7 @@ export namespace Provider {
     const enabled = config.enabled_providers ? new Set(config.enabled_providers) : null
 
     function isProviderAllowed(providerID: string): boolean {
-      if (!isDeepSeekProvider(providerID)) return false
+      if (!isAllowedProvider(providerID)) return false
       if (enabled && !enabled.has(providerID)) return false
       if (disabled.has(providerID)) return false
       return true
@@ -1040,20 +499,6 @@ export namespace Provider {
 
     const configProviders = Object.entries(config.provider ?? {})
 
-    // Add GitHub Copilot Enterprise provider that inherits from GitHub Copilot
-    if (database["github-copilot"]) {
-      const githubCopilot = database["github-copilot"]
-      database["github-copilot-enterprise"] = {
-        ...githubCopilot,
-        id: "github-copilot-enterprise",
-        name: "GitHub Copilot Enterprise",
-        models: mapValues(githubCopilot.models, (model) => ({
-          ...model,
-          providerID: "github-copilot-enterprise",
-        })),
-      }
-    }
-
     function mergeProvider(providerID: string, provider: Partial<Info>) {
       const existing = providers[providerID]
       if (existing) {
@@ -1069,13 +514,17 @@ export namespace Provider {
 
     // extend database from config
     for (const [providerID, provider] of configProviders) {
-      if (!isDeepSeekProvider(providerID)) continue
+      if (!isAllowedProvider(providerID)) continue
       const existing = database[providerID]
+      const custom = isCustomProvider(providerID)
       const parsed: Info = {
         id: providerID,
         name: provider.name ?? existing?.name ?? providerID,
-        env: [DEEPSEEK_API_KEY_ENV],
-        options: mergeDeep(existing?.options ?? {}, omit(provider.options ?? {}, ["apiKey", "baseURL"])),
+        env: [custom ? CUSTOM_API_KEY_ENV : DEEPSEEK_API_KEY_ENV],
+        options: mergeDeep(
+          existing?.options ?? {},
+          custom ? omit(provider.options ?? {}, ["apiKey"]) : omit(provider.options ?? {}, ["apiKey", "baseURL"]),
+        ),
         source: "config",
         models: existing?.models ?? {},
       }
@@ -1154,7 +603,7 @@ export namespace Provider {
     // load env
     const env = Env.all()
     for (const [providerID, provider] of Object.entries(database)) {
-      if (!isDeepSeekProvider(providerID)) continue
+      if (!isAllowedProvider(providerID)) continue
       if (disabled.has(providerID)) continue
       const apiKey = provider.env.map((item) => env[item]).find(Boolean)
       if (!apiKey) continue
@@ -1166,7 +615,7 @@ export namespace Provider {
 
     // load apikeys
     for (const [providerID, provider] of Object.entries(await Auth.all())) {
-      if (!isDeepSeekProvider(providerID)) continue
+      if (!isAllowedProvider(providerID)) continue
       if (disabled.has(providerID)) continue
       if (provider.type !== "api") continue
       mergeProvider(providerID, {
@@ -1175,31 +624,18 @@ export namespace Provider {
       })
     }
 
-    for (const [providerID, fn] of Object.entries(CUSTOM_LOADERS)) {
-      if (!isDeepSeekProvider(providerID)) continue
-      if (disabled.has(providerID)) continue
-      const data = database[providerID]
-      if (!data) {
-        log.error("Provider does not exist in model list " + providerID)
-        continue
-      }
-      const result = await fn(data)
-      if (result && (result.autoload || providers[providerID])) {
-        if (result.getModel) modelLoaders[providerID] = result.getModel
-        mergeProvider(providerID, {
-          source: "custom",
-          options: result.options,
-        })
-      }
-    }
-
     // load config
     for (const [providerID, provider] of configProviders) {
-      if (!isDeepSeekProvider(providerID)) continue
+      if (!isAllowedProvider(providerID)) continue
       const partial: Partial<Info> = { source: "config" }
-      partial.env = [DEEPSEEK_API_KEY_ENV]
+      partial.env = [isCustomProvider(providerID) ? CUSTOM_API_KEY_ENV : DEEPSEEK_API_KEY_ENV]
       if (provider.name) partial.name = provider.name
-      if (provider.options) partial.options = omit(provider.options, ["apiKey", "baseURL"])
+      // DeepSeek's baseURL is fixed by us; a custom endpoint's baseURL is the whole point of it,
+      // so it must survive into the provider options.
+      if (provider.options)
+        partial.options = isCustomProvider(providerID)
+          ? omit(provider.options, ["apiKey"])
+          : omit(provider.options, ["apiKey", "baseURL"])
       mergeProvider(providerID, partial)
     }
 
@@ -1271,7 +707,7 @@ export namespace Provider {
       log.info("found", { providerID })
     }
 
-    enforceDeepSeekOnlyProviders(providers)
+    enforceAllowedProviders(providers)
 
     return {
       models: languages,
@@ -1327,63 +763,25 @@ export namespace Provider {
           opts.signal = combined
         }
 
-        // Strip openai itemId metadata following what codex does
-        // Codex uses #[serde(skip_serializing)] on id fields for all item types:
-        // Message, Reasoning, FunctionCall, LocalShellCall, CustomToolCall, WebSearchCall
-        // IDs are only re-attached for Azure with store=true
-        if (model.api.npm === "@ai-sdk/openai" && opts.body && opts.method === "POST") {
-          const body = JSON.parse(opts.body as string)
-          const isAzure = model.providerID.includes("azure")
-          const keepIds = isAzure && body.store === true
-          if (!keepIds && Array.isArray(body.input)) {
-            for (const item of body.input) {
-              if ("id" in item) {
-                delete item.id
-              }
-            }
-            opts.body = JSON.stringify(body)
-          }
-        }
-
-        const response = await fetchFn(input, {
+        return await fetchFn(input, {
           ...opts,
           // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
           timeout: false,
         })
-
-        if (model.providerID === "google" && model.api.npm === "@ai-sdk/openai-compatible") {
-          return normalizeGoogleStreamingResponse(response)
-        }
-
-        return response
       }
 
-      // Special case: google-vertex-anthropic uses a subpath import
-      const bundledKey =
-        model.providerID === "google-vertex-anthropic" ? "@ai-sdk/google-vertex/anthropic" : model.api.npm
-      const bundledFn = BUNDLED_PROVIDERS[bundledKey]
-      if (bundledFn) {
-        log.info("using bundled provider", { providerID: model.providerID, pkg: bundledKey })
-        const loaded = bundledFn({
-          name: model.providerID,
-          ...options,
-        })
-        s.sdk.set(key, loaded)
-        return loaded as SDK
+      // Every supported model (built-in DeepSeek and any custom endpoint) speaks the
+      // OpenAI-compatible protocol, so there is exactly one SDK to construct and nothing
+      // to install at runtime.
+      const bundledFn = BUNDLED_PROVIDERS[model.api.npm]
+      if (!bundledFn) {
+        throw new Error(
+          `Unsupported provider SDK "${model.api.npm}" for ${model.providerID}/${model.id}. ` +
+            `Killstata only bundles ${OPENAI_COMPATIBLE_NPM}; a custom provider must expose an OpenAI-compatible API.`,
+        )
       }
 
-      let installedPath: string
-      if (!model.api.npm.startsWith("file://")) {
-        installedPath = await BunProc.install(model.api.npm, "latest")
-      } else {
-        log.info("loading local provider", { pkg: model.api.npm })
-        installedPath = model.api.npm
-      }
-
-      const mod = await import(installedPath)
-
-      const fn = mod[Object.keys(mod).find((key) => key.startsWith("create"))!]
-      const loaded = fn({
+      const loaded = bundledFn({
         name: model.providerID,
         ...options,
       })
@@ -1399,12 +797,14 @@ export namespace Provider {
   }
 
   export async function getModel(providerID: string, modelID: string) {
-    if (!isDeepSeekProvider(providerID)) {
-      throw new Error(deepSeekOnlyMessage(providerID, modelID))
+    if (!isAllowedProvider(providerID)) {
+      throw new Error(allowedProvidersMessage(providerID, modelID))
     }
-    const resolvedModelID = normalizeDeepSeekModelID(modelID)
+    // DeepSeek accepts a few compatibility aliases (deepseek-chat / deepseek-reasoner / ...).
+    // A custom endpoint has no aliases: the model id is whatever the user declared or we discovered.
+    const resolvedModelID = isDeepSeekProvider(providerID) ? normalizeDeepSeekModelID(modelID) : modelID
     if (!resolvedModelID) {
-      throw new Error(deepSeekOnlyMessage(providerID, modelID))
+      throw new Error(allowedProvidersMessage(providerID, modelID))
     }
     const s = await state()
     const provider = s.providers[providerID]
@@ -1472,10 +872,9 @@ export namespace Provider {
 
     if (cfg.small_model) {
       const parsed = parseModel(cfg.small_model)
-      if (!isDeepSeekProvider(parsed.providerID)) throw new Error(deepSeekOnlyMessage(parsed.providerID, parsed.modelID))
-      const modelID = normalizeDeepSeekModelID(parsed.modelID)
-      if (!modelID) throw new Error(deepSeekOnlyMessage(parsed.providerID, parsed.modelID))
-      return getModel(parsed.providerID, modelID)
+      if (!isAllowedProvider(parsed.providerID))
+        throw new Error(allowedProvidersMessage(parsed.providerID, parsed.modelID))
+      return getModel(parsed.providerID, parsed.modelID)
     }
 
     return getModel(DEEPSEEK_PROVIDER_ID, DEEPSEEK_DEFAULT_MODEL_ID)
@@ -1499,9 +898,11 @@ export namespace Provider {
     for (const configured of [cfg?.model, cfg?.small_model]) {
       if (!configured) continue
       const parsed = parseModel(configured)
-      if (!isDeepSeekProvider(parsed.providerID)) continue
+      if (!isAllowedProvider(parsed.providerID)) continue
       if (parsed.providerID !== provider.id) continue
-      const modelID = normalizeDeepSeekModelID(parsed.modelID)
+      const modelID = isDeepSeekProvider(parsed.providerID)
+        ? normalizeDeepSeekModelID(parsed.modelID)
+        : parsed.modelID
       if (modelID && provider.models[modelID]) return modelID
     }
 
@@ -1514,9 +915,12 @@ export namespace Provider {
     const cfg = await Config.get()
     if (cfg.model) {
       const parsed = parseModel(cfg.model)
-      if (!isDeepSeekProvider(parsed.providerID)) throw new Error(deepSeekOnlyMessage(parsed.providerID, parsed.modelID))
-      const modelID = normalizeDeepSeekModelID(parsed.modelID)
-      if (!modelID) throw new Error(deepSeekOnlyMessage(parsed.providerID, parsed.modelID))
+      if (!isAllowedProvider(parsed.providerID))
+        throw new Error(allowedProvidersMessage(parsed.providerID, parsed.modelID))
+      const modelID = isDeepSeekProvider(parsed.providerID)
+        ? normalizeDeepSeekModelID(parsed.modelID)
+        : parsed.modelID
+      if (!modelID) throw new Error(allowedProvidersMessage(parsed.providerID, parsed.modelID))
       return {
         providerID: parsed.providerID,
         modelID,

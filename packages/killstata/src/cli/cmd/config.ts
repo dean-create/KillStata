@@ -657,7 +657,6 @@ async function configureWorkspace(existing: Awaited<ReturnType<typeof Config.get
 }
 
 async function configureModelProvider(existing: Awaited<ReturnType<typeof Config.get>>) {
-  await ModelsDev.refresh().catch(() => {})
   const configured = parseConfiguredModel(existing.model ?? existing.small_model)
   const enabled = existing.enabled_providers ? new Set(existing.enabled_providers) : undefined
   const disabled = new Set(existing.disabled_providers ?? [])

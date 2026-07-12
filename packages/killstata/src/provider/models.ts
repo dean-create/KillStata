@@ -1,26 +1,16 @@
-﻿import { Global } from "../global"
-import { Log } from "../util/log"
-import path from "path"
 import z from "zod"
-import { data } from "./models-macro" with { type: "macro" }
-import { Installation } from "../installation"
-import { Flag } from "../flag/flag"
-import { fallbackProviders } from "./models-fallback"
+import {
+  DEEPSEEK_API_KEY_ENV,
+  DEEPSEEK_BASE_URL,
+  DEEPSEEK_DEFAULT_MODEL_ID,
+  DEEPSEEK_PRO_MODEL_ID,
+  DEEPSEEK_PROVIDER_ID,
+  DEEPSEEK_V4_CONTEXT_WINDOW_TOKENS,
+  DEEPSEEK_V4_MAX_OUTPUT_TOKENS,
+} from "./deepseek-policy"
+import { CUSTOM_API_KEY_ENV, CUSTOM_PROVIDER_ID, OPENAI_COMPATIBLE_NPM } from "./model-policy"
 
 export namespace ModelsDev {
-  const log = Log.create({ service: "models.dev" })
-  const filepath = path.join(Global.Path.cache, "models.json")
-
-  function localFallback() {
-    return fallbackProviders() satisfies Record<string, Provider>
-  }
-
-  function removeHostedProviders(providers: Record<string, Provider>) {
-    const result = { ...providers }
-    delete result.killstata
-    return result
-  }
-
   export const Model = z.object({
     id: z.string(),
     name: z.string(),
@@ -84,44 +74,54 @@ export namespace ModelsDev {
     npm: z.string().optional(),
     models: z.record(z.string(), Model),
   })
-
   export type Provider = z.infer<typeof Provider>
 
-  export async function get() {
-    if (!Flag.KILLSTATA_DISABLE_MODELS_FETCH) refresh()
-    const file = Bun.file(filepath)
-    const result = await file.json().catch(() => {})
-    if (result) return removeHostedProviders(result as Record<string, Provider>)
-    try {
-      if (typeof data === "function") {
-        const json = await data()
-        return removeHostedProviders(JSON.parse(json) as Record<string, Provider>)
-      }
-    } catch (error) {
-      log.error("failed to load embedded models.dev fallback", { error })
+  function deepSeekCatalogModel(id: string, name: string): Model {
+    return {
+      id,
+      name,
+      family: "deepseek",
+      release_date: "2026-04-24",
+      attachment: false,
+      reasoning: true,
+      temperature: true,
+      tool_call: true,
+      limit: {
+        context: DEEPSEEK_V4_CONTEXT_WINDOW_TOKENS,
+        output: DEEPSEEK_V4_MAX_OUTPUT_TOKENS,
+      },
+      modalities: { input: ["text"], output: ["text"] },
+      options: {},
     }
-    return removeHostedProviders(localFallback())
   }
 
-  export async function refresh() {
-    if (Flag.KILLSTATA_DISABLE_MODELS_FETCH) return
-    const file = Bun.file(filepath)
-    log.info("refreshing", {
-      file,
-    })
-    const url = Global.Path.modelsDevUrl
-    const result = await fetch(`${url}/api.json`, {
-      headers: {
-        "User-Agent": Installation.USER_AGENT,
+  // Killstata does not pull the models.dev catalog. It supports exactly two providers, so the
+  // catalog is a two-entry constant: the built-in DeepSeek, and a "custom" OpenAI-compatible
+  // endpoint whose models the user declares in killstata.json (or that we discover via /v1/models).
+  const BUILTIN_CATALOG: Record<string, Provider> = {
+    [DEEPSEEK_PROVIDER_ID]: {
+      id: DEEPSEEK_PROVIDER_ID,
+      name: "DeepSeek",
+      api: DEEPSEEK_BASE_URL,
+      env: [DEEPSEEK_API_KEY_ENV],
+      npm: OPENAI_COMPATIBLE_NPM,
+      models: {
+        [DEEPSEEK_DEFAULT_MODEL_ID]: deepSeekCatalogModel(DEEPSEEK_DEFAULT_MODEL_ID, "DeepSeek V4 Flash"),
+        [DEEPSEEK_PRO_MODEL_ID]: deepSeekCatalogModel(DEEPSEEK_PRO_MODEL_ID, "DeepSeek V4 Pro"),
       },
-      signal: AbortSignal.timeout(10 * 1000),
-    }).catch((e) => {
-      log.error("Failed to fetch models.dev", {
-        error: e,
-      })
-    })
-    if (result && result.ok) await Bun.write(file, await result.text())
+    },
+    [CUSTOM_PROVIDER_ID]: {
+      id: CUSTOM_PROVIDER_ID,
+      name: "Custom (OpenAI-compatible)",
+      env: [CUSTOM_API_KEY_ENV],
+      npm: OPENAI_COMPATIBLE_NPM,
+      // Left empty on purpose: the models come from killstata.json (provider.custom.models)
+      // or from probing the endpoint's /v1/models.
+      models: {},
+    },
+  }
+
+  export async function get(): Promise<Record<string, Provider>> {
+    return structuredClone(BUILTIN_CATALOG)
   }
 }
-
-setInterval(() => ModelsDev.refresh(), 60 * 1000 * 60).unref()

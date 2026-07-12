@@ -17,7 +17,7 @@ import { Vcs } from "../project/vcs"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill/skill"
 import { Auth } from "../auth"
-import { deepSeekEnvOnlyAuthMessage, isDeepSeekProvider } from "../provider/deepseek-policy"
+import { allowedProvidersMessage, isAllowedProvider } from "../provider/model-policy"
 import { Flag } from "../flag/flag"
 import { Command } from "../command"
 import { Global } from "../global"
@@ -434,8 +434,8 @@ export namespace Server {
           async (c) => {
             const providerID = c.req.valid("param").providerID
             const auth = c.req.valid("json")
-            if (!isDeepSeekProvider(providerID)) {
-              throw new Error(deepSeekEnvOnlyAuthMessage(providerID))
+            if (!isAllowedProvider(providerID)) {
+              throw new Error(allowedProvidersMessage(providerID))
             }
             await Auth.set(providerID, auth)
             // /connect 通过 HTTP 保存密钥后，刷新当前实例，避免继续使用旧 provider 缓存。
