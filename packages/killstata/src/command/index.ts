@@ -3,8 +3,6 @@ import z from "zod"
 import { Config } from "../config/config"
 import { Instance } from "../project/instance"
 import { Identifier } from "../id/id"
-import PROMPT_INITIALIZE from "./template/initialize.txt"
-import PROMPT_REVIEW from "./template/review.txt"
 import { MCP } from "../mcp"
 import { Log } from "../util/log"
 import { withTimeout } from "@/util/timeout"
@@ -66,8 +64,6 @@ export namespace Command {
   }
 
   export const Default = {
-    INIT: "init",
-    REVIEW: "review",
     WORKFLOW: "workflow",
     STAGE: "stage",
     RERUN: "rerun",
@@ -162,25 +158,6 @@ export namespace Command {
     const cfg = await Config.get()
 
     const result: Record<string, Info> = {
-      [Default.INIT]: {
-        name: Default.INIT,
-        description: "创建或更新 AGENTS.md 项目说明",
-        advanced: true,
-        get template() {
-          return PROMPT_INITIALIZE.replace("${path}", Instance.worktree)
-        },
-        hints: hints(PROMPT_INITIALIZE),
-      },
-      [Default.REVIEW]: {
-        name: Default.REVIEW,
-        description: "审查代码改动，可指定 commit、branch 或 PR，默认审查未提交改动",
-        advanced: true,
-        get template() {
-          return PROMPT_REVIEW.replace("${path}", Instance.worktree)
-        },
-        subtask: true,
-        hints: hints(PROMPT_REVIEW),
-      },
       [Default.WORKFLOW]: {
         name: Default.WORKFLOW,
         description: "查看当前计量工作流、阶段状态、校验器和下一步",

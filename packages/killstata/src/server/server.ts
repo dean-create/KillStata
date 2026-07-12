@@ -23,7 +23,6 @@ import { Command } from "../command"
 import { Global } from "../global"
 import { ProjectRoutes } from "./routes/project"
 import { SessionRoutes } from "./routes/session"
-import { PtyRoutes } from "./routes/pty"
 import { McpRoutes } from "./routes/mcp"
 import { FileRoutes } from "./routes/file"
 import { ConfigRoutes } from "./routes/config"
@@ -151,7 +150,6 @@ export namespace Server {
         )
         .use(validator("query", z.object({ directory: z.string().optional() })))
         .route("/project", ProjectRoutes())
-        .route("/pty", PtyRoutes())
         .route("/config", ConfigRoutes())
         .route("/experimental", ExperimentalRoutes())
         .route("/session", SessionRoutes())

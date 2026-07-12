@@ -42,4 +42,34 @@ describe("session.system prompt contracts", () => {
     expect(source).not.toContain("<files>")
     expect(source).not.toContain("Ripgrep.tree")
   })
+
+  test("DeepSeek models route to the dedicated deepseek prompt, not the generic fallback", async () => {
+    const { SystemPrompt } = await import("../../src/session/system")
+
+    const deepseekPrompt = SystemPrompt.provider({
+      providerID: "deepseek",
+      api: { id: "deepseek-v4-flash" },
+    } as any)
+    const genericPrompt = SystemPrompt.provider({
+      providerID: "custom",
+      api: { id: "qwen3-max" },
+    } as any)
+
+    // The DeepSeek prompt carries tool-call and grounding discipline the generic one does not.
+    expect(deepseekPrompt[0]).toContain("Tool Call Discipline")
+    expect(deepseekPrompt[0]).toContain("Grounding Discipline")
+    expect(genericPrompt[0]).not.toContain("Tool Call Discipline")
+
+    // Both still get the econometrics context appended.
+    expect(deepseekPrompt).toHaveLength(2)
+    expect(genericPrompt).toHaveLength(2)
+  })
+
+  test("anthropic spoof header is gone", () => {
+    const sourcePath = path.join(process.cwd(), "src", "session", "system.ts")
+    const source = fs.readFileSync(sourcePath, "utf-8")
+
+    expect(source).not.toContain("PROMPT_ANTHROPIC_SPOOF")
+    expect(source).not.toContain("anthropic_spoof")
+  })
 })

@@ -16,15 +16,12 @@ import { ServeCommand } from "./cli/cmd/serve"
 import { DebugCommand } from "./cli/cmd/debug"
 import { StatsCommand } from "./cli/cmd/stats"
 import { McpCommand } from "./cli/cmd/mcp"
-import { GithubCommand } from "./cli/cmd/github"
 import { ExportCommand } from "./cli/cmd/export"
 import { ImportCommand } from "./cli/cmd/import"
 import { AttachCommand } from "./cli/cmd/tui/attach"
 import { TuiThreadCommand } from "./cli/cmd/tui/thread"
-import { AcpCommand } from "./cli/cmd/acp"
 import { EOL } from "os"
 import { WebCommand } from "./cli/cmd/web"
-import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
 import { InitCommand } from "./cli/cmd/init"
 import { SkillsCommand } from "./cli/cmd/skills"
@@ -82,7 +79,6 @@ const parser = yargs(hideBin(process.argv))
   })
   .usage("\n" + UI.logo())
   .completion("completion", "generate shell completion script")
-  .command(AcpCommand)
   .command(McpCommand)
   .command(TuiThreadCommand)
   .command(AttachCommand)
@@ -99,8 +95,6 @@ const parser = yargs(hideBin(process.argv))
   .command(StatsCommand)
   .command(ExportCommand)
   .command(ImportCommand)
-  .command(GithubCommand)
-  .command(PrCommand)
   .command(SessionCommand)
   .command(ConfigCommand)
   .command(InitCommand)

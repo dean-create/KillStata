@@ -20,13 +20,11 @@ import { type ToolDefinition } from "@killstata/plugin"
 import z from "zod"
 import { Plugin } from "../plugin"
 import { WebSearchTool } from "./websearch"
-import { CodeSearchTool } from "./codesearch"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
 import { Truncate } from "./truncation"
 import { PlanExitTool, PlanEnterTool } from "./plan"
-import { ApplyPatchTool } from "./apply_patch"
 import { EconometricsTool } from "./econometrics"
 import { DataImportTool } from "./data-import"
 import { DataBatchTool } from "./data-batch"
@@ -120,10 +118,8 @@ export namespace ToolRegistry {
       TodoWriteTool,
       TodoReadTool,
       WebSearchTool,
-      CodeSearchTool,
       SkillTool,
       WorkflowTool,
-      ApplyPatchTool,
       EconometricsTool,
       RegressionTableTool,
       DataImportTool,
@@ -173,16 +169,10 @@ export namespace ToolRegistry {
       tools
         .filter((t) => {
           if (!workflowAllowed.has(t.id)) return false
-          // Enable websearch/codesearch for zen users OR via enable flag
-          if (t.id === "codesearch" || t.id === "websearch") {
+          // Enable websearch for zen users OR via enable flag
+          if (t.id === "websearch") {
             return model.providerID === "killstata" || Flag.KILLSTATA_ENABLE_EXA
           }
-
-          // use apply tool in same format as codex
-          const usePatch =
-            model.modelID.includes("gpt-") && !model.modelID.includes("oss") && !model.modelID.includes("gpt-4")
-          if (t.id === "apply_patch") return usePatch
-          if (t.id === "edit" || t.id === "write") return !usePatch
 
           return true
         })

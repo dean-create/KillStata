@@ -565,7 +565,6 @@ export namespace Config {
           question: PermissionAction.optional(),
           webfetch: PermissionAction.optional(),
           websearch: PermissionAction.optional(),
-          codesearch: PermissionAction.optional(),
           lsp: PermissionRule.optional(),
           doom_loop: PermissionAction.optional(),
         })

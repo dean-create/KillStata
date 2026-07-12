@@ -8,10 +8,10 @@ import { getStage, readDatasetManifest } from "../tool/analysis-state"
 import { relativeWithinProject } from "../tool/analysis-path"
 
 import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
-import PROMPT_ANTHROPIC_WITHOUT_TODO from "./prompt/qwen.txt"
+import PROMPT_GENERIC from "./prompt/qwen.txt"
+import PROMPT_DEEPSEEK from "./prompt/deepseek.txt"
 import PROMPT_BEAST from "./prompt/beast.txt"
 import PROMPT_GEMINI from "./prompt/gemini.txt"
-import PROMPT_ANTHROPIC_SPOOF from "./prompt/anthropic_spoof.txt"
 
 import PROMPT_CODEX from "./prompt/codex_header.txt"
 import type { Provider } from "@/provider/provider"
@@ -245,8 +245,7 @@ export namespace SystemPrompt {
     return []
   }
 
-  export function header(providerID: string) {
-    if (providerID.includes("anthropic")) return [PROMPT_ANTHROPIC_SPOOF.trim()]
+  export function header(_providerID: string): string[] {
     return []
   }
 
@@ -256,7 +255,11 @@ export namespace SystemPrompt {
 
   export function provider(model: Provider.Model) {
     let basePrompt: string
-    if (model.api.id.includes("gpt-5")) {
+    // DeepSeek is the default (and only built-in) provider, so it gets a prompt tuned for its
+    // known weak spots: tool-argument JSON discipline and grounding numbers in artifacts.
+    if (model.providerID === "deepseek" || model.api.id.includes("deepseek")) {
+      basePrompt = PROMPT_DEEPSEEK
+    } else if (model.api.id.includes("gpt-5")) {
       basePrompt = PROMPT_CODEX
     } else if (model.api.id.includes("gpt-") || model.api.id.includes("o1") || model.api.id.includes("o3")) {
       basePrompt = PROMPT_BEAST
@@ -265,7 +268,7 @@ export namespace SystemPrompt {
     } else if (model.api.id.includes("claude")) {
       basePrompt = PROMPT_ANTHROPIC
     } else {
-      basePrompt = PROMPT_ANTHROPIC_WITHOUT_TODO
+      basePrompt = PROMPT_GENERIC
     }
 
     return [basePrompt, ECONOMETRICS_CONTEXT]

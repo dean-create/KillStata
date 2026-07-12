@@ -20,7 +20,6 @@ import {
   runBundledStataMcpServer,
   StataEdition,
 } from "../../mcp/stata"
-import { createBuiltInGitGitHubMcpConfig, runBundledGitGitHubMcpServer } from "../../mcp/git-github"
 
 function getAuthStatusIcon(status: MCP.AuthStatus): string {
   switch (status) {
@@ -63,7 +62,6 @@ export const McpCommand = cmd({
     yargs
       .command(McpAddCommand)
       .command(McpStataServerCommand)
-      .command(McpGitGitHubServerCommand)
       .command(McpListCommand)
       .command(McpAuthCommand)
       .command(McpLogoutCommand)
@@ -469,11 +467,6 @@ export const McpAddCommand = cmd({
           message: "Select MCP server type or preset",
           options: [
             {
-              label: "Git & GitHub (built-in)",
-              value: "git-github",
-              hint: "Commit, push, inspect diffs, and manage PRs/issues from chat",
-            },
-            {
               label: "Stata (built-in)",
               value: "stata",
               hint: "Set a Stata path once and use Stata directly from chat",
@@ -491,15 +484,6 @@ export const McpAddCommand = cmd({
           ],
         })
         if (prompts.isCancel(type)) throw new UI.CancelledError()
-
-        if (type === "git-github") {
-          const mcpConfig = createBuiltInGitGitHubMcpConfig()
-          await addMcpToConfig("git_github", mcpConfig, configPath)
-          prompts.log.success(`Built-in Git/GitHub MCP added to ${configPath}`)
-          prompts.log.info("GitHub tools use KILLSTATA_GITHUB_TOKEN, GITHUB_TOKEN, or GH_TOKEN from your environment.")
-          prompts.outro("MCP server added successfully")
-          return
-        }
 
         if (type === "stata") {
           const stataPath = await prompts.text({
@@ -650,13 +634,6 @@ export const McpStataServerCommand = cmd({
   },
 })
 
-export const McpGitGitHubServerCommand = cmd({
-  command: "git-github-server",
-  describe: "start the built-in Git and GitHub MCP server",
-  async handler() {
-    await runBundledGitGitHubMcpServer()
-  },
-})
 
 export const McpDebugCommand = cmd({
   command: "debug <name>",

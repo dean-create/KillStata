@@ -29,7 +29,6 @@ export const WORKFLOW_READ_CORE_TOOL_IDS = [
   "workflow",
   "webfetch",
   "websearch",
-  "codesearch",
   "todoread",
   "todowrite",
 ] as const
@@ -44,7 +43,6 @@ export const WORKFLOW_KNOWN_TOOL_IDS = [
   ...WORKFLOW_ANALYSIS_SHELL_TOOL_IDS,
   "edit",
   "write",
-  "apply_patch",
   ...WORKFLOW_IMPORT_TOOL_IDS,
   ...WORKFLOW_ESTIMATE_TOOL_IDS,
   "task",
@@ -97,7 +95,6 @@ const READ_ONLY_TOOL_IDS = new Set([
   "grep",
   "webfetch",
   "websearch",
-  "codesearch",
   "todoread",
   "lsp",
 ])
@@ -109,7 +106,6 @@ const FILESYSTEM_TOOL_IDS = new Set([
   "shell",
   "edit",
   "write",
-  "apply_patch",
   "data_import",
   "data_batch",
   "econometrics",

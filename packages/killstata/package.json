@@ -46,13 +46,7 @@
     "publish:windows:latest": "bun run publish:windows",
     "prepublishOnly": "node ./script/guard-source-publish.mjs",
     "release:windows:latest": "bun run script/release-windows.ts",
-    "dev": "BROWSERSLIST_IGNORE_OLD_DATA=1 bun run --conditions=browser ./src/index.ts",
-    "random": "echo 'Random script updated at $(date)' && echo 'Change queued successfully' && echo 'Another change made' && echo 'Yet another change' && echo 'One more change' && echo 'Final change' && echo 'Another final change' && echo 'Yet another final change'",
-    "clean": "echo 'Cleaning up...' && rm -rf node_modules dist",
-    "lint": "echo 'Running lint checks...' && bun test --coverage",
-    "format": "echo 'Formatting code...' && bun run --prettier --write src/**/*.ts",
-    "docs": "echo 'Generating documentation...' && find src -name '*.ts' -exec echo 'Processing: {}' \\;",
-    "deploy": "echo 'Deploying application...' && bun run build && echo 'Deployment completed successfully'"
+    "dev": "BROWSERSLIST_IGNORE_OLD_DATA=1 bun run --conditions=browser ./src/index.ts"
   },
   "bin": {
     "killstata": "./bin/killstata"
@@ -74,7 +68,6 @@
   },
   "devDependencies": {
     "@babel/core": "7.28.4",
-    "@octokit/webhooks-types": "7.6.1",
     "@killstata/script": "workspace:*",
     "@parcel/watcher-darwin-arm64": "2.5.1",
     "@parcel/watcher-darwin-x64": "2.5.1",
@@ -96,9 +89,6 @@
     "zod-to-json-schema": "3.24.5"
   },
   "dependencies": {
-    "@actions/core": "1.11.1",
-    "@actions/github": "6.0.1",
-    "@agentclientprotocol/sdk": "0.12.0",
     "@ai-sdk/amazon-bedrock": "3.0.73",
     "@ai-sdk/anthropic": "2.0.57",
     "@ai-sdk/azure": "2.0.91",
@@ -127,8 +117,6 @@
     "@killstata/sdk": "workspace:*",
     "@killstata/util": "workspace:*",
     "@modelcontextprotocol/sdk": "1.25.2",
-    "@octokit/graphql": "9.0.2",
-    "@octokit/rest": "catalog:",
     "@openauthjs/openauth": "catalog:",
     "@openrouter/ai-sdk-provider": "1.5.2",
     "@opentui/core": "0.1.74",
@@ -141,7 +129,6 @@
     "@zip.js/zip.js": "2.7.62",
     "ai": "catalog:",
     "bonjour-service": "1.3.0",
-    "bun-pty": "0.4.4",
     "chokidar": "4.0.3",
     "clipboardy": "4.0.0",
     "decimal.js": "10.5.0",
