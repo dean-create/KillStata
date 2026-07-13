@@ -3,15 +3,10 @@ import path from "path"
 import { Filesystem } from "@/util/filesystem"
 import { ConfigMarkdown } from "@/config/markdown"
 import { NamedError } from "@killstata/util/error"
-import { Instance } from "@/project/instance"
 import z from "zod"
-import {
-  ensureKillstataHomeDirectories,
-  legacyUserSkillRoot,
-  userSkillRoot as runtimeUserSkillRoot,
-} from "@/killstata/runtime-config"
+import { ensureKillstataHomeDirectories, userSkillRoot as runtimeUserSkillRoot } from "@/killstata/runtime-config"
 
-export const SkillSource = z.enum(["builtin", "user", "project"])
+export const SkillSource = z.literal("user")
 export type SkillSource = z.infer<typeof SkillSource>
 
 export const DoctorFinding = z.object({
@@ -40,38 +35,13 @@ type GithubItem = {
   url: string
 }
 
-export function builtinSkillsRoot() {
-  return path.resolve(import.meta.dir, "../../skills/builtin")
-}
-
 export function userSkillsRoot() {
   return runtimeUserSkillRoot()
 }
 
-export function importedSkillsRoot() {
-  return path.join(userSkillsRoot(), "imported")
-}
-
-export function defaultSkillsRoot() {
-  return path.join(userSkillsRoot(), "default")
-}
-
-export function defaultSkillsManifestPath() {
-  return path.join(defaultSkillsRoot(), ".managed.json")
-}
-
-export function localSkillsRoot() {
-  return path.join(userSkillsRoot(), "local")
-}
-
-export function projectSkillsRoot() {
-  const projectRoot = Instance.worktree || Instance.directory
-  return path.join(projectRoot, ".killstata", "skills")
-}
-
 export async function ensureSkillDirectories() {
   await ensureKillstataHomeDirectories()
-  await fs.mkdir(projectSkillsRoot(), { recursive: true })
+  await fs.mkdir(userSkillsRoot(), { recursive: true })
 }
 
 export function pathWithin(parent: string, child: string) {
@@ -175,7 +145,7 @@ export async function installSkillFromGitHub(input: {
   const repo = input.repo.trim()
   const skillPath = assertSafeRelative(input.skillPath.trim(), "skillPath")
   const ref = input.ref?.trim() || "main"
-  const destinationRoot = input.destinationRoot || projectSkillsRoot()
+  const destinationRoot = input.destinationRoot || userSkillsRoot()
   const fetchFn = input.fetchFn || fetch
 
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
@@ -285,16 +255,11 @@ export async function doctorSkillFile(filePath: string) {
 
 export async function uninstallSkillDirectory(skillDir: string) {
   const allowedRoots = [
-    projectSkillsRoot(),
     userSkillsRoot(),
-    legacyUserSkillRoot(),
-    path.join(legacyUserSkillRoot(), "default"),
-    path.join(legacyUserSkillRoot(), "imported"),
-    path.join(legacyUserSkillRoot(), "local"),
   ]
   if (!allowedRoots.some((root) => pathWithin(root, skillDir))) {
     throw new InstallFromGitHubError({
-      message: `Refusing to uninstall skill outside ${projectSkillsRoot()} or ${userSkillsRoot()}`,
+      message: `Refusing to uninstall skill outside ${userSkillsRoot()}`,
     })
   }
   await fs.rm(skillDir, { recursive: true, force: true })

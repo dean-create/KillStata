@@ -7,8 +7,7 @@ import { UI } from "@/cli/ui"
 import { iife } from "@/util/iife"
 import { Log } from "@/util/log"
 import { withNetworkOptions, resolveNetworkOptions } from "@/cli/network"
-import { ensureFirstRunOnboarding, prepareFirstRunAnalysisRuntime } from "@/cli/onboarding"
-import { Instance } from "@/project/instance"
+import { ensureFirstRunOnboarding } from "@/cli/onboarding"
 import type { Event } from "@killstata/sdk/v2"
 import type { EventSource } from "./context/sdk"
 
@@ -93,12 +92,7 @@ export const TuiThreadCommand = cmd({
     }
 
     UI.clearBootNoise()
-    if (await ensureFirstRunOnboarding()) {
-      await Instance.provide({
-        directory: cwd,
-        fn: prepareFirstRunAnalysisRuntime,
-      })
-    }
+    await ensureFirstRunOnboarding()
 
     const worker = new Worker(workerPath, {
       env: Object.fromEntries(

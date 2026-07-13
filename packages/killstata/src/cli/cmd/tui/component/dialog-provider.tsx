@@ -175,8 +175,8 @@ export function DialogProvider() {
   const options = createDialogProviderOptions()
   return (
     <DialogSelect
-      title={`Connect a provider (API key only, ${options().length} options)`}
-      placeholder="Search all providers"
+      title={`Advanced provider settings (${options().length} options)`}
+      placeholder="Choose a provider"
       options={options()}
       scrollbarVisible
     />

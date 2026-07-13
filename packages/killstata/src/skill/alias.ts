@@ -1,6 +1,6 @@
 import fs from "fs/promises"
 import path from "path"
-import { projectSkillsRoot } from "./manage"
+import { userSkillsRoot } from "./manage"
 import { Skill } from "./skill"
 
 export type SkillAliasDefinition = {
@@ -137,7 +137,7 @@ export function formatSkillAliasText(aliases: SkillAliasAvailability[]) {
 
 export async function writeSkillAliasReport(aliases?: SkillAliasAvailability[]) {
   const resolved = aliases ?? (await resolveSkillAliasAvailability())
-  const destination = path.join(projectSkillsRoot(), "killstata-skill-alias-report.json")
+  const destination = path.join(userSkillsRoot(), "killstata-skill-alias-report.json")
   await fs.mkdir(path.dirname(destination), { recursive: true })
   await fs.writeFile(destination, JSON.stringify({ generatedAt: new Date().toISOString(), aliases: resolved }, null, 2), "utf-8")
   return destination

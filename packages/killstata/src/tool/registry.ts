@@ -3,7 +3,6 @@ import { BashTool, ShellTool } from "./bash"
 import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
-import { BatchTool } from "./batch"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
 import { TodoWriteTool, TodoReadTool } from "./todo"
@@ -22,18 +21,11 @@ import { Plugin } from "../plugin"
 import { WebSearchTool } from "./websearch"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
-import { LspTool } from "./lsp"
 import { Truncate } from "./truncation"
-import { PlanExitTool, PlanEnterTool } from "./plan"
 import { EconometricsTool } from "./econometrics"
 import { DataImportTool } from "./data-import"
-import { DataBatchTool } from "./data-batch"
-import { ManufacturingAnalysisTool } from "./manufacturing-analysis"
-import { RegressionTableTool } from "./regression-table"
-import { ResearchBriefTool } from "./research-brief"
 import { HeterogeneityRunnerTool } from "./heterogeneity-runner"
-import { PaperDraftTool } from "./paper-draft"
-import { SlideGeneratorTool } from "./slide-generator"
+import { ExperimentLogTool } from "./experiment-log"
 import { WorkflowTool } from "./workflow"
 import { resolveToolAvailability, workflowToolPolicy } from "@/runtime/workflow"
 import type { ToolAvailabilityPolicy } from "@/runtime/types"
@@ -121,17 +113,9 @@ export namespace ToolRegistry {
       SkillTool,
       WorkflowTool,
       EconometricsTool,
-      RegressionTableTool,
       DataImportTool,
-      DataBatchTool,
-      ManufacturingAnalysisTool,
-      ResearchBriefTool,
       HeterogeneityRunnerTool,
-      PaperDraftTool,
-      SlideGeneratorTool,
-      ...(Flag.KILLSTATA_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
-      ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
-      ...(Flag.KILLSTATA_EXPERIMENTAL_PLAN_MODE && Flag.KILLSTATA_CLIENT === "cli" ? [PlanExitTool, PlanEnterTool] : []),
+      ExperimentLogTool,
       ...custom,
     ]
   }

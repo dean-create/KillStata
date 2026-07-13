@@ -1,0 +1,9 @@
+Read the experiment log for a dataset: every regression that has been run, the data stage it used, and how the results changed between attempts.
+
+The log is written automatically after each estimation — you do not need to generate it. Use this tool to answer questions like:
+
+- "How many specifications have we tried?"
+- "What happened to the coefficient after we dropped 2015-2018?"
+- "Which sample gave the most significant result?"
+
+The log records every attempt, including the ones that were not significant. When reporting findings, disclose the specifications that were tried rather than only the one that worked — selectively reporting a single significant specification while hiding the rest is p-hacking.

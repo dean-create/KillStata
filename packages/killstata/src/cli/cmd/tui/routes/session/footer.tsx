@@ -89,7 +89,7 @@ export function Footer() {
         <Switch>
           <Match when={store.welcome}>
             <text fg={theme.text}>
-              Get started <span style={{ fg: theme.textMuted }}>/connect</span>
+              Restart to add your API key
             </text>
           </Match>
           <Match when={connected()}>

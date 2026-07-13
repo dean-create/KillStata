@@ -1,4 +1,3 @@
-import os from "os"
 import path from "path"
 import { Config } from "@/config/config"
 import { Filesystem } from "@/util/filesystem"
@@ -7,19 +6,13 @@ import { Global } from "@/global"
 import { Instance } from "@/project/instance"
 import { Log } from "@/util/log"
 import type { MessageV2 } from "./message-v2"
-import { userWorkspaceAgentsPath, userWorkspaceMemoryPath, userWorkspaceUserPath } from "@/killstata/runtime-config"
 
 const log = Log.create({ service: "session.instruction" })
-const FILES = ["AGENTS.md", ...(Flag.KILLSTATA_DISABLE_CLAUDE_CODE_PROMPT ? [] : ["CLAUDE.md"]), "CONTEXT.md"]
-const USER_WORKSPACE_RULE_FILES = [userWorkspaceAgentsPath(), userWorkspaceMemoryPath(), userWorkspaceUserPath()]
-
+const FILES = ["AGENTS.md", "CONTEXT.md"]
 function globalFiles() {
-  const files = [path.join(Global.Path.config, "AGENTS.md"), ...USER_WORKSPACE_RULE_FILES]
+  const files = [path.join(Global.Path.config, "AGENTS.md")]
   if (Flag.KILLSTATA_CONFIG_DIR) {
     files.unshift(path.join(Flag.KILLSTATA_CONFIG_DIR, "AGENTS.md"))
-  }
-  if (!Flag.KILLSTATA_DISABLE_CLAUDE_CODE_PROMPT) {
-    files.push(path.join(os.homedir(), ".claude", "CLAUDE.md"))
   }
   return files
 }
@@ -90,7 +83,7 @@ export namespace SessionInstruction {
 
     for (const raw of config.instructions ?? []) {
       if (raw.startsWith("https://") || raw.startsWith("http://")) continue
-      const instruction = raw.startsWith("~/") ? path.join(os.homedir(), raw.slice(2)) : raw
+      const instruction = raw.startsWith("~/") ? path.join(Global.Path.home, raw.slice(2)) : raw
       let matches: string[] = []
       if (path.isAbsolute(instruction)) {
         matches = await Array.fromAsync(

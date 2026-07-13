@@ -123,100 +123,8 @@ export function managedPythonExecutable() {
     : path.join(managedPythonVenvRoot(), "bin", "python")
 }
 
-export function legacyUserSkillRoot() {
-  return path.join(userRoot(), "skill")
-}
-
 export function userSkillRoot() {
   return path.join(userRoot(), "skills")
-}
-
-export function importedSkillsRoot() {
-  return path.join(userSkillRoot(), "imported")
-}
-
-export function defaultSkillsRoot() {
-  return path.join(userSkillRoot(), "default")
-}
-
-export function localSkillsRoot() {
-  return path.join(userSkillRoot(), "local")
-}
-
-export function cachedSkillsRoot() {
-  return path.join(userSkillRoot(), "cache")
-}
-
-export function defaultSkillsManifestPath() {
-  return path.join(defaultSkillsRoot(), ".managed.json")
-}
-
-export function userWorkspaceRoot() {
-  return path.join(userRoot(), "workspace")
-}
-
-export function userWorkspaceAgentsPath() {
-  return path.join(userWorkspaceRoot(), "AGENTS.md")
-}
-
-export function userWorkspaceMemoryPath() {
-  return path.join(userWorkspaceRoot(), "MEMORY.md")
-}
-
-export function userWorkspaceUserPath() {
-  return path.join(userWorkspaceRoot(), "USER.md")
-}
-
-export function userAgentsRoot() {
-  return path.join(userRoot(), "agents")
-}
-
-export function userMainAgentRoot() {
-  return path.join(userAgentsRoot(), "main")
-}
-
-export function userMainAgentStateRoot() {
-  return path.join(userMainAgentRoot(), "agent")
-}
-
-export function userMainAgentSessionsRoot() {
-  return path.join(userMainAgentRoot(), "sessions")
-}
-
-export function userMainAgentModelsPath() {
-  return path.join(userMainAgentStateRoot(), "models.json")
-}
-
-export function userMainAgentAuthProfilesPath() {
-  return path.join(userMainAgentStateRoot(), "auth-profiles.json")
-}
-
-export function userSubagentsRoot() {
-  return path.join(userRoot(), "subagents")
-}
-
-export function userSubagentRunsPath() {
-  return path.join(userSubagentsRoot(), "runs.json")
-}
-
-export function userLogsRoot() {
-  return path.join(userRoot(), "logs")
-}
-
-export function userTmpRoot() {
-  return path.join(userRoot(), "tmp")
-}
-
-export function userStateRoot() {
-  return path.join(userRoot(), "state")
-}
-
-export function userDownloadsRoot() {
-  return path.join(userRoot(), "downloads")
-}
-
-export function userWorkspaceStatePath() {
-  return path.join(userStateRoot(), "workspace.json")
 }
 
 export function userPaths() {
@@ -229,59 +137,9 @@ export function userPaths() {
     managedRuntime: managedRuntimeRoot(),
     managedPythonInstall: managedPythonInstallRoot(),
     managedUv: managedUvExecutable(),
-    legacySkillRoot: legacyUserSkillRoot(),
     skillRoot: userSkillRoot(),
-    defaultSkills: defaultSkillsRoot(),
-    defaultSkillsManifest: defaultSkillsManifestPath(),
-    importedSkills: importedSkillsRoot(),
-    localSkills: localSkillsRoot(),
-    cachedSkills: cachedSkillsRoot(),
-    workspace: userWorkspaceRoot(),
-    workspaceAgents: userWorkspaceAgentsPath(),
-    workspaceMemory: userWorkspaceMemoryPath(),
-    workspaceUser: userWorkspaceUserPath(),
-    agents: userAgentsRoot(),
-    mainAgentRoot: userMainAgentRoot(),
-    mainAgentState: userMainAgentStateRoot(),
-    mainAgentSessions: userMainAgentSessionsRoot(),
-    mainAgentModels: userMainAgentModelsPath(),
-    mainAgentAuthProfiles: userMainAgentAuthProfilesPath(),
-    subagents: userSubagentsRoot(),
-    subagentRuns: userSubagentRunsPath(),
-    logs: userLogsRoot(),
-    tmp: userTmpRoot(),
-    state: userStateRoot(),
-    workspaceState: userWorkspaceStatePath(),
-    downloads: userDownloadsRoot(),
   }
 }
-
-const USER_WORKSPACE_AGENTS_TEMPLATE = `# Killstata User-Level Rules
-
-Use this file for global Killstata preferences that should apply across projects.
-
-- Put durable personal defaults here.
-- Keep project-specific implementation rules in the project's AGENTS.md.
-- Update this file when the user wants Killstata's default behavior to change globally.
-`
-
-const USER_WORKSPACE_MEMORY_TEMPLATE = `# Killstata Persistent Memory
-
-Store only information the user explicitly asked Killstata to remember long term.
-
-- Do not store temporary task context here.
-- Prefer concise, durable rules and preferences.
-- Remove outdated items when the user supersedes them.
-`
-
-const USER_WORKSPACE_USER_TEMPLATE = `# Killstata User Profile
-
-Summarize stable user preferences or working style only when the user explicitly asks to update this profile.
-
-- This file is read by default.
-- Do not auto-write session summaries here.
-- Keep entries short and behavior-focused.
-`
 
 export function shortenHomePath(input: string) {
   const home = Global.Path.home
@@ -807,82 +665,9 @@ export async function writeUserConfigPatch(input: Config.Info) {
   await writeUserConfigValues(values)
 }
 
-async function ensureJsonFile(filepath: string, fallback: unknown) {
-  if (fs.existsSync(filepath)) return
-  fs.mkdirSync(path.dirname(filepath), { recursive: true })
-  await Bun.write(filepath, JSON.stringify(fallback, null, 2))
-}
-
-async function ensureTextFile(filepath: string, fallback: string) {
-  if (fs.existsSync(filepath)) return
-  fs.mkdirSync(path.dirname(filepath), { recursive: true })
-  await Bun.write(filepath, fallback)
-}
-
 export async function ensureKillstataHomeDirectories() {
   const paths = userPaths()
-
   fs.mkdirSync(paths.root, { recursive: true })
-
-  if (fs.existsSync(paths.legacySkillRoot) && !fs.existsSync(paths.skillRoot)) {
-    fs.renameSync(paths.legacySkillRoot, paths.skillRoot)
-  }
-
-  if (fs.existsSync(paths.legacySkillRoot) && fs.existsSync(paths.skillRoot)) {
-    for (const entry of fs.readdirSync(paths.legacySkillRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const source = path.join(paths.legacySkillRoot, entry.name)
-      const target = path.join(paths.skillRoot, entry.name)
-      if (fs.existsSync(target)) continue
-      fs.renameSync(source, target)
-    }
-    if (fs.readdirSync(paths.legacySkillRoot).length === 0) {
-      fs.rmSync(paths.legacySkillRoot, { recursive: true, force: true })
-    }
-  }
-
-  const legacySkillRoots = [paths.defaultSkills, paths.importedSkills, paths.localSkills]
-  for (const legacyRoot of legacySkillRoots) {
-    if (!fs.existsSync(legacyRoot)) continue
-    for (const entry of fs.readdirSync(legacyRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const source = path.join(legacyRoot, entry.name)
-      const target = path.join(paths.skillRoot, entry.name)
-      if (fs.existsSync(target)) continue
-      fs.renameSync(source, target)
-    }
-    const leftovers = fs.readdirSync(legacyRoot)
-    if (leftovers.length === 0) {
-      fs.rmSync(legacyRoot, { recursive: true, force: true })
-    }
-  }
-
-  const directories = [
-    paths.managedPythonVenv,
-    paths.workspace,
-    paths.agents,
-    paths.mainAgentRoot,
-    paths.mainAgentState,
-    paths.mainAgentSessions,
-    paths.subagents,
-    paths.logs,
-    paths.tmp,
-    paths.state,
-    paths.downloads,
-  ]
-
-  for (const dir of directories) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-
-  await ensureJsonFile(paths.mainAgentModels, {})
-  await ensureJsonFile(paths.mainAgentAuthProfiles, {})
-  await ensureJsonFile(paths.subagentRuns, [])
-  await ensureJsonFile(paths.workspaceState, {})
-  await ensureTextFile(paths.workspaceAgents, USER_WORKSPACE_AGENTS_TEMPLATE)
-  await ensureTextFile(paths.workspaceMemory, USER_WORKSPACE_MEMORY_TEMPLATE)
-  await ensureTextFile(paths.workspaceUser, USER_WORKSPACE_USER_TEMPLATE)
-
   return paths
 }
 

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import fs from "fs"
+import path from "path"
 import { hasFirstRunCredential } from "@/cli/onboarding"
 
 describe("first-run onboarding", () => {
@@ -33,5 +35,10 @@ describe("first-run onboarding", () => {
         },
       }),
     ).toBe(false)
+  })
+
+  test("starts the interface immediately instead of prewarming the analysis runtime", () => {
+    const threadSource = fs.readFileSync(path.join(process.cwd(), "src", "cli", "cmd", "tui", "thread.ts"), "utf-8")
+    expect(threadSource).not.toContain("prepareFirstRunAnalysisRuntime")
   })
 })

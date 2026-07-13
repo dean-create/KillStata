@@ -28,11 +28,11 @@ import {
   runPostEstimationGates,
 } from "./analysis-reflection"
 import { AnalysisIntent } from "./analysis-intent"
+import { refreshExperimentLog } from "./analysis-experiment-log"
 import {
   createEconometricsNumericSnapshot,
   type NumericSnapshotDocument,
 } from "./analysis-grounding"
-import { generateRegressionTable } from "./regression-table"
 import { relativeWithinProject, resolveToolPath } from "./analysis-path"
 import {
   artifactGroup,
@@ -279,6 +279,7 @@ type PythonResult = {
   narrative_path?: string
   summary_path?: string
   numeric_snapshot_path?: string
+  experiment_log_path?: string
   qa_status?: string
   warnings?: string[]
   blocking_errors?: string[]
@@ -293,10 +294,6 @@ type PythonResult = {
   run_id?: string
   branch?: string
   table_variables?: string[]
-  academic_table_markdown_path?: string
-  academic_table_latex_path?: string
-  academic_table_workbook_path?: string
-  academic_table_docx_path?: string
   delivery_report_docx_path?: string
   final_analysis_workbook_path?: string
   journal_paper_docx_path?: string
@@ -833,10 +830,6 @@ function buildEconometricsPresentation(input: {
       artifactGroup("可引用表格", [
         presentationArtifact("系数表 CSV", result.coefficients_path),
         presentationArtifact("系数表工作簿", result.workbook_path),
-        presentationArtifact("三线表 Markdown", result.academic_table_markdown_path),
-        presentationArtifact("三线表 LaTeX", result.academic_table_latex_path),
-        presentationArtifact("三线表 Excel", result.academic_table_workbook_path),
-        presentationArtifact("三线表 Word", result.academic_table_docx_path),
       ]),
       artifactGroup("诊断与风险", [
         presentationArtifact("诊断文件", result.diagnostics_path),
@@ -3804,34 +3797,6 @@ except Exception as e:
     const publishedFiles: EconometricsPublishedFile[] = []
     let deliveryBundlePath: string | undefined
 
-    if (hasNonEmptyCoefficientTable(result.coefficients_path)) {
-      try {
-        const tableResult = await generateRegressionTable({
-          title: regressionTableTitle(params.methodName),
-          modelDirs: [outputDir],
-          columnLabels: ["(1)"],
-          columnSubtitles: [regressionTableSubtitle(params.methodName)],
-          variables: result.table_variables,
-          notes: undefined,
-          formats: ["markdown", "latex", "xlsx", "docx"],
-          outputDir,
-          branch,
-          runId: effectiveRunId,
-        }, ctx)
-        if (tableResult.success) {
-          result.academic_table_markdown_path = tableResult.markdown_path
-          result.academic_table_latex_path = tableResult.latex_path
-          result.academic_table_workbook_path = tableResult.workbook_path
-          result.academic_table_docx_path = tableResult.docx_path
-        }
-      } catch (error) {
-        log.warn("failed to generate academic table", {
-          method: params.methodName,
-          error: String(error),
-        })
-      }
-    }
-
     let numericSnapshot: NumericSnapshotDocument | undefined
     if (result.output_path) {
       numericSnapshot = createEconometricsNumericSnapshot({
@@ -3892,48 +3857,6 @@ except Exception as e:
       methodName: params.methodName,
     })
 
-    if (params.methodName === "panel_fe_regression") {
-      try {
-        result.delivery_report_docx_path = await generateBaselineReportDocx({
-          methodName: params.methodName,
-          outputDir,
-          pythonCommand,
-          result,
-          dependentVar: params.dependentVar,
-          treatmentVar: params.treatmentVar,
-          covariates: params.covariates,
-          entityVar: params.entityVar,
-          timeVar: params.timeVar,
-          clusterVar: params.clusterVar,
-          qaGateReason: qaGate.qaGateReason,
-        })
-      } catch (error) {
-        log.warn("failed to generate baseline report docx", {
-          method: params.methodName,
-          error: String(error),
-        })
-      }
-    }
-
-    const shouldGenerateJournalPaper =
-      (params.options?.["generateJournalPaper"] === true || params.options?.["generate_journal_paper"] === true) &&
-      hasSignificantRegressionResult(result)
-    if (shouldGenerateJournalPaper) {
-      result.journal_paper_docx_path = await generateJournalPaperDocx({
-        methodName: params.methodName,
-        outputDir,
-        pythonCommand,
-        result,
-        dependentVar: params.dependentVar,
-        treatmentVar: params.treatmentVar,
-        covariates: params.covariates,
-        entityVar: params.entityVar,
-        timeVar: params.timeVar,
-        clusterVar: params.clusterVar,
-        qaGateReason: qaGate.qaGateReason,
-      })
-    }
-
     if (datasetManifest) {
       appendArtifact(datasetManifest, {
         artifactId: `${params.methodName}_${Date.now()}`,
@@ -3954,8 +3877,22 @@ except Exception as e:
           warnings: result.warnings,
           blocking_errors: result.blocking_errors,
           suggested_repairs: result.suggested_repairs,
+          // 实验日志要靠它复原"这一次到底是怎么设定的"
+          spec: {
+            dependentVar: params.dependentVar,
+            treatmentVar: params.treatmentVar,
+            covariates: params.covariates,
+            entityVar: params.entityVar,
+            timeVar: params.timeVar,
+            clusterVar: params.clusterVar,
+          },
         },
       })
+
+      // 每跑完一次回归就把实验日志刷新一遍。做成自动而非"等模型想起来调工具"，
+      // 是因为留痕的价值恰恰在于它不依赖任何人记得——包括模型。
+      const logPath = refreshExperimentLog(datasetManifest.datasetId)
+      if (logPath) result.experiment_log_path = logPath
     }
 
     const stageKey = params.stageId ?? sourceStage?.stageId ?? result.stage_id ?? "stage"
@@ -3995,24 +3932,6 @@ except Exception as e:
       `${params.methodName}_analysis_workbook`,
       result.final_analysis_workbook_path,
       `计量分析数据_${sanitizeDeliveryFilePart(params.methodName)}.xlsx`,
-    )
-    publish(
-      `${params.methodName}_academic_latex`,
-      `${params.methodName}_table_latex`,
-      result.academic_table_latex_path,
-      `三线表_${sanitizeDeliveryFilePart(params.methodName)}.tex`,
-    )
-    publish(
-      `${params.methodName}_academic_docx`,
-      `${params.methodName}_table_docx`,
-      result.academic_table_docx_path,
-      `三线表_${sanitizeDeliveryFilePart(params.methodName)}.docx`,
-    )
-    publish(
-      `${params.methodName}_journal_paper`,
-      `${params.methodName}_journal_paper`,
-      result.journal_paper_docx_path,
-      `期刊小论文_${sanitizeDeliveryFilePart(params.methodName)}.docx`,
     )
 
     if (result.output_path) {
@@ -4076,10 +3995,6 @@ except Exception as e:
     if (result.narrative_path) output += `- Narrative summary: ${relativeWithinProject(result.narrative_path)}\n`
     if (result.numeric_snapshot_path) output += `- Numeric snapshot: ${relativeWithinProject(result.numeric_snapshot_path)}\n`
     if (result.final_analysis_workbook_path) output += `- Final analysis Excel: ${relativeWithinProject(result.final_analysis_workbook_path)}\n`
-    if (result.academic_table_markdown_path) output += `- Three-line table Markdown: ${relativeWithinProject(result.academic_table_markdown_path)}\n`
-    if (result.academic_table_latex_path) output += `- Three-line table LaTeX: ${relativeWithinProject(result.academic_table_latex_path)}\n`
-    if (result.academic_table_workbook_path) output += `- Three-line table Excel: ${relativeWithinProject(result.academic_table_workbook_path)}\n`
-    if (result.academic_table_docx_path) output += `- Three-line table Word: ${relativeWithinProject(result.academic_table_docx_path)}\n`
     if (result.delivery_report_docx_path) output += `- Result report Word: ${relativeWithinProject(result.delivery_report_docx_path)}\n`
     output += `- Concise result summary: ${relativeWithinProject(conciseResultPath)}\n`
     if (result.output_path) output += `- Result JSON: ${relativeWithinProject(result.output_path)}\n`

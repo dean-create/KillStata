@@ -1,7 +1,6 @@
 import * as prompts from "@clack/prompts"
 import { Auth, type Auth as AuthType } from "@/auth"
 import { UI } from "@/cli/ui"
-import { ensureRuntimePythonReady } from "@/killstata/runtime-config"
 import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_PROVIDER_ID } from "@/provider/deepseek-policy"
 import { CUSTOM_API_KEY_ENV, CUSTOM_PROVIDER_ID } from "@/provider/model-policy"
 
@@ -31,8 +30,8 @@ async function hasExistingCredential() {
 }
 
 /**
- * The default product path only needs a model credential. Python, MCP, skills,
- * and filesystem locations are managed later or through advanced settings.
+ * The default product path only needs a model credential. The analysis runtime
+ * and its storage are managed internally; advanced settings are model-only.
  */
 export async function ensureFirstRunOnboarding() {
   if (await hasExistingCredential()) return false
@@ -55,20 +54,6 @@ export async function ensureFirstRunOnboarding() {
     key,
   })
 
-  prompts.outro("Ready. Starting KillStata…")
+  prompts.outro("Ready. Ask KillStata to analyze data when you are ready.")
   return true
-}
-
-export async function prepareFirstRunAnalysisRuntime() {
-  const spinner = prompts.spinner()
-  spinner.start("Preparing data analysis tools")
-  try {
-    const status = await ensureRuntimePythonReady()
-    if (!status.ok || status.missing.length > 0) throw new Error(status.error ?? "Analysis tools are incomplete.")
-    spinner.stop("Data analysis tools are ready")
-    return true
-  } catch {
-    spinner.stop("Data analysis tools will finish preparing when you first analyze data", 1)
-    return false
-  }
 }

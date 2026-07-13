@@ -5,7 +5,6 @@ import {
 } from "@/runtime/tool-catalog"
 import { toolExecutionTraits } from "@/runtime/tool-policy"
 import { allowMcpToolForWorkflow, explainMcpToolForWorkflow, resolveToolAvailability } from "@/runtime/workflow"
-import { validateBatchableToolCall } from "@/tool/batch"
 
 describe("runtime tool policy", () => {
   test("workflow tool catalog uses real todo ids and has no duplicate known ids", () => {
@@ -43,14 +42,6 @@ describe("runtime tool policy", () => {
     })
   })
 
-  test("batch only accepts read-only tool calls", () => {
-    expect(() => validateBatchableToolCall("read", { filePath: "README.md" })).not.toThrow()
-    expect(() => validateBatchableToolCall("workflow", { action: "tools" })).not.toThrow()
-
-    expect(() => validateBatchableToolCall("data_import", { action: "import" })).toThrow(/not safe for batch/)
-    expect(() => validateBatchableToolCall("workflow", { action: "rerun" })).toThrow(/not safe for batch/)
-    expect(() => validateBatchableToolCall("batch", {})).toThrow(/not allowed in batch/)
-  })
 
   test("mcp gating allows only safe non-Stata sidecars after core workflow stages", () => {
     const safePolicy = {
@@ -87,11 +78,10 @@ describe("runtime tool policy", () => {
         platformCapabilities: { mcp: true, images: true, remote: false },
         modelCapabilities: { supportsTools: true, supportsImages: true },
       },
-      toolIDs: ["read", "workflow", "data_import", "data_batch", "econometrics"],
+      toolIDs: ["read", "workflow", "data_import", "econometrics"],
     })
 
     expect(available.directToolIDs).toContain("data_import")
-    expect(available.directToolIDs).toContain("data_batch")
     expect(available.deferredToolIDs).toContain("econometrics")
   })
 })

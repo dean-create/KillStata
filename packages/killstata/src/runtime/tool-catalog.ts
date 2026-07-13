@@ -34,9 +34,9 @@ export const WORKFLOW_READ_CORE_TOOL_IDS = [
 ] as const
 
 export const WORKFLOW_ANALYSIS_SHELL_TOOL_IDS = ["bash", "shell"] as const
-export const WORKFLOW_IMPORT_TOOL_IDS = ["data_import", "data_batch"] as const
-export const WORKFLOW_ESTIMATE_TOOL_IDS = ["econometrics", "regression_table"] as const
-export const WORKFLOW_REPORT_TOOL_IDS = ["regression_table", "research_brief", "paper_draft", "slide_generator"] as const
+export const WORKFLOW_IMPORT_TOOL_IDS = ["data_import"] as const
+export const WORKFLOW_ESTIMATE_TOOL_IDS = ["econometrics"] as const
+export const WORKFLOW_REPORT_TOOL_IDS = ["experiment_log"] as const
 
 export const WORKFLOW_KNOWN_TOOL_IDS = [
   ...WORKFLOW_READ_CORE_TOOL_IDS,
@@ -46,11 +46,7 @@ export const WORKFLOW_KNOWN_TOOL_IDS = [
   ...WORKFLOW_IMPORT_TOOL_IDS,
   ...WORKFLOW_ESTIMATE_TOOL_IDS,
   "task",
-  "manufacturing_analysis",
   "heterogeneity_runner",
-  "research_brief",
-  "paper_draft",
-  "slide_generator",
   "batch",
   "lsp",
   "plan_enter",
@@ -60,7 +56,7 @@ export const WORKFLOW_KNOWN_TOOL_IDS = [
 export const WORKFLOW_INPUT_INTENT_TOOL_BUNDLES = {
   ingest: [...WORKFLOW_READ_CORE_TOOL_IDS, ...WORKFLOW_IMPORT_TOOL_IDS],
   status: [...WORKFLOW_READ_CORE_TOOL_IDS],
-  verify: [...WORKFLOW_READ_CORE_TOOL_IDS, "regression_table"],
+  verify: [...WORKFLOW_READ_CORE_TOOL_IDS],
   repair: [
     ...WORKFLOW_READ_CORE_TOOL_IDS,
     ...WORKFLOW_ANALYSIS_SHELL_TOOL_IDS,
@@ -84,7 +80,7 @@ export const WORKFLOW_REPAIR_ONLY_BUNDLES = {
   preprocess_or_filter: ["workflow", "read", "glob", "grep", "skill", ...WORKFLOW_IMPORT_TOOL_IDS],
   describe_or_diagnostics: ["workflow", "read", "glob", "grep", "skill", ...WORKFLOW_IMPORT_TOOL_IDS],
   baseline_estimate: ["workflow", "read", "glob", "grep", "skill", ...WORKFLOW_IMPORT_TOOL_IDS, ...WORKFLOW_ESTIMATE_TOOL_IDS],
-  verifier: ["workflow", "read", "glob", "grep", "skill", "regression_table"],
+  verifier: ["workflow", "read", "glob", "grep", "skill"],
   report: ["workflow", "read", "glob", "grep", "skill"],
 } as const satisfies Record<WorkflowStageKind, readonly string[]>
 
@@ -107,14 +103,8 @@ const FILESYSTEM_TOOL_IDS = new Set([
   "edit",
   "write",
   "data_import",
-  "data_batch",
   "econometrics",
-  "regression_table",
-  "research_brief",
   "heterogeneity_runner",
-  "paper_draft",
-  "slide_generator",
-  "manufacturing_analysis",
 ])
 
 export function uniqueToolIDs(tools: readonly string[]) {

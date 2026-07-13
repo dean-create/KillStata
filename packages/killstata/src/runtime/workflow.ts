@@ -1793,10 +1793,6 @@ async function loadWorkflowExecutableTool(toolName: string) {
       const { EconometricsTool } = await import("@/tool/econometrics")
       return EconometricsTool
     }
-    case "regression_table": {
-      const { RegressionTableTool } = await import("@/tool/regression-table")
-      return RegressionTableTool
-    }
     case "workflow": {
       const { WorkflowTool } = await import("@/tool/workflow")
       return WorkflowTool

@@ -22,7 +22,6 @@ import { TuiThreadCommand } from "./cli/cmd/tui/thread"
 import { EOL } from "os"
 import { SessionCommand } from "./cli/cmd/session"
 import { ConfigCommand } from "./cli/cmd/config"
-import { ensureKillstataHomeDirectories } from "./killstata/runtime-config"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -66,8 +65,6 @@ const parser = yargs(hideBin(process.argv))
 
     process.env.AGENT = "1"
     process.env.KILLSTATA = "1"
-    await ensureKillstataHomeDirectories()
-
     Log.Default.info("killstata", {
       version: Installation.VERSION,
       args: process.argv.slice(2),
