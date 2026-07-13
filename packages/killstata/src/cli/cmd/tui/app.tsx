@@ -545,15 +545,14 @@ function App() {
       category: "System",
     },
     {
-      title: "Exit the app",
+      title: "退出 killstata",
       value: "app.exit",
-      hidden: !showAdvancedCommands(),
       slash: {
         name: "exit",
         aliases: ["quit", "q"],
       },
       onSelect: () => exit(),
-      category: "System",
+      category: "核心",
     },
     {
       title: "Toggle debug panel",
