@@ -86,7 +86,7 @@ export const ConfigRoutes = lazy(() =>
         const providers = await Provider.list().then((x) => mapValues(x, (item) => item))
         return c.json({
           providers: Object.values(providers),
-          default: mapValues(providers, (item) => Provider.defaultModelID(item, config)),
+          default: Provider.defaultModelIDs(providers, config),
         })
       },
     ),

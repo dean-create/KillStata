@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
+import { mapValues } from "remeda"
 import { Instance } from "@/project/instance"
 import { Provider } from "@/provider/provider"
+import { ModelsDev } from "@/provider/models"
 import { ProviderAuth } from "@/provider/auth"
 import { DEEPSEEK_DEFAULT_MODEL_ID, DEEPSEEK_PROVIDER_ID } from "@/provider/deepseek-policy"
 import { CUSTOM_PROVIDER_ID, allowedProvidersMessage, isAllowedProvider } from "@/provider/model-policy"
@@ -95,5 +97,23 @@ describe("provider allowlist (deepseek + custom)", () => {
     await withProject(async () => {
       await expect(ProviderAuth.api({ providerID: CUSTOM_PROVIDER_ID, key: "custom-key" })).resolves.toBeUndefined()
     })
+  })
+
+  // 回归测试：一个全新用户没有任何配置、也没有 API key 时，provider 列表接口必须能返回。
+  // 曾经的 bug：目录里的 "custom" 是个空模板（没有模型），而列表接口对每个 provider 都
+  // 调用 defaultModelID，遇到空模型直接抛 "no models found for provider custom"，
+  // 结果 TUI 一启动就崩——用户连进去配 key 的机会都没有。
+  test("a provider with no models yet is skipped, not fatal (zero-config startup must work)", async () => {
+    const catalog = await ModelsDev.get()
+    const providers = mapValues(catalog, (item) => Provider.fromModelsDevProvider(item))
+
+    // custom 在目录里，但它还没有任何模型。
+    expect(providers[CUSTOM_PROVIDER_ID]).toBeDefined()
+    expect(Object.keys(providers[CUSTOM_PROVIDER_ID].models)).toHaveLength(0)
+
+    // 这一步过去会抛错，现在必须安然返回，且只给出真正可用的 provider 的默认模型。
+    const defaults = Provider.defaultModelIDs(providers, {})
+    expect(defaults[DEEPSEEK_PROVIDER_ID]).toBe(DEEPSEEK_DEFAULT_MODEL_ID)
+    expect(defaults[CUSTOM_PROVIDER_ID]).toBeUndefined()
   })
 })

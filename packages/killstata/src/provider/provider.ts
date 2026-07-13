@@ -911,6 +911,18 @@ export namespace Provider {
     return model.id
   }
 
+  // 目录里的 "custom" 是一个空模板：用户声明 baseURL + models 之前它没有任何模型，
+  // 因此也谈不上"默认模型"。列表接口必须跳过它，而不是让 defaultModelID 抛错、
+  // 把整个 provider 列表（以及依赖它的 TUI 启动）一起拖垮。
+  export function defaultModelIDs(providers: Record<string, Info>, cfg?: { model?: string; small_model?: string }) {
+    const result: Record<string, string> = {}
+    for (const [providerID, provider] of Object.entries(providers)) {
+      if (Object.keys(provider.models).length === 0) continue
+      result[providerID] = defaultModelID(provider, cfg)
+    }
+    return result
+  }
+
   export async function defaultModel() {
     const cfg = await Config.get()
     if (cfg.model) {
