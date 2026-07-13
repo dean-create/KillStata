@@ -364,30 +364,6 @@ export function Session() {
   const command = useCommandDialog()
   command.register(() => [
     {
-      title: "分享会话",
-      description: "生成并复制当前会话分享链接",
-      value: "session.share",
-      suggested: route.type === "session",
-      keybind: "session_share",
-      category: "会话",
-      enabled: sync.data.config.share !== "disabled" && !session()?.share?.url,
-      slash: {
-        name: "share",
-      },
-      onSelect: async (dialog) => {
-        await sdk.client.session
-          .share({
-            sessionID: route.sessionID,
-          })
-          .then((res) =>
-            Clipboard.copy(res.data!.share!.url).catch(() => toast.show({ message: "复制链接到剪贴板失败", variant: "error" })),
-          )
-          .then(() => toast.show({ message: "分享链接已复制到剪贴板", variant: "success" }))
-          .catch(() => toast.show({ message: "分享会话失败", variant: "error" }))
-        dialog.clear()
-      },
-    },
-    {
       title: "重命名会话",
       description: "修改当前会话标题",
       value: "session.rename",
@@ -425,29 +401,6 @@ export function Session() {
       },
     },
     {
-      title: "从消息创建分支",
-      description: "从选中的历史消息派生一个新会话",
-      value: "session.fork",
-      keybind: "session_fork",
-      category: "会话",
-      slash: {
-        name: "fork",
-      },
-      onSelect: (dialog) => {
-        dialog.replace(() => (
-          <DialogForkFromTimeline
-            onMove={(messageID) => {
-              const child = scroll.getChildren().find((child) => {
-                return child.id === messageID
-              })
-              if (child) scroll.scrollBy(child.y - scroll.y - 1)
-            }}
-            sessionID={route.sessionID}
-          />
-        ))
-      },
-    },
-    {
       title: "压缩会话上下文",
       description: "总结当前会话，减少后续上下文占用",
       value: "session.compact",
@@ -472,26 +425,6 @@ export function Session() {
           modelID: selectedModel.modelID,
           providerID: selectedModel.providerID,
         })
-        dialog.clear()
-      },
-    },
-    {
-      title: "取消分享会话",
-      description: "撤销当前会话的分享链接",
-      value: "session.unshare",
-      keybind: "session_unshare",
-      category: "会话",
-      enabled: !!session()?.share?.url,
-      slash: {
-        name: "unshare",
-      },
-      onSelect: async (dialog) => {
-        await sdk.client.session
-          .unshare({
-            sessionID: route.sessionID,
-          })
-          .then(() => toast.show({ message: "已取消会话分享", variant: "success" }))
-          .catch(() => toast.show({ message: "取消分享会话失败", variant: "error" }))
         dialog.clear()
       },
     },
@@ -611,19 +544,6 @@ export function Session() {
       },
       onSelect: (dialog) => {
         setShowThinking((prev) => !prev)
-        dialog.clear()
-      },
-    },
-    {
-      title: "切换 diff 自动换行",
-      description: "切换代码差异视图的自动换行",
-      value: "session.toggle.diffwrap",
-      category: "会话",
-      slash: {
-        name: "diffwrap",
-      },
-      onSelect: (dialog) => {
-        setDiffWrapMode((prev) => (prev === "word" ? "none" : "word"))
         dialog.clear()
       },
     },

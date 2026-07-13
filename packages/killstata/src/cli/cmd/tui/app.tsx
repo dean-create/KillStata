@@ -417,6 +417,7 @@ function App() {
     },
     {
       title: "智能体",
+      hidden: !showAdvancedCommands(),
       description: "切换 Analyst、Explorer 等工作智能体",
       value: "agent.list",
       keybind: "agent_list",
@@ -528,16 +529,6 @@ function App() {
       hidden: !showAdvancedCommands(),
       onSelect: () => {
         open("https://killstata.io/docs").catch(() => { })
-        dialog.clear()
-      },
-      category: "System",
-    },
-    {
-      title: "Open WebUI",
-      value: "webui.open",
-      hidden: !showAdvancedCommands(),
-      onSelect: () => {
-        open(sdk.url).catch(() => { })
         dialog.clear()
       },
       category: "System",
