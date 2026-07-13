@@ -4,20 +4,6 @@ export type ClientOptions = {
   baseUrl: `${string}://${string}` | (string & {})
 }
 
-export type EventInstallationUpdated = {
-  type: "installation.updated"
-  properties: {
-    version: string
-  }
-}
-
-export type EventInstallationUpdateAvailable = {
-  type: "installation.update-available"
-  properties: {
-    version: string
-  }
-}
-
 export type Project = {
   id: string
   worktree: string
@@ -39,6 +25,20 @@ export type Project = {
 export type EventProjectUpdated = {
   type: "project.updated"
   properties: Project
+}
+
+export type EventInstallationUpdated = {
+  type: "installation.updated"
+  properties: {
+    version: string
+  }
+}
+
+export type EventInstallationUpdateAvailable = {
+  type: "installation.update-available"
+  properties: {
+    version: string
+  }
 }
 
 export type EventServerInstanceDisposed = {
@@ -514,6 +514,468 @@ export type EventPermissionReplied = {
   }
 }
 
+export type PermissionAction = "allow" | "deny" | "ask"
+
+export type PermissionRule = {
+  permission: string
+  pattern: string
+  action: PermissionAction
+}
+
+export type PermissionRuleset = Array<PermissionRule>
+
+export type Session = {
+  id: string
+  slug: string
+  projectID: string
+  directory: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<FileDiff>
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  version: string
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+}
+
+export type EventSessionCreated = {
+  type: "session.created"
+  properties: {
+    info: Session
+  }
+}
+
+export type EventSessionUpdated = {
+  type: "session.updated"
+  properties: {
+    info: Session
+  }
+}
+
+export type EventSessionDeleted = {
+  type: "session.deleted"
+  properties: {
+    info: Session
+  }
+}
+
+export type EventSessionDiff = {
+  type: "session.diff"
+  properties: {
+    sessionID: string
+    diff: Array<FileDiff>
+  }
+}
+
+export type EventSessionError = {
+  type: "session.error"
+  properties: {
+    sessionID?: string
+    error?: ProviderAuthError | UnknownError | MessageOutputLengthError | MessageAbortedError | ApiError
+  }
+}
+
+export type EventTuiPromptAppend = {
+  type: "tui.prompt.append"
+  properties: {
+    text: string
+  }
+}
+
+export type EventTuiCommandExecute = {
+  type: "tui.command.execute"
+  properties: {
+    command:
+      | "session.list"
+      | "session.new"
+      | "session.share"
+      | "session.interrupt"
+      | "session.compact"
+      | "session.page.up"
+      | "session.page.down"
+      | "session.line.up"
+      | "session.line.down"
+      | "session.half.page.up"
+      | "session.half.page.down"
+      | "session.first"
+      | "session.last"
+      | "prompt.clear"
+      | "prompt.submit"
+      | "agent.cycle"
+      | string
+  }
+}
+
+export type EventTuiToastShow = {
+  type: "tui.toast.show"
+  properties: {
+    title?: string
+    message: string
+    variant: "info" | "success" | "warning" | "error"
+    /**
+     * Duration in milliseconds
+     */
+    duration?: number
+  }
+}
+
+export type EventTuiSessionSelect = {
+  type: "tui.session.select"
+  properties: {
+    /**
+     * Session ID to navigate to
+     */
+    sessionID: string
+  }
+}
+
+export type EventFileWatcherUpdated = {
+  type: "file.watcher.updated"
+  properties: {
+    file: string
+    event: "add" | "change" | "unlink"
+  }
+}
+
+export type EventVcsBranchUpdated = {
+  type: "vcs.branch.updated"
+  properties: {
+    branch?: string
+  }
+}
+
+export type EventMcpToolsChanged = {
+  type: "mcp.tools.changed"
+  properties: {
+    server: string
+  }
+}
+
+export type EventMcpBrowserOpenFailed = {
+  type: "mcp.browser.open.failed"
+  properties: {
+    mcpName: string
+    url: string
+  }
+}
+
+export type EventCommandExecuted = {
+  type: "command.executed"
+  properties: {
+    name: string
+    sessionID: string
+    arguments: string
+    messageID: string
+  }
+}
+
+export type EventRuntimeQueryState = {
+  type: "runtime.query.state"
+  properties: {
+    sessionID: string
+    phase: "idle" | "accepted" | "dispatching" | "running"
+    generation: number
+    pending: number
+    action?: string
+  }
+}
+
+export type EventRuntimeQueueUpdated = {
+  type: "runtime.queue.updated"
+  properties: {
+    sessionID: string
+    pending: number
+    actions: Array<{
+      id: string
+      type: string
+      priority: number
+      createdAt: number
+    }>
+  }
+}
+
+export type EventRuntimeTaskUpdated = {
+  type: "runtime.task.updated"
+  properties: {
+    sessionID: string
+    task: {
+      taskId: string
+      sessionID: string
+      actionType: string
+      status: "queued" | "dispatching" | "running" | "completed" | "failed" | "cancelled" | "restored"
+      priority: number
+      messageID?: string
+      workflowRunId?: string
+      stageId?: string
+      activeStage?: string
+      inputGraph?: Array<{
+        [key: string]: unknown
+      }>
+      timeline?: Array<{
+        [key: string]: unknown
+      }>
+      latestCheckpointId?: string
+      latestFailureCode?: string
+      verifierStatus?: "pass" | "warn" | "block"
+      repairOnly?: boolean
+      policyDecisions?: Array<{
+        [key: string]: unknown
+      }>
+      audit?: Array<{
+        [key: string]: unknown
+      }>
+      contextVersion?: number
+      metadata?: {
+        [key: string]: unknown
+      }
+      createdAt: string
+      updatedAt: string
+    }
+  }
+}
+
+export type EventRuntimeTimelineEvent = {
+  type: "runtime.timeline.event"
+  properties: {
+    sessionID: string
+    event: {
+      id: string
+      taskId: string
+      sessionID: string
+      kind: string
+      stageId?: string
+      workflowRunId?: string
+      message?: string
+      metadata?: {
+        [key: string]: unknown
+      }
+      createdAt: string
+    }
+  }
+}
+
+export type EventRuntimeCheckpointCreated = {
+  type: "runtime.checkpoint.created"
+  properties: {
+    sessionID: string
+    checkpoint: {
+      checkpointId: string
+      taskId?: string
+      sessionID: string
+      workflowRunId?: string
+      stageId?: string
+      branch?: string
+      activeStage?: string
+      trustedArtifacts?: Array<string>
+      verifierStatus?: "pass" | "warn" | "block"
+      repairOnly?: boolean
+      replayInput?: {
+        [key: string]: unknown
+      }
+      createdAt: string
+    }
+  }
+}
+
+export type EventRuntimeRestoreCompleted = {
+  type: "runtime.restore.completed"
+  properties: {
+    sessionID: string
+    checkpoint: {
+      checkpointId: string
+      taskId?: string
+      sessionID: string
+      workflowRunId?: string
+      stageId?: string
+      branch?: string
+      activeStage?: string
+      trustedArtifacts?: Array<string>
+      verifierStatus?: "pass" | "warn" | "block"
+      repairOnly?: boolean
+      replayInput?: {
+        [key: string]: unknown
+      }
+      createdAt: string
+    }
+    restoredTaskId?: string
+  }
+}
+
+export type EventRuntimeProtocolEvent = {
+  type: "runtime.protocol.event"
+  properties: {
+    envelope: {
+      version: 1
+      sequence: number
+      sessionID: string
+      source: "runtime" | "workflow" | "tool" | "verifier" | "task-ledger" | "agent-control" | "context"
+      event: {
+        type: string
+        sessionID: string
+        payload: {
+          [key: string]: unknown
+        }
+      }
+      createdAt: string
+      compatibility?: {
+        [key: string]: unknown
+      }
+    }
+  }
+}
+
+export type EventRuntimeExecPolicyDecision = {
+  type: "runtime.exec_policy.decision"
+  properties: {
+    sessionID: string
+    decision: {
+      decisionId: string
+      sessionID: string
+      toolName: string
+      command: string
+      action: "allow" | "ask" | "deny"
+      reason: string
+      matchedRule?: string
+      networkAccess?: boolean
+      filesystemRisk?: "none" | "external_write" | "destructive" | "trusted_artifact_overwrite"
+      createdAt: string
+    }
+  }
+}
+
+export type EventRuntimeContextSnapshot = {
+  type: "runtime.context.snapshot"
+  properties: {
+    sessionID: string
+    snapshot: {
+      sessionID: string
+      historyVersion: number
+      referenceContext: {
+        [key: string]: unknown
+      }
+      tokenEstimate: number
+      protectedItems: Array<string>
+      imageInputs: Array<{
+        [key: string]: unknown
+      }>
+      createdAt: string
+    }
+  }
+}
+
+export type EventRuntimeAgentControlState = {
+  type: "runtime.agent_control.state"
+  properties: {
+    sessionID: string
+    state: {
+      sessionID: string
+      activeAgent?: "explore" | "general" | "verifier"
+      forkMode?: "minimal_context" | "last_n_turns" | "workflow_slice"
+      decisions: Array<{
+        [key: string]: unknown
+      }>
+      messages: Array<{
+        [key: string]: unknown
+      }>
+      updatedAt: string
+    }
+  }
+}
+
+export type EventRuntimeToolBatch = {
+  type: "runtime.tool.batch"
+  properties: {
+    sessionID: string
+    batchId: string
+    parallel: boolean
+    toolCalls: Array<{
+      toolName: string
+      callID: string
+    }>
+  }
+}
+
+export type EventRuntimeToolLifecycle = {
+  type: "runtime.tool.lifecycle"
+  properties: {
+    sessionID: string
+    callID: string
+    toolName: string
+    phase: "queued" | "running" | "completed" | "failed"
+    batchId?: string
+  }
+}
+
+export type EventRuntimeCompaction = {
+  type: "runtime.compaction"
+  properties: {
+    sessionID: string
+    phase: "snapshot" | "trim" | "collapse" | "autocompact"
+    details?: {
+      [key: string]: unknown
+    }
+  }
+}
+
+export type EventRuntimeSubagentLifecycle = {
+  type: "runtime.subagent.lifecycle"
+  properties: {
+    sessionID: string
+    subagentSessionID: string
+    agent: string
+    phase: "queued" | "running" | "completed" | "failed"
+  }
+}
+
+export type EventRuntimeWorkflowState = {
+  type: "runtime.workflow.state"
+  properties: {
+    sessionID: string
+    workflowRunId?: string
+    workflowLocale?: "zh-CN" | "en"
+    branch?: string
+    activeStage?: string
+    activeStageId?: string
+    activeCoordinatorAgent?: "explore" | "general" | "verifier"
+    repairOnly?: boolean
+    latestFailureCode?: string
+    verifierStatus?: "pass" | "warn" | "block"
+    trustedArtifacts?: Array<string>
+    rerunTargetStageId?: string
+    approvalStatus?: "required" | "approved" | "declined"
+    currentChecklistItem?: {
+      id: string
+      label: string
+      status: "pending" | "in_progress" | "completed" | "blocked"
+    }
+    analysisChecklist?: Array<{
+      id: string
+      label: string
+      status: "pending" | "in_progress" | "completed" | "blocked"
+      linkedStageId?: string
+      summary?: string
+    }>
+  }
+}
+
 export type SessionStatus =
   | {
       type: "idle"
@@ -526,6 +988,12 @@ export type SessionStatus =
     }
   | {
       type: "busy"
+    }
+  | {
+      type: "repair"
+      tool: string
+      retryStage: string
+      message: string
     }
 
 export type EventSessionStatus = {
@@ -540,6 +1008,33 @@ export type EventSessionIdle = {
   type: "session.idle"
   properties: {
     sessionID: string
+  }
+}
+
+export type Todo = {
+  /**
+   * Brief description of the task
+   */
+  content: string
+  /**
+   * Current status of the task: pending, in_progress, completed, cancelled
+   */
+  status: string
+  /**
+   * Priority level of the task: high, medium, low
+   */
+  priority: string
+  /**
+   * Unique identifier for the todo item
+   */
+  id: string
+}
+
+export type EventTodoUpdated = {
+  type: "todo.updated"
+  properties: {
+    sessionID: string
+    todos: Array<Todo>
   }
 }
 
@@ -621,249 +1116,10 @@ export type EventSessionCompacted = {
   }
 }
 
-export type Todo = {
-  /**
-   * Brief description of the task
-   */
-  content: string
-  /**
-   * Current status of the task: pending, in_progress, completed, cancelled
-   */
-  status: string
-  /**
-   * Priority level of the task: high, medium, low
-   */
-  priority: string
-  /**
-   * Unique identifier for the todo item
-   */
-  id: string
-}
-
-export type EventTodoUpdated = {
-  type: "todo.updated"
-  properties: {
-    sessionID: string
-    todos: Array<Todo>
-  }
-}
-
-export type EventFileWatcherUpdated = {
-  type: "file.watcher.updated"
-  properties: {
-    file: string
-    event: "add" | "change" | "unlink"
-  }
-}
-
-export type EventTuiPromptAppend = {
-  type: "tui.prompt.append"
-  properties: {
-    text: string
-  }
-}
-
-export type EventTuiCommandExecute = {
-  type: "tui.command.execute"
-  properties: {
-    command:
-      | "session.list"
-      | "session.new"
-      | "session.share"
-      | "session.interrupt"
-      | "session.compact"
-      | "session.page.up"
-      | "session.page.down"
-      | "session.line.up"
-      | "session.line.down"
-      | "session.half.page.up"
-      | "session.half.page.down"
-      | "session.first"
-      | "session.last"
-      | "prompt.clear"
-      | "prompt.submit"
-      | "agent.cycle"
-      | string
-  }
-}
-
-export type EventTuiToastShow = {
-  type: "tui.toast.show"
-  properties: {
-    title?: string
-    message: string
-    variant: "info" | "success" | "warning" | "error"
-    /**
-     * Duration in milliseconds
-     */
-    duration?: number
-  }
-}
-
-export type EventTuiSessionSelect = {
-  type: "tui.session.select"
-  properties: {
-    /**
-     * Session ID to navigate to
-     */
-    sessionID: string
-  }
-}
-
-export type EventMcpToolsChanged = {
-  type: "mcp.tools.changed"
-  properties: {
-    server: string
-  }
-}
-
-export type EventMcpBrowserOpenFailed = {
-  type: "mcp.browser.open.failed"
-  properties: {
-    mcpName: string
-    url: string
-  }
-}
-
-export type EventCommandExecuted = {
-  type: "command.executed"
-  properties: {
-    name: string
-    sessionID: string
-    arguments: string
-    messageID: string
-  }
-}
-
-export type PermissionAction = "allow" | "deny" | "ask"
-
-export type PermissionRule = {
-  permission: string
-  pattern: string
-  action: PermissionAction
-}
-
-export type PermissionRuleset = Array<PermissionRule>
-
-export type Session = {
-  id: string
-  slug: string
-  projectID: string
-  directory: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<FileDiff>
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  version: string
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-}
-
-export type EventSessionCreated = {
-  type: "session.created"
-  properties: {
-    info: Session
-  }
-}
-
-export type EventSessionUpdated = {
-  type: "session.updated"
-  properties: {
-    info: Session
-  }
-}
-
-export type EventSessionDeleted = {
-  type: "session.deleted"
-  properties: {
-    info: Session
-  }
-}
-
-export type EventSessionDiff = {
-  type: "session.diff"
-  properties: {
-    sessionID: string
-    diff: Array<FileDiff>
-  }
-}
-
-export type EventSessionError = {
-  type: "session.error"
-  properties: {
-    sessionID?: string
-    error?: ProviderAuthError | UnknownError | MessageOutputLengthError | MessageAbortedError | ApiError
-  }
-}
-
-export type EventVcsBranchUpdated = {
-  type: "vcs.branch.updated"
-  properties: {
-    branch?: string
-  }
-}
-
-export type Pty = {
-  id: string
-  title: string
-  command: string
-  args: Array<string>
-  cwd: string
-  status: "running" | "exited"
-  pid: number
-}
-
-export type EventPtyCreated = {
-  type: "pty.created"
-  properties: {
-    info: Pty
-  }
-}
-
-export type EventPtyUpdated = {
-  type: "pty.updated"
-  properties: {
-    info: Pty
-  }
-}
-
-export type EventPtyExited = {
-  type: "pty.exited"
-  properties: {
-    id: string
-    exitCode: number
-  }
-}
-
-export type EventPtyDeleted = {
-  type: "pty.deleted"
-  properties: {
-    id: string
-  }
-}
-
 export type Event =
+  | EventProjectUpdated
   | EventInstallationUpdated
   | EventInstallationUpdateAvailable
-  | EventProjectUpdated
   | EventServerInstanceDisposed
   | EventServerConnected
   | EventGlobalDisposed
@@ -876,31 +1132,42 @@ export type Event =
   | EventMessagePartRemoved
   | EventPermissionAsked
   | EventPermissionReplied
-  | EventSessionStatus
-  | EventSessionIdle
-  | EventQuestionAsked
-  | EventQuestionReplied
-  | EventQuestionRejected
-  | EventSessionCompacted
-  | EventTodoUpdated
-  | EventFileWatcherUpdated
-  | EventTuiPromptAppend
-  | EventTuiCommandExecute
-  | EventTuiToastShow
-  | EventTuiSessionSelect
-  | EventMcpToolsChanged
-  | EventMcpBrowserOpenFailed
-  | EventCommandExecuted
   | EventSessionCreated
   | EventSessionUpdated
   | EventSessionDeleted
   | EventSessionDiff
   | EventSessionError
+  | EventTuiPromptAppend
+  | EventTuiCommandExecute
+  | EventTuiToastShow
+  | EventTuiSessionSelect
+  | EventFileWatcherUpdated
   | EventVcsBranchUpdated
-  | EventPtyCreated
-  | EventPtyUpdated
-  | EventPtyExited
-  | EventPtyDeleted
+  | EventMcpToolsChanged
+  | EventMcpBrowserOpenFailed
+  | EventCommandExecuted
+  | EventRuntimeQueryState
+  | EventRuntimeQueueUpdated
+  | EventRuntimeTaskUpdated
+  | EventRuntimeTimelineEvent
+  | EventRuntimeCheckpointCreated
+  | EventRuntimeRestoreCompleted
+  | EventRuntimeProtocolEvent
+  | EventRuntimeExecPolicyDecision
+  | EventRuntimeContextSnapshot
+  | EventRuntimeAgentControlState
+  | EventRuntimeToolBatch
+  | EventRuntimeToolLifecycle
+  | EventRuntimeCompaction
+  | EventRuntimeSubagentLifecycle
+  | EventRuntimeWorkflowState
+  | EventSessionStatus
+  | EventSessionIdle
+  | EventTodoUpdated
+  | EventQuestionAsked
+  | EventQuestionReplied
+  | EventQuestionRejected
+  | EventSessionCompacted
 
 export type GlobalEvent = {
   directory: string
@@ -1127,6 +1394,10 @@ export type KeybindsConfig = {
    */
   input_paste?: string
   /**
+   * Open the data file picker (Excel / CSV / DTA)
+   */
+  data_file_picker?: string
+  /**
    * Submit input
    */
   input_submit?: string
@@ -1351,7 +1622,6 @@ export type PermissionConfig =
       question?: PermissionActionConfig
       webfetch?: PermissionActionConfig
       websearch?: PermissionActionConfig
-      codesearch?: PermissionActionConfig
       lsp?: PermissionRuleConfig
       doom_loop?: PermissionActionConfig
       [key: string]: PermissionRuleConfig | Array<string> | PermissionActionConfig | undefined
@@ -1360,6 +1630,7 @@ export type PermissionConfig =
 
 export type AgentConfig = {
   model?: string
+  variant?: string
   temperature?: number
   top_p?: number
   prompt?: string
@@ -1577,6 +1848,82 @@ export type McpRemoteConfig = {
  */
 export type LayoutConfig = "auto" | "stretch"
 
+export type KillstataRootDirectoryConfig = {
+  /**
+   * Absolute path for this killstata user-level directory
+   */
+  root?: string
+}
+
+export type KillstataPythonConfig = {
+  /**
+   * Absolute path to the Python executable killstata should use
+   */
+  executable?: string
+  /**
+   * Whether killstata should prefer the managed virtual environment under ~/.killstata/venv
+   */
+  managed?: boolean
+}
+
+export type KillstataWorkspaceConfig = {
+  /**
+   * Whether killstata should use the global ~/.killstata/workspace directory
+   */
+  enabled?: boolean
+  /**
+   * Absolute path to the global killstata workspace directory
+   */
+  root?: string
+}
+
+export type KillstataAgentsConfig = {
+  /**
+   * Absolute path to the user-level agents directory
+   */
+  root?: string
+  main?: {
+    /**
+     * Absolute path to the main agent root directory
+     */
+    root?: string
+    /**
+     * Absolute path to the main agent metadata directory
+     */
+    stateRoot?: string
+    /**
+     * Absolute path to the main agent sessions directory
+     */
+    sessionsRoot?: string
+  }
+  subagents?: {
+    /**
+     * Absolute path to the subagents directory
+     */
+    root?: string
+    /**
+     * Absolute path to the subagent run index JSON file
+     */
+    runsPath?: string
+  }
+}
+
+/**
+ * Killstata runtime configuration for Python and Stata
+ */
+export type KillstataConfig = {
+  home?: KillstataRootDirectoryConfig
+  python?: KillstataPythonConfig
+  workspace?: KillstataWorkspaceConfig
+  skills?: KillstataRootDirectoryConfig
+  agents?: KillstataAgentsConfig
+  logs?: KillstataRootDirectoryConfig
+  memory?: KillstataRootDirectoryConfig
+  tmp?: KillstataRootDirectoryConfig
+  state?: KillstataRootDirectoryConfig
+  downloads?: KillstataRootDirectoryConfig
+}
+
 export type Config = {
   /**
    * JSON schema reference for configuration validation
@@ -1609,10 +1956,18 @@ export type Config = {
      * Control diff rendering style: 'auto' adapts to terminal width, 'stacked' always shows single column
      */
     diff_style?: "auto" | "stacked"
+    /**
+     * Show internal/debug slash commands and MCP prompt commands in the TUI command menu
+     */
+    showAdvancedCommands?: boolean
+    /**
+     * @deprecated Use showAdvancedCommands. Show internal/debug slash commands in the TUI command menu
+     */
+    show_advanced_commands?: boolean
   }
   server?: ServerConfig
   /**
-   * Command configuration, see https://killstata.ai/docs/commands
+   * Command configuration, see https://killstata.io/docs/commands
    */
   command?: {
     [key: string]: {
@@ -1621,8 +1976,22 @@ export type Config = {
       agent?: string
       model?: string
       subtask?: boolean
+      availability?: Array<string>
+      queueBehavior?: "queued" | "immediate"
+      workflowAware?: boolean
+      immediate?: boolean
+      remoteSafe?: boolean
+      repairOnlyAllowed?: boolean
+      requiresTrustedArtifacts?: boolean
+      advanced?: boolean
+      visibleWhen?: Array<string>
+      blockedReason?: string
     }
   }
+  /**
+   * Command names to suppress from slash-command registration, including custom commands
+   */
+  disabled_commands?: Array<string>
   watcher?: {
     ignore?: Array<string>
   }
@@ -1673,7 +2042,7 @@ export type Config = {
     [key: string]: AgentConfig | undefined
   }
   /**
-   * Agent configuration, see https://killstata.ai/docs/agents
+   * Agent configuration, see https://killstata.io/docs/agents
    */
   agent?: {
     plan?: AgentConfig
@@ -1801,6 +2170,7 @@ export type Config = {
      */
     mcp_timeout?: number
   }
+  killstata?: KillstataConfig
 }
 
 export type Model = {
@@ -1897,25 +2267,6 @@ export type ToolListItem = {
 }
 
 export type ToolList = Array<ToolListItem>
-
-export type Worktree = {
-  name: string
-  branch: string
-  directory: string
-}
-
-export type WorktreeCreateInput = {
-  name?: string
-  startCommand?: string
-}
-
-export type WorktreeRemoveInput = {
-  directory: string
-}
-
-export type WorktreeResetInput = {
-  directory: string
-}
 
 export type McpResource = {
   name: string
@@ -2082,6 +2433,11 @@ export type Command = {
   workflowAware?: boolean
   immediate?: boolean
   remoteSafe?: boolean
+  repairOnlyAllowed?: boolean
+  requiresTrustedArtifacts?: boolean
+  advanced?: boolean
+  visibleWhen?: Array<string>
+  blockedReason?: string
   template: string
   subtask?: boolean
   hints: Array<string>
@@ -2101,6 +2457,7 @@ export type Agent = {
     modelID: string
     providerID: string
   }
+  variant?: string
   prompt?: string
   options: {
     [key: string]: unknown
@@ -2270,181 +2627,6 @@ export type ProjectUpdateResponses = {
 
 export type ProjectUpdateResponse = ProjectUpdateResponses[keyof ProjectUpdateResponses]
 
-export type PtyListData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-  }
-  url: "/pty"
-}
-
-export type PtyListResponses = {
-  /**
-   * List of sessions
-   */
-  200: Array<Pty>
-}
-
-export type PtyListResponse = PtyListResponses[keyof PtyListResponses]
-
-export type PtyCreateData = {
-  body?: {
-    command?: string
-    args?: Array<string>
-    cwd?: string
-    title?: string
-    env?: {
-      [key: string]: string
-    }
-  }
-  path?: never
-  query?: {
-    directory?: string
-  }
-  url: "/pty"
-}
-
-export type PtyCreateErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type PtyCreateError = PtyCreateErrors[keyof PtyCreateErrors]
-
-export type PtyCreateResponses = {
-  /**
-   * Created session
-   */
-  200: Pty
-}
-
-export type PtyCreateResponse = PtyCreateResponses[keyof PtyCreateResponses]
-
-export type PtyRemoveData = {
-  body?: never
-  path: {
-    ptyID: string
-  }
-  query?: {
-    directory?: string
-  }
-  url: "/pty/{ptyID}"
-}
-
-export type PtyRemoveErrors = {
-  /**
-   * Not found
-   */
-  404: NotFoundError
-}
-
-export type PtyRemoveError = PtyRemoveErrors[keyof PtyRemoveErrors]
-
-export type PtyRemoveResponses = {
-  /**
-   * Session removed
-   */
-  200: boolean
-}
-
-export type PtyRemoveResponse = PtyRemoveResponses[keyof PtyRemoveResponses]
-
-export type PtyGetData = {
-  body?: never
-  path: {
-    ptyID: string
-  }
-  query?: {
-    directory?: string
-  }
-  url: "/pty/{ptyID}"
-}
-
-export type PtyGetErrors = {
-  /**
-   * Not found
-   */
-  404: NotFoundError
-}
-
-export type PtyGetError = PtyGetErrors[keyof PtyGetErrors]
-
-export type PtyGetResponses = {
-  /**
-   * Session info
-   */
-  200: Pty
-}
-
-export type PtyGetResponse = PtyGetResponses[keyof PtyGetResponses]
-
-export type PtyUpdateData = {
-  body?: {
-    title?: string
-    size?: {
-      rows: number
-      cols: number
-    }
-  }
-  path: {
-    ptyID: string
-  }
-  query?: {
-    directory?: string
-  }
-  url: "/pty/{ptyID}"
-}
-
-export type PtyUpdateErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type PtyUpdateError = PtyUpdateErrors[keyof PtyUpdateErrors]
-
-export type PtyUpdateResponses = {
-  /**
-   * Updated session
-   */
-  200: Pty
-}
-
-export type PtyUpdateResponse = PtyUpdateResponses[keyof PtyUpdateResponses]
-
-export type PtyConnectData = {
-  body?: never
-  path: {
-    ptyID: string
-  }
-  query?: {
-    directory?: string
-  }
-  url: "/pty/{ptyID}/connect"
-}
-
-export type PtyConnectErrors = {
-  /**
-   * Not found
-   */
-  404: NotFoundError
-}
-
-export type PtyConnectError = PtyConnectErrors[keyof PtyConnectErrors]
-
-export type PtyConnectResponses = {
-  /**
-   * Connected session
-   */
-  200: boolean
-}
-
-export type PtyConnectResponse = PtyConnectResponses[keyof PtyConnectResponses]
-
 export type ConfigGetData = {
   body?: never
   path?: never
@@ -2568,105 +2750,6 @@ export type ToolListResponses = {
 }
 
 export type ToolListResponse = ToolListResponses[keyof ToolListResponses]
-
-export type WorktreeRemoveData = {
-  body?: WorktreeRemoveInput
-  path?: never
-  query?: {
-    directory?: string
-  }
-  url: "/experimental/worktree"
-}
-
-export type WorktreeRemoveErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type WorktreeRemoveError = WorktreeRemoveErrors[keyof WorktreeRemoveErrors]
-
-export type WorktreeRemoveResponses = {
-  /**
-   * Worktree removed
-   */
-  200: boolean
-}
-
-export type WorktreeRemoveResponse = WorktreeRemoveResponses[keyof WorktreeRemoveResponses]
-
-export type WorktreeListData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-  }
-  url: "/experimental/worktree"
-}
-
-export type WorktreeListResponses = {
-  /**
-   * List of worktree directories
-   */
-  200: Array<string>
-}
-
-export type WorktreeListResponse = WorktreeListResponses[keyof WorktreeListResponses]
-
-export type WorktreeCreateData = {
-  body?: WorktreeCreateInput
-  path?: never
-  query?: {
-    directory?: string
-  }
-  url: "/experimental/worktree"
-}
-
-export type WorktreeCreateErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type WorktreeCreateError = WorktreeCreateErrors[keyof WorktreeCreateErrors]
-
-export type WorktreeCreateResponses = {
-  /**
-   * Worktree created
-   */
-  200: Worktree
-}
-
-export type WorktreeCreateResponse = WorktreeCreateResponses[keyof WorktreeCreateResponses]
-
-export type WorktreeResetData = {
-  body?: WorktreeResetInput
-  path?: never
-  query?: {
-    directory?: string
-  }
-  url: "/experimental/worktree/reset"
-}
-
-export type WorktreeResetErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type WorktreeResetError = WorktreeResetErrors[keyof WorktreeResetErrors]
-
-export type WorktreeResetResponses = {
-  /**
-   * Worktree reset
-   */
-  200: boolean
-}
-
-export type WorktreeResetResponse = WorktreeResetResponses[keyof WorktreeResetResponses]
 
 export type ExperimentalResourceListData = {
   body?: never
@@ -2959,46 +3042,6 @@ export type SessionTodoResponses = {
 
 export type SessionTodoResponse = SessionTodoResponses[keyof SessionTodoResponses]
 
-export type SessionInitData = {
-  body?: {
-    modelID: string
-    providerID: string
-    messageID: string
-  }
-  path: {
-    /**
-     * Session ID
-     */
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-  }
-  url: "/session/{sessionID}/init"
-}
-
-export type SessionInitErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-  /**
-   * Not found
-   */
-  404: NotFoundError
-}
-
-export type SessionInitError = SessionInitErrors[keyof SessionInitErrors]
-
-export type SessionInitResponses = {
-  /**
-   * 200
-   */
-  200: boolean
-}
-
-export type SessionInitResponse = SessionInitResponses[keyof SessionInitResponses]
-
 export type SessionForkData = {
   body?: {
     messageID?: string
@@ -3238,6 +3281,12 @@ export type SessionPromptData = {
     }
     system?: string
     variant?: string
+    queuePriority?: number
+    queueActionType?: "prompt" | "command" | "shell" | "continue" | "retry" | "repair" | "compaction"
+    queueMetadata?: {
+      [key: string]: unknown
+    }
+    intent?: "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -3425,6 +3474,12 @@ export type SessionPromptAsyncData = {
     }
     system?: string
     variant?: string
+    queuePriority?: number
+    queueActionType?: "prompt" | "command" | "shell" | "continue" | "retry" | "repair" | "compaction"
+    queueMetadata?: {
+      [key: string]: unknown
+    }
+    intent?: "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -4799,6 +4854,7 @@ export type AppSkillsResponses = {
     name: string
     description: string
     location: string
+    source: "user"
   }>
 }
 

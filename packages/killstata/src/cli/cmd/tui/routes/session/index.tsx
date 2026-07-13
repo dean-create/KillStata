@@ -647,10 +647,8 @@ export function Session() {
       description: "切换通用工具输出内容显示",
       value: "session.toggle.generic_tool_output",
       category: "会话",
-      slash: {
-        name: "tool-output",
-        aliases: ["generic-tool-output"],
-      },
+      // 与 /details 高度重叠，命令面板里只留 /details 一个逃生门就够了。
+      hidden: true,
       onSelect: (dialog) => {
         setShowGenericToolOutput((prev) => !prev)
         dialog.clear()

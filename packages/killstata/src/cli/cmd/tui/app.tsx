@@ -341,12 +341,11 @@ function App() {
       },
     },
     {
-      title: "New session",
+      title: "开启新对话",
       suggested: route.data.type === "session",
       value: "session.new",
       keybind: "session_new",
       category: "Session",
-      hidden: !showAdvancedCommands(),
       slash: {
         name: "new",
         aliases: ["clear"],
@@ -480,6 +479,8 @@ function App() {
       description: "查看当前会话、模型和服务状态",
       keybind: "status_view",
       value: "killstata.status",
+      // 藏进 advanced：会话/模型状态已经在底栏常驻显示，命令面板里再放一条是噪音。
+      hidden: !showAdvancedCommands(),
       slash: {
         name: "status",
       },

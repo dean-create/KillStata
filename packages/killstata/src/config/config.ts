@@ -744,6 +744,11 @@ export namespace Config {
       variant_cycle: z.string().optional().default("ctrl+t").describe("Cycle model variants"),
       input_clear: z.string().optional().default("none").describe("Clear input field"),
       input_paste: z.string().optional().default("ctrl+v").describe("Paste from clipboard"),
+      data_file_picker: z
+        .string()
+        .optional()
+        .default("ctrl+o")
+        .describe("Open the data file picker (Excel / CSV / DTA)"),
       input_submit: z.string().optional().default("return").describe("Submit input"),
       input_newline: z
         .string()

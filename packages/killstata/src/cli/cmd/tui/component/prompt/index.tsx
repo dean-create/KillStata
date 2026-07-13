@@ -13,6 +13,7 @@ import { useKeybind } from "@tui/context/keybind"
 import { usePromptHistory, type PromptInfo } from "./history"
 import { usePromptStash } from "./stash"
 import { DialogStash } from "../dialog-stash"
+import { DialogDataFile } from "../dialog-data-file"
 import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useCommandDialog } from "../dialog-command"
 import { useRenderer } from "@opentui/solid"
@@ -742,6 +743,14 @@ export function Prompt(props: PromptProps) {
   }
   const exit = useExit()
 
+  // 从数据文件选择器选中一个文件后，把路径插进输入框（而不是直接发出去）——
+  // 用户通常还想在路径后面补一句「导入并看看面板键有没有重复」。
+  function insertDataFilePath(filePath: string) {
+    const needsSpace = input.plainText.length > 0 && !input.plainText.endsWith(" ")
+    input.insertText(`${needsSpace ? " " : ""}${filePath} `)
+    input.focus()
+  }
+
   function pasteText(text: string, virtualText: string) {
     const currentOffset = input.visualCursor.offset
     const extmarkStart = currentOffset
@@ -899,7 +908,17 @@ export function Prompt(props: PromptProps) {
             backgroundColor={theme.backgroundElement}
             flexGrow={1}
           >
-            <textarea
+            <box flexDirection="row" gap={1}>
+              {/* 数据文件入口。终端没有真正的文件选择器，所以这个标志是「按 Ctrl+O 打开
+                  数据文件浏览器」的可见提示 —— 否则用户根本不知道有这个功能。 */}
+              <text
+                flexShrink={0}
+                fg={theme.textMuted}
+                onMouseDown={() => dialog.replace(() => <DialogDataFile onPick={insertDataFilePath} />)}
+              >
+                📎
+              </text>
+              <textarea
               placeholder={
                 props.showPlaceholder === false
                   ? undefined
@@ -941,6 +960,10 @@ export function Prompt(props: PromptProps) {
                     return
                   }
                   // If no image, let the default paste behavior continue
+                }
+                if (keybind.match("data_file_picker", e)) {
+                  dialog.replace(() => <DialogDataFile onPick={insertDataFilePath} />)
+                  return
                 }
                 if (keybind.match("input_clear", e) && store.prompt.input !== "") {
                   input.clear()
@@ -1081,7 +1104,9 @@ export function Prompt(props: PromptProps) {
               focusedBackgroundColor={theme.backgroundElement}
               cursorColor={theme.text}
               syntaxStyle={syntax()}
+              flexGrow={1}
             />
+            </box>
             <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
               <text fg={highlight()}>
                 {store.mode === "shell" ? "Shell" : Locale.titlecase(local.agent.current()?.name ?? "agent")}{" "}
