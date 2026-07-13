@@ -112,9 +112,16 @@ function describeDelta(entry: ExperimentEntry, previous?: ExperimentEntry) {
   lines.push(`系数 ${fmt(coefBefore)} → **${fmt(coefNow)}**${pct}`)
 
   if (entry.pValue !== undefined && previous.pValue !== undefined) {
-    const direction =
-      entry.pValue < previous.pValue ? "更显著" : entry.pValue > previous.pValue ? "更不显著" : "显著性未变"
-    lines.push(`p ${fmtP(previous.pValue)} → **${fmtP(entry.pValue)}**（${direction}）`)
+    const before = fmtP(previous.pValue)
+    const now = fmtP(entry.pValue)
+    // 两个 p 值在报告精度下无法区分时（例如都是 <0.0001），不要拿底层浮点去分高下——
+    // 说"更不显著"只会让读者困惑，而且这种差别在统计上本来也没有意义。
+    if (before === now) {
+      lines.push(`p 值 ${now}（显著性相当）`)
+    } else {
+      const direction = entry.pValue < previous.pValue ? "更显著" : "更不显著"
+      lines.push(`p ${before} → **${now}**（${direction}）`)
+    }
   }
   return lines.join(" · ")
 }
@@ -133,7 +140,8 @@ function renderEntry(entry: ExperimentEntry, previous?: ExperimentEntry) {
   lines.push(
     `- **结果**：系数 **${fmt(entry.coefficient)}**` +
       ` · 标准误 ${fmt(entry.stdError)}` +
-      ` · p = ${fmtP(entry.pValue)}${star ? ` **${star}**` : ""}` +
+      // 显著性星号本身就是 `*`，再用 `**` 加粗会和 markdown 的强调语法打架，直接输出。
+      ` · p = ${fmtP(entry.pValue)}${star ? ` ${star}` : ""}` +
       ` · R² ${fmt(entry.rSquared, 3)}` +
       ` · N = ${fmtCount(entry.rowsUsed)}`,
   )

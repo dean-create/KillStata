@@ -173,4 +173,30 @@ describe("experiment log", () => {
     const md = renderExperimentLog({ datasetId: "did_empty", entries: [] })
     expect(md).toContain("尚未运行任何回归")
   })
+
+  // 下面两条是端到端实跑时才暴露出来的——单测里用的"漂亮"数字碰不到。
+
+  test("significance stars do not collide with markdown emphasis", () => {
+    const entries = [
+      { index: 1, createdAt: "t", method: "panel_fe", coefficient: 0.1, stdError: 0.01, pValue: 0.00001 },
+    ]
+    const md = renderExperimentLog({ datasetId: "d", entries: entries as any })
+
+    // 曾经的 bug：用 **${star}** 包裹三颗星，渲染出 `*******` 七颗
+    expect(md).not.toContain("*******")
+    expect(md).toContain("p = <0.0001 ***")
+  })
+
+  test("two p-values that are indistinguishable at reporting precision are not ranked against each other", () => {
+    // 两次 p 都极小（底层浮点不同，但报告出来都是 <0.0001）
+    const entries = [
+      { index: 1, createdAt: "t1", method: "panel_fe", coefficient: 0.1167, stdError: 0.0113, pValue: 1e-15 },
+      { index: 2, createdAt: "t2", method: "panel_fe", coefficient: 0.1426, stdError: 0.0217, pValue: 1e-10 },
+    ]
+    const md = renderExperimentLog({ datasetId: "d", entries: entries as any })
+
+    // 曾经的 bug：拿 1e-10 > 1e-15 判定"更不显著"，而用户看到的两个值明明都是 <0.0001
+    expect(md).not.toContain("更不显著")
+    expect(md).toContain("显著性相当")
+  })
 })
