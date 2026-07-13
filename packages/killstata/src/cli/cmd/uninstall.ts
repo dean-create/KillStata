@@ -128,10 +128,10 @@ async function showRemovalSummary(targets: RemovalTargets, method: Installation.
 
   if (method !== "curl" && method !== "unknown") {
     const cmds: Record<string, string> = {
-      npm: "npm uninstall -g killstata-ai",
-      pnpm: "pnpm uninstall -g killstata-ai",
-      bun: "bun remove -g killstata-ai",
-      yarn: "yarn global remove killstata-ai",
+      npm: "npm uninstall -g killstata",
+      pnpm: "pnpm uninstall -g killstata",
+      bun: "bun remove -g killstata",
+      yarn: "yarn global remove killstata",
       brew: "brew uninstall killstata",
       choco: "choco uninstall killstata",
       scoop: "scoop uninstall killstata",
@@ -179,10 +179,10 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
 
   if (method !== "curl" && method !== "unknown") {
     const cmds: Record<string, string[]> = {
-      npm: ["npm", "uninstall", "-g", "killstata-ai"],
-      pnpm: ["pnpm", "uninstall", "-g", "killstata-ai"],
-      bun: ["bun", "remove", "-g", "killstata-ai"],
-      yarn: ["yarn", "global", "remove", "killstata-ai"],
+      npm: ["npm", "uninstall", "-g", "killstata"],
+      pnpm: ["pnpm", "uninstall", "-g", "killstata"],
+      bun: ["bun", "remove", "-g", "killstata"],
+      yarn: ["yarn", "global", "remove", "killstata"],
       brew: ["brew", "uninstall", "killstata"],
       choco: ["choco", "uninstall", "killstata"],
       scoop: ["scoop", "uninstall", "killstata"],

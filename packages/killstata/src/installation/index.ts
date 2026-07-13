@@ -103,8 +103,7 @@ export namespace Installation {
 
     for (const check of checks) {
       const output = await check.command()
-      const installedName =
-        check.name === "brew" || check.name === "choco" || check.name === "scoop" ? "killstata" : "killstata-ai"
+      const installedName = "killstata"
       if (output.includes(installedName)) {
         return check.name
       }
@@ -121,8 +120,6 @@ export namespace Installation {
   )
 
   async function getBrewFormula() {
-    const tapFormula = await $`brew list --formula anomalyco/tap/killstata`.throws(false).quiet().text()
-    if (tapFormula.includes("killstata")) return "anomalyco/tap/killstata"
     const coreFormula = await $`brew list --formula killstata`.throws(false).quiet().text()
     if (coreFormula.includes("killstata")) return "killstata"
     return "killstata"
@@ -138,13 +135,13 @@ export namespace Installation {
         })
         break
       case "npm":
-        cmd = $`npm install -g killstata-ai@${target}`
+        cmd = $`npm install -g killstata@${target}`
         break
       case "pnpm":
-        cmd = $`pnpm install -g killstata-ai@${target}`
+        cmd = $`pnpm install -g killstata@${target}`
         break
       case "bun":
-        cmd = $`bun install -g killstata-ai@${target}`
+        cmd = $`bun install -g killstata@${target}`
         break
       case "brew": {
         const formula = await getBrewFormula()
@@ -205,7 +202,7 @@ export namespace Installation {
         return reg.endsWith("/") ? reg.slice(0, -1) : reg
       })
       const channel = CHANNEL
-      return fetch(`${registry}/killstata-ai/${channel}`)
+      return fetch(`${registry}/killstata/${channel}`)
         .then((res) => {
           if (!res.ok) throw new Error(res.statusText)
           return res.json()
@@ -236,7 +233,7 @@ export namespace Installation {
         .then((data: any) => data.version)
     }
 
-    return fetch("https://api.github.com/repos/anomalyco/killstata/releases/latest")
+    return fetch("https://api.github.com/repos/dean-create/KillStata/releases/latest")
       .then((res) => {
         if (!res.ok) throw new Error(res.statusText)
         return res.json()

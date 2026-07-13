@@ -345,14 +345,9 @@ Start here:
 
 - [CONTRIBUTING.md](./CONTRIBUTING.md)
 
-## Workflow Docs
+## Architecture
 
-If you want the lower-level architecture and runtime workflow details, start here:
-
-- [CURRENT_IMPLEMENTED_WORKFLOW.md](./CURRENT_IMPLEMENTED_WORKFLOW.md)
-- [FINAL_OUTPUT_CHAIN_AUDIT.md](./FINAL_OUTPUT_CHAIN_AUDIT.md)
-
-These documents explain how `datasetId`, `stageId`, runtime workflow state, and output artifacts fit together.
+For the lower-level data and runtime workflow, see the [analysis architecture](./docs/architecture.md).
 
 ## License
 

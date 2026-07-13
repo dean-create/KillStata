@@ -117,7 +117,7 @@ if (!Script.preview && !packOnly) {
   }
 
   if (!windowsPriorityFlag && hasLinuxContainers) {
-    const image = "ghcr.io/anomalyco/killstata"
+    const image = "ghcr.io/dean-create/killstata"
     const platforms = "linux/amd64,linux/arm64"
     const tags = [`${image}:${Script.version}`, `${image}:latest`]
     const tagFlags = tags.flatMap((t) => ["-t", t])
