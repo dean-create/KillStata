@@ -21,7 +21,7 @@
     },
     "packages/killstata": {
       "name": "killstata",
-      "version": "0.1.23",
+      "version": "0.1.25",
       "bin": {
         "killstata": "./bin/killstata",
       },
