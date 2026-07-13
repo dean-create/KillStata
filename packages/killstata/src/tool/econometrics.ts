@@ -45,7 +45,7 @@ import {
 import { numericSnapshotPreview } from "./analysis-tool-metadata"
 import { createToolDisplay } from "./analysis-display"
 import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./analysis-user-view"
-import { formatRuntimePythonSetupError, getRuntimePythonStatus } from "@/killstata/runtime-config"
+import { ensureRuntimePythonReady, formatRuntimePythonSetupError } from "@/killstata/runtime-config"
 import { ensureAnalysisPlan, formatAnalysisChecklist, setAnalysisPlanApproval } from "@/runtime/workflow"
 import {
   workflowAnalysisPlanHeader,
@@ -2003,12 +2003,19 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
       timeVar: params.timeVar,
     })
 
-    const pythonStatus = await getRuntimePythonStatus()
+    // 参数校验必须先于审批弹窗：没有数据来源的调用根本跑不起来（resolveArtifactInput
+    // 不会凭空找出一个数据集），不该先弹执行计划打扰用户、等用户点了同意才报错。
+    if (!params.dataPath && !params.datasetId) {
+      throw new Error("Econometrics requires dataPath or datasetId/stageId")
+    }
+
+    const pythonStatus = await ensureRuntimePythonReady()
     if (!pythonStatus.ok || pythonStatus.missing.length) {
       throw new Error(formatRuntimePythonSetupError("econometrics", pythonStatus))
     }
     const pythonCommand = pythonStatus.executable
     const installCommand = pythonStatus.installCommand
+
     if (ctx.agent === "analyst" && params.methodName !== "auto_recommend") {
       const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
       if (!analystState.planApproved) {
@@ -4218,6 +4225,4 @@ except Exception as e:
     }
   },
 }))
-
-
 

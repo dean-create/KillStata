@@ -942,16 +942,6 @@ export namespace Config {
       ref: "KillstataPythonConfig",
     })
 
-  const KillstataStata = z
-    .object({
-      path: z.string().optional().describe("Absolute path to the Stata installation directory or executable"),
-      edition: z.enum(["mp", "se", "be"]).optional().describe("Stata edition for the built-in MCP server"),
-    })
-    .strict()
-    .meta({
-      ref: "KillstataStataConfig",
-    })
-
   const KillstataRootDirectory = z
     .object({
       root: z.string().optional().describe("Absolute path for this killstata user-level directory"),
@@ -999,7 +989,6 @@ export namespace Config {
     .object({
       home: KillstataRootDirectory.optional(),
       python: KillstataPython.optional(),
-      stata: KillstataStata.optional(),
       workspace: KillstataWorkspace.optional(),
       skills: KillstataRootDirectory.optional(),
       agents: KillstataAgents.optional(),
@@ -1264,13 +1253,9 @@ export namespace Config {
     if (!data || typeof data !== "object" || Array.isArray(data)) return undefined
 
     const record = data as Record<string, unknown>
-    const hasLegacyShape =
-      typeof record["python_executable"] === "string" ||
-      typeof record["stata_path"] === "string" ||
-      typeof record["stata_edition"] === "string"
+    const hasLegacyShape = typeof record["python_executable"] === "string"
     if (!hasLegacyShape) return undefined
 
-    const edition = record["stata_edition"]
     return {
       $schema: "https://killstata.io/config.json",
       killstata: {
@@ -1278,13 +1263,6 @@ export namespace Config {
           typeof record["python_executable"] === "string"
             ? {
                 executable: record["python_executable"],
-              }
-            : undefined,
-        stata:
-          typeof record["stata_path"] === "string" || typeof edition === "string"
-            ? {
-                path: typeof record["stata_path"] === "string" ? record["stata_path"] : undefined,
-                edition: edition === "mp" || edition === "se" || edition === "be" ? edition : undefined,
               }
             : undefined,
       },

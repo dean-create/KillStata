@@ -56,7 +56,7 @@ import {
   analysisMetric,
   createToolAnalysisView,
 } from "./analysis-user-view"
-import { formatRuntimePythonSetupError, getRuntimePythonStatus } from "@/killstata/runtime-config"
+import { ensureRuntimePythonReady, formatRuntimePythonSetupError } from "@/killstata/runtime-config"
 import { ensureAnalysisPlan, formatAnalysisChecklist, setAnalysisPlanApproval } from "@/runtime/workflow"
 import {
   workflowAnalysisPlanHeader,
@@ -663,12 +663,22 @@ export const DataImportTool = Tool.define("data_import", {
         `Retry budget exhausted for data_import in this session (${retryBudget.count}/${retryBudget.max}). Inspect the reflection logs and repair the failed stage before retrying.`,
       )
     }
-    const pythonStatus = await getRuntimePythonStatus()
+    // 参数校验必须先于任何审批弹窗。否则一个根本无法执行的调用（模型对着"你好"或误触的
+    // "1" 瞎调工具、连数据路径都没给）会先弹出执行计划让用户签字，用户点了同意之后才
+    // 发现参数缺失——白白打扰一次。先在这里拒绝，模型拿到错误自己重来，用户全程无感。
+    requireResolvableInput(params.action, {
+      inputPath: params.inputPath,
+      datasetId: params.datasetId,
+      stageId: params.stageId,
+    })
+
+    const pythonStatus = await ensureRuntimePythonReady()
     if (!pythonStatus.ok || pythonStatus.missing.length) {
       throw new Error(formatRuntimePythonSetupError("data_import", pythonStatus))
     }
     const pythonCommand = pythonStatus.executable
     const installCommand = pythonStatus.installCommand
+
     if (ctx.agent === "analyst") {
       const branch = params.branch ?? "main"
       if (!ANALYST_PRE_APPROVAL_ACTIONS.has(params.action)) {
@@ -758,12 +768,6 @@ export const DataImportTool = Tool.define("data_import", {
         AnalysisIntent.confirmExplorerAction(ctx.sessionID, destructiveSignature)
       }
     }
-
-    requireResolvableInput(params.action, {
-      inputPath: params.inputPath,
-      datasetId: params.datasetId,
-      stageId: params.stageId,
-    })
 
     const directInputPath = params.inputPath
       ? await resolveToolPath({
@@ -2092,5 +2096,3 @@ except Exception as exc:
     }
   },
 })
-
-

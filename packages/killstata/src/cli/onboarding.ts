@@ -1,6 +1,7 @@
 import * as prompts from "@clack/prompts"
 import { Auth, type Auth as AuthType } from "@/auth"
 import { UI } from "@/cli/ui"
+import { ensureRuntimePythonReady } from "@/killstata/runtime-config"
 import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_PROVIDER_ID } from "@/provider/deepseek-policy"
 import { CUSTOM_API_KEY_ENV, CUSTOM_PROVIDER_ID } from "@/provider/model-policy"
 
@@ -56,4 +57,18 @@ export async function ensureFirstRunOnboarding() {
 
   prompts.outro("Ready. Starting KillStata…")
   return true
+}
+
+export async function prepareFirstRunAnalysisRuntime() {
+  const spinner = prompts.spinner()
+  spinner.start("Preparing data analysis tools")
+  try {
+    const status = await ensureRuntimePythonReady()
+    if (!status.ok || status.missing.length > 0) throw new Error(status.error ?? "Analysis tools are incomplete.")
+    spinner.stop("Data analysis tools are ready")
+    return true
+  } catch {
+    spinner.stop("Data analysis tools will finish preparing when you first analyze data", 1)
+    return false
+  }
 }

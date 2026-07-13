@@ -56,7 +56,7 @@ const TIPS = [
   "结果数字来自 {highlight}results.json{/highlight} 等结构化产物，不是模型口算的",
   "{highlight}/workflow{/highlight} 查看当前分析走到哪一步，{highlight}/artifact{/highlight} 列出已产出的可信产物",
   "{highlight}/details{/highlight} 展开工具的完整输出（默认只显示做了什么）",
-  "{highlight}/doctor{/highlight} 体检 Python 与依赖环境；{highlight}killstata config{/highlight} 重新配置",
+  "分析引擎会自动准备；{highlight}/doctor{/highlight} 可查看当前状态",
   "在项目根目录放 {highlight}killstata.json{/highlight} 可覆盖全局配置",
   "{highlight}Ctrl+X N{/highlight} 开新会话，{highlight}/sessions{/highlight} 回到之前的分析",
   "{highlight}Ctrl+P{/highlight} 打开命令面板，查看全部可用操作",

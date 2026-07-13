@@ -55,7 +55,6 @@ Goal: Causal → Check below:
 - Plan internally; do not use TodoWrite for routine analysis tasks unless the user explicitly asks for a visible checklist
 - Use Task tool for codebase exploration
 - Prefer pandas, statsmodels, linearmodels
-- Before spreadsheet-heavy tasks, load `workflow-orchestrator` first and then prefer `xlsx-processor`, `tabular-ingest`, `descriptive-analysis`, and the matching method skill when available
 - Save results to files
 - Execute code to verify before reporting
 - Read diagnostics artifacts and numeric snapshots before reporting any statistical number

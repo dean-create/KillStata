@@ -15,15 +15,12 @@ import { FormatError, FormatUnknownError } from "./cli/error"
 import { ServeCommand } from "./cli/cmd/serve"
 import { DebugCommand } from "./cli/cmd/debug"
 import { StatsCommand } from "./cli/cmd/stats"
-import { McpCommand } from "./cli/cmd/mcp"
 import { ExportCommand } from "./cli/cmd/export"
 import { ImportCommand } from "./cli/cmd/import"
 import { AttachCommand } from "./cli/cmd/tui/attach"
 import { TuiThreadCommand } from "./cli/cmd/tui/thread"
 import { EOL } from "os"
 import { SessionCommand } from "./cli/cmd/session"
-import { InitCommand } from "./cli/cmd/init"
-import { SkillsCommand } from "./cli/cmd/skills"
 import { ConfigCommand } from "./cli/cmd/config"
 import { ensureKillstataHomeDirectories } from "./killstata/runtime-config"
 
@@ -78,7 +75,6 @@ const parser = yargs(hideBin(process.argv))
   })
   .usage("\n" + UI.logo())
   .completion("completion", "generate shell completion script")
-  .command(McpCommand)
   .command(TuiThreadCommand)
   .command(AttachCommand)
   .command(RunCommand)
@@ -95,8 +91,6 @@ const parser = yargs(hideBin(process.argv))
   .command(ImportCommand)
   .command(SessionCommand)
   .command(ConfigCommand)
-  .command(InitCommand)
-  .command(SkillsCommand)
   .fail((msg, err) => {
     if (
       msg?.startsWith("Unknown argument") ||

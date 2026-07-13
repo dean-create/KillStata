@@ -1,5 +1,3 @@
-﻿import { formatSkillAliasXml, resolveSkillAliasAvailability, Skill } from "../skill"
-import { ConfigMarkdown } from "../config/markdown"
 
 import { Instance } from "../project/instance"
 import path from "path"
@@ -133,22 +131,6 @@ When user describes a research question, determine the appropriate method:
 - Use 'heterogeneity_runner' only after a baseline result exists and only when subgroup or mechanism variables are explicit.
 - Use 'paper_draft' and 'slide_generator' only from saved structured artifacts; never report unsupported numbers from memory in those stages.
 - Use the data_import tool for data preprocessing and QA
-- Do not use Stata MCP tools for the default killstata econometric workflow unless the user explicitly asks for Stata-side verification or direct Stata execution.
-- For the primary workflow, prefer killstata's own data_import, econometrics, regression_table, workflow, and saved structured artifacts instead of external Stata sessions.
-- Use Stata MCP only as an explicit sidecar validation path after the core killstata workflow succeeds, not as the main execution path.
-- Before complex spreadsheet, DTA, or econometric tasks, load workflow-orchestrator first with the skill tool, then load the most relevant specialist skill.
-- Skill aliases:
-  - Excel/XLSX processing -> prefer xlsx-processor, then tabular-ingest
-  - CSV summarization -> prefer descriptive-analysis or the closest csv/tabular profiling skill available
-  - Missing-data handling and variable engineering -> prefer tabular-cleaning, otherwise fall back to data_import
-  - Panel structure checks -> prefer panel-data-qa before estimation
-  - Idea formation and pre-analysis scoping -> prefer research-briefing
-  - DID / IV / PSM / RDD -> prefer did-estimation / iv-estimation / psm-estimation / rdd-estimation when the design is already known
-  - Diagnostic testing and robustness -> prefer robustness-check and regression-reporting, otherwise fall back to econometrics diagnostics
-  - Post-baseline heterogeneity or mechanism work -> prefer heterogeneity-analysis
-  - Paper drafting -> prefer paper-drafting
-  - Academic seminar deck generation -> prefer slide-generator
-- Prefer project-local skills first, then user-installed skills, then builtin skills with the same name.
 - Save every intermediate dataset and audit file when cleaning data
 - Intermediate datasets should be Parquet stages; inspection files should be CSV/XLSX
 - Treat inspection CSV/XLSX as user-facing audit artifacts, not default read targets for the analysis agent.
@@ -175,29 +157,7 @@ When user describes a research question, determine the appropriate method:
 - 6. If any blocking issue appears, repair it and rerun the affected estimation stage.
 - 7. Limit retries to three rounds. After three failed rounds, report the issue clearly and ask the user to decide.
 
-## Automatic Skill Loading
-- Before execution, auto-load skills using these rules:
-- Excel/DTA/CSV input -> load tabular-ingest; for multi-sheet Excel work, prefer xlsx-processor.
-- Cleaning, filtering, normalization, or recoding requests -> load tabular-cleaning.
-- Missing-data handling -> load missing-data-handler.
-- Interaction terms, logs, lags, or grouped feature construction -> load variable-engineering.
-- Fast CSV understanding -> load csv-summarizer.
-- Panel QA -> load panel-data-qa.
-- After regression -> load diagnostic-testing and regression-reporting.
-- Robustness requests -> load robustness-check.
 `
-
-async function buildSkillAliasSummary() {
-  const aliases = await resolveSkillAliasAvailability().catch(() => [])
-  return formatSkillAliasXml(aliases)
-}
-
-type AutoSkillContext = {
-  intent: "ingest"
-  trigger: string
-  skills: string[]
-  files: string[]
-}
 
 export namespace SystemPrompt {
   export function agent(agent: Agent.Info) {
@@ -211,8 +171,6 @@ export namespace SystemPrompt {
           "- Ask for confirmation before running estimation or execution-heavy data steps. After approval, execute the checklist stage by stage instead of skipping straight to regression.",
           "- Keep all user-visible workflow checklists, approval prompts, and follow-up execution guidance in the user's language. When the user is writing in Chinese, those workflow-facing texts must be Chinese too.",
           "- Reuse Explorer-produced canonical datasets, QA evidence, and cleaning artifacts whenever they already exist.",
-          "- Before non-trivial econometric analysis, load workflow-orchestrator with the skill tool, then load the most relevant specialist skill.",
-          "- Prefer descriptive-analysis, did-estimation, iv-estimation, psm-estimation, rdd-estimation, regression-reporting, robustness-check, research-briefing, heterogeneity-analysis, paper-drafting, and slide-generator when the task matches them.",
           '- If the user asks for a reasonable baseline, a standard baseline, or says to choose the model yourself, default to econometrics with methodName="smart_baseline".',
           '- If the user asks for recommendation only, without execution, default to econometrics with methodName="auto_recommend".',
           "- If the user explicitly names an estimator, respect that estimator unless it is not executable with the available variables or identifiers.",
@@ -236,8 +194,6 @@ export namespace SystemPrompt {
           "- Before any row deletion, filter removal, dropna, rollback, or other deletion-like data operation, ask the user to confirm.",
           "- Do not run formal econometric estimation, regression tables, or report-generation tools by default; hand clean datasets and artifacts off to Analyst for the empirical study plan.",
           "- Keep user-facing updates brief and report-like; emphasize dataset state, cleaning effects, QA findings, and produced artifacts.",
-          "- Before spreadsheet, CSV, Excel, or DTA processing, load workflow-orchestrator with the skill tool, then load the most relevant specialist skill.",
-          "- Prefer xlsx-processor, tabular-ingest, tabular-cleaning, and panel-data-qa when the task matches them.",
         ].join("\n"),
       ]
     }
@@ -277,8 +233,6 @@ export namespace SystemPrompt {
   export async function environment(input?: { messages?: MessageV2.WithParts[] }) {
     const project = Instance.project
     const dataSummary = await buildDataSummary(input?.messages)
-    const skillSummary = await buildSkillAliasSummary()
-    const autoSkillContext = await buildAutoSkillContext(input?.messages)
 
     return [
       [
@@ -290,102 +244,10 @@ export namespace SystemPrompt {
         `  Today's date: ${new Date().toDateString()}`,
         `</env>`,
         dataSummary,
-        skillSummary,
-        autoSkillContext,
       ]
         .filter(Boolean)
         .join("\n"),
     ]
-  }
-
-  function latestUserInputText(messages: MessageV2.WithParts[] = []) {
-    const latest = [...messages].reverse().find((message) => message.info.role === "user")
-    if (!latest) return ""
-    return latest.parts
-      .map((part) => {
-        if (part.type === "text") return part.text
-        if (part.type === "file") {
-          const sourcePath = part.source?.type === "file" ? part.source.path : ""
-          return [part.filename, part.url, sourcePath].filter(Boolean).join(" ")
-        }
-        return ""
-      })
-      .join("\n")
-  }
-
-  function detectAutoSkillContext(messages: MessageV2.WithParts[] = [], dataFiles: string[] = []): AutoSkillContext | undefined {
-    const latestText = latestUserInputText(messages)
-    const excelFiles = dataFiles.filter((file) => /\.(xlsx|xls)$/i.test(file))
-    const mentionedExcel =
-      /\.(xlsx|xls)\b/i.test(latestText) || /\b(excel|spreadsheet|workbook)\b/i.test(latestText) || /表格|工作簿/.test(latestText)
-    const asksForDataWork = /读取|导入|清洗|筛选|分析|回归|统计|数据|read|import|clean|analy[sz]e|regress/.test(latestText)
-
-    if (mentionedExcel || (excelFiles.length > 0 && asksForDataWork)) {
-      return {
-        intent: "ingest",
-        trigger: mentionedExcel ? "latest_user_excel_reference" : "workspace_excel_candidate",
-        skills: ["workflow-orchestrator", "xlsx-processor", "tabular-ingest"],
-        files: excelFiles.slice(0, 5),
-      }
-    }
-
-    if (/\.(csv|dta|sav)\b/i.test(latestText)) {
-      return {
-        intent: "ingest",
-        trigger: "latest_user_tabular_reference",
-        skills: ["workflow-orchestrator", "tabular-ingest"],
-        files: dataFiles.filter((file) => /\.(csv|dta|sav)$/i.test(file)).slice(0, 5),
-      }
-    }
-
-    return undefined
-  }
-
-  async function loadSkillPromptSnippet(skillName: string) {
-    const skill = await Skill.get(skillName).catch(() => undefined)
-    if (!skill) return undefined
-    const parsed = await ConfigMarkdown.parse(skill.location).catch(() => undefined)
-    if (!parsed) return undefined
-    // 这里不是替模型“执行 skill”，而是把匹配 skill 固化成当前 stage 的规则上下文。
-    // 这样 Excel 输入不会只靠模型自觉调用 skill，而是每轮 prompt 都能看到导入 SOP。
-    const content = parsed.content.trim()
-    const maxLength = 2_800
-    const safeContent = content.length > maxLength ? `${content.slice(0, maxLength)}\n[truncated]` : content
-    return [
-      `  <skill name="${skill.name}" source="${skill.source}">`,
-      safeContent
-        .split(/\r?\n/)
-        .map((line) => `    ${line}`)
-        .join("\n"),
-      "  </skill>",
-    ].join("\n")
-  }
-
-  async function buildAutoSkillContext(messages?: MessageV2.WithParts[]) {
-    const dataFiles = await scanDataFiles(Instance.directory)
-    const context = detectAutoSkillContext(messages, dataFiles)
-    if (!context) return ""
-    const snippets = (
-      await Promise.all(context.skills.map((skillName) => loadSkillPromptSnippet(skillName)))
-    ).filter((item): item is string => typeof item === "string" && item.length > 0)
-
-    if (snippets.length === 0) return ""
-
-    return [
-      "<auto_skill_context>",
-      `  Intent: ${context.intent}`,
-      `  Trigger: ${context.trigger}`,
-      context.files.length > 0 ? `  Candidate files: ${context.files.join(", ")}` : "",
-      "  Required execution contract:",
-      "  - Treat these loaded skills as stage prompt rules, not as executable readers.",
-      "  - For Excel intake, inspect sheet choices when needed, then call data_import with action=\"import\".",
-      "  - Use data_import/Python to create the canonical Parquet stage, schema, inspection files, and audit log.",
-      "  - Do not jump to econometrics/reporting before import and QA have produced trusted artifacts.",
-      ...snippets,
-      "</auto_skill_context>",
-    ]
-      .filter(Boolean)
-      .join("\n")
   }
 
   async function scanDataFiles(directory: string): Promise<string[]> {

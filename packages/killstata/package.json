@@ -55,7 +55,6 @@
     "bin/",
     "parsers-config.ts",
     "src/",
-    "skills/",
     "python/**/*.py",
     "python/README.md",
     "script/postinstall.mjs",

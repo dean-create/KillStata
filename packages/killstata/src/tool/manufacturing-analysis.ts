@@ -10,7 +10,7 @@ import { buildFileStamp, projectHealthRoot, projectTempRoot } from "./analysis-s
 import { relativeWithinProject, resolveToolPath } from "./analysis-path"
 import { createToolDisplay } from "./analysis-display"
 import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./analysis-user-view"
-import { formatRuntimePythonSetupError, getRuntimePythonStatus } from "@/killstata/runtime-config"
+import { ensureRuntimePythonReady, formatRuntimePythonSetupError } from "@/killstata/runtime-config"
 
 const log = Log.create({ service: "manufacturing-analysis-tool" })
 const PYTHON_RESULT_PREFIX = "__KILLSTATA_MANUFACTURING_JSON__"
@@ -564,7 +564,7 @@ export const ManufacturingAnalysisTool = Tool.define("manufacturing_analysis", {
   description: DESCRIPTION,
   parameters: ManufacturingAnalysisSchema,
   async execute(params: ManufacturingAnalysisParams, ctx) {
-    const pythonStatus = await getRuntimePythonStatus(["pandas", "numpy", "scipy", "openpyxl", "python-docx"])
+    const pythonStatus = await ensureRuntimePythonReady(["pandas", "numpy", "scipy", "openpyxl", "python-docx"])
     if (!pythonStatus.ok || pythonStatus.missing.length) {
       throw new Error(formatRuntimePythonSetupError("manufacturing_analysis", pythonStatus))
     }

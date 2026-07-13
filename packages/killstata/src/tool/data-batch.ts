@@ -13,7 +13,7 @@ import { buildFileStamp, projectHealthRoot, projectTempRoot } from "./analysis-s
 import { relativeWithinProject, resolveToolPath } from "./analysis-path"
 import { createToolDisplay } from "./analysis-display"
 import { createToolAnalysisView, analysisArtifact, analysisMetric } from "./analysis-user-view"
-import { formatRuntimePythonSetupError, getRuntimePythonStatus } from "@/killstata/runtime-config"
+import { ensureRuntimePythonReady, formatRuntimePythonSetupError } from "@/killstata/runtime-config"
 import { Instance } from "../project/instance"
 
 const DEFAULT_EXPORT_FORMAT = "xlsx" as const
@@ -485,7 +485,7 @@ async function detectExcelLayout(input: {
   requestedColumns: string[]
   columnAliases?: ColumnAliases
 }) {
-  const pythonStatus = await getRuntimePythonStatus()
+  const pythonStatus = await ensureRuntimePythonReady()
   if (!pythonStatus.ok || pythonStatus.missing.length) {
     throw new Error(formatRuntimePythonSetupError("data_batch", pythonStatus))
   }

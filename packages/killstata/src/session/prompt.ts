@@ -306,8 +306,6 @@ export namespace SessionPrompt {
       metadata: {
         messageID: message.info.id,
         intent: detectedIntent,
-        autoSkillBundle:
-          detectedIntent === "ingest" ? ["workflow-orchestrator", "xlsx-processor", "tabular-ingest"] : undefined,
         hasImageInput: input.parts.some((part) => part.type === "file" && part.mime?.startsWith("image/")),
         inputGraph: inputGraphFromParts(input.parts, detectedIntent),
         ...(input.queueMetadata ?? {}),

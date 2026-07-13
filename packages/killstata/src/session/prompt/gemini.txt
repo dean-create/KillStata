@@ -85,7 +85,6 @@ Always check and report:
 - **Code Execution:** Use bash for running Python scripts
 - **Data Tools:** pandas, statsmodels, linearmodels, scipy.stats
 - **Visualization:** matplotlib, seaborn for publication figures
-- **Skills:** Load `workflow-orchestrator` first for empirical workflows, then prefer `xlsx-processor`, `tabular-ingest`, `descriptive-analysis`, and the matching method skill for spreadsheet-heavy work
 
 # Tone and Style (CLI Interaction)
 

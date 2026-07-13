@@ -54,7 +54,6 @@ Quality flags: [issues found]
 - Use Read to examine specific files
 - Use Bash for file listing and basic operations
 - Prefer canonical datasetId/stageId artifacts after import rather than repeatedly referencing raw CSV/XLSX/DTA files
-- Before spreadsheet-heavy exploration, load `workflow-orchestrator` first and then prefer `xlsx-processor`, `tabular-ingest`, or `descriptive-analysis` when available
 - Return file paths as absolute paths
 - Do NOT modify any files or run commands that change system state
 - Avoid emojis for clear communication

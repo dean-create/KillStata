@@ -2899,9 +2899,6 @@ export function explainMcpToolForWorkflow(input: {
   if (input.toolName.startsWith("context7_")) {
     reasons.push("blocked because documentation MCP tools are not part of the econometrics workflow")
   }
-  if (input.toolName.startsWith("stata_")) {
-    reasons.push("blocked because Stata MCP is sidecar-only and must not replace core killstata tools")
-  }
   const sidecarIntentReason = explainMcpSidecarIntent(input.toolName)
   if (sidecarIntentReason) {
     reasons.push(sidecarIntentReason)
@@ -2920,7 +2917,7 @@ export function explainMcpToolForWorkflow(input: {
   }
 
   if (reasons.length === 0) {
-    reasons.push("available as a non-Stata MCP sidecar after the core workflow has reached a safe stage")
+    reasons.push("available as an advanced sidecar after the core workflow has reached a safe stage")
   }
 
   return {
