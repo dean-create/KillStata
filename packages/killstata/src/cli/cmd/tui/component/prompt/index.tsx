@@ -1,3 +1,4 @@
+import path from "path"
 import { BoxRenderable, TextareaRenderable, MouseEvent, PasteEvent, t, dim, fg } from "@opentui/core"
 import { createEffect, createMemo, type JSX, onMount, createSignal, onCleanup, Show, Switch, Match, on } from "solid-js"
 import "opentui-spinner/solid"
@@ -743,11 +744,16 @@ export function Prompt(props: PromptProps) {
   }
   const exit = useExit()
 
-  // 从数据文件选择器选中一个文件后，把路径插进输入框（而不是直接发出去）——
-  // 用户通常还想在路径后面补一句「导入并看看面板键有没有重复」。
+  // 选中数据文件后，输入框里显示一枚紧凑的附件标记（[数据文件 panel.xlsx]），
+  // 真正发给模型的是完整路径 —— 由 pasteText 的 virtual/real 映射负责。
+  //
+  // 关键：这里传的是**路径**而不是文件内容。图片走的 pasteAttachment 会把 base64 正文
+  // 塞进消息，对一份几 MB 的 Excel 那样做会当场撑爆上下文窗口。数据文件的正文只能由
+  // data_import 工具去读，模型永远只该看到路径。
   function insertDataFilePath(filePath: string) {
     const needsSpace = input.plainText.length > 0 && !input.plainText.endsWith(" ")
-    input.insertText(`${needsSpace ? " " : ""}${filePath} `)
+    if (needsSpace) input.insertText(" ")
+    pasteText(filePath, `[数据文件 ${path.basename(filePath)}]`)
     input.focus()
   }
 

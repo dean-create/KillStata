@@ -53,10 +53,15 @@ describe("session.system prompt contracts", () => {
       api: { id: "qwen3-max" },
     } as any)
 
-    // The DeepSeek prompt carries tool-call and grounding discipline the generic one does not.
-    expect(deepseekPrompt[0]).toContain("Tool Call Discipline")
-    expect(deepseekPrompt[0]).toContain("Grounding Discipline")
-    expect(genericPrompt[0]).not.toContain("Tool Call Discipline")
+    // 断言的是纪律条款本身，不是标题措辞 —— 标题改写不该让这个测试变红，
+    // 但这两条纪律要是从 DeepSeek prompt 里消失了，它必须红。
+    // 1) 工具参数必须是真 JSON 对象（DeepSeek 会把参数当 JSON 字符串传，tool.ts 里有专门的修复逻辑）
+    expect(deepseekPrompt[0]).toContain("MUST be a real JSON object")
+    // 2) 统计数字只能从产物里读，不能心算 —— 这是防编数字的底线
+    expect(deepseekPrompt[0]).toContain("Never compute or round a statistic in your head")
+
+    // 通用 prompt 走的是另一份文件，不该带上这些 DeepSeek 专属纪律。
+    expect(genericPrompt[0]).not.toContain("MUST be a real JSON object")
 
     // Both still get the econometrics context appended.
     expect(deepseekPrompt).toHaveLength(2)
