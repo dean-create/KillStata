@@ -326,12 +326,11 @@ function App() {
   })
   command.register(() => [
     {
-      title: "Switch session",
+      title: "切换会话",
       value: "session.list",
       keybind: "session_list",
-      category: "Session",
+      category: "核心",
       suggested: sync.data.session.length > 0,
-      hidden: !showAdvancedCommands(),
       slash: {
         name: "sessions",
         aliases: ["resume", "continue"],
@@ -513,16 +512,15 @@ function App() {
       category: "System",
     },
     {
-      title: "Help",
+      title: "帮助",
       value: "help.show",
-      hidden: !showAdvancedCommands(),
       slash: {
         name: "help",
       },
       onSelect: () => {
         dialog.replace(() => <DialogHelp />)
       },
-      category: "System",
+      category: "核心",
     },
     {
       title: "Open docs",
