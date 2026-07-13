@@ -1,6 +1,30 @@
 # PROGRESS
 
-## 当前状态（2026-07-13）：refine.md 全部 19 项完成 ✅ + TUI 输出风格改造 ✅
+## 当前状态（2026-07-13）：refine.md 19 项全部完成 ✅ + TUI 交互改造 ✅（82 测试全绿）
+
+### 第七轮：斜杠命令精简 + 数据文件入口 + 上下文保护
+
+**斜杠命令 13 → 3**：`/progress`（分析进度）、`/results`（分析结果）、`/doctor`（环境检查）。
+删掉 `/stage /rerun /verify /tasks /timeline /restore /tools /skills /diagnostics /agent`——
+「看阶段/看任务/看时间线」这些事直接用自然语言问就行，不该逼用户背命令。
+`/new`（开新对话）此前被 `advanced` 藏着、用户根本看不到，已放出来。
+
+**数据文件入口（新）**：输入框左侧加 📎 标志，`Ctrl+O` 打开选择器。新增 `tool/data-file.ts`
+作为「本产品能处理什么格式」的唯一真相源，只列 `.csv/.xlsx/.xls/.dta`。
+**parquet 故意不列**——它是内部 stage 格式，用户手工挑它会绕过 QA 和 stage 追踪。
+
+**上下文保护**：`isOverflow` 此前是「已经超了才压缩」，零余量。下一轮叠上新用户消息、
+系统提示、工具 schema 就顶爆上限——用户看到的是**硬 API 报错**而不是一次压缩。
+加 10% 安全余量提前触发，测试覆盖 DeepSeek 大窗口与 custom 小窗口两种模型。
+
+**又一个静默失效的 bug**：`compaction` 调的是**旧** permission 模块的 `list()`，但所有真实
+审批都走 `PermissionNext`——旧模块的 `ask()` 全库零调用 → pending 恒为空 → 压缩上下文里
+「未决审批」一直是空的。旧 `permission/index.ts` 已零引用移入 trash；两个模块还定义了
+同名 `permission.replied` 事件但字段不同，导致生成的 openapi schema 取错版本，一并解决。
+
+---
+
+## 历史轮次
 
 四轮迭代，每一处改动都遵循「改一处 → typecheck → 测一处」，全部有真实测试验证。
 
