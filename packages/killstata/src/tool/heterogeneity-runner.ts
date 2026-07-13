@@ -3,6 +3,7 @@ import path from "path"
 import { spawn } from "child_process"
 import z from "zod"
 import DESCRIPTION from "./heterogeneity-runner.txt"
+import { PY_READ_CSV_FALLBACK } from "./python-snippets"
 import { Tool } from "./tool"
 import { Instance } from "../project/instance"
 import { Log } from "../util/log"
@@ -279,10 +280,12 @@ def q(name):
     escaped = str(name).replace("\\\\", "\\\\\\\\").replace('"', '\\\\\\"')
     return f'Q("{escaped}")'
 
+${PY_READ_CSV_FALLBACK}
+
 def read_table(file_path):
     suffix = Path(file_path).suffix.lower()
     if suffix == ".csv":
-        return pd.read_csv(file_path)
+        return read_csv_with_fallback(file_path)
     if suffix in [".xlsx", ".xls"]:
         return pd.read_excel(file_path)
     if suffix == ".dta":

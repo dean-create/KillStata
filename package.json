@@ -1,6 +1,6 @@
 {
   "name": "killstata",
-  "description": "AI-powered development tool",
+  "description": "AI-native CLI for econometric research workflows",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.5",

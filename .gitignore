@@ -42,3 +42,4 @@ packages/nul
 
 # analysis scratch artifacts (never commit)
 temp_data_for_regression*
+.venv-dev/
