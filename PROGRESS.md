@@ -1,8 +1,8 @@
 # PROGRESS
 
-## 当前状态（2026-07-12）：refine.md 全部 19 项完成 ✅
+## 当前状态（2026-07-13）：refine.md 全部 19 项完成 ✅ + TUI 输出风格改造 ✅
 
-三轮迭代，每一处改动都遵循「改一处 → typecheck → 测一处」，全部有真实测试验证。
+四轮迭代，每一处改动都遵循「改一处 → typecheck → 测一处」，全部有真实测试验证。
 
 ### 第一轮：Bug 修复（B1-B11 + C1/C4/C5）
 
@@ -79,4 +79,28 @@
 
 ## 历史索引
 
-- 无归档。
+- 无归档。### 第四轮：TUI 输出风格改造 + 继续做减法（2026-07-13）
+
+**问题**：输出是 OpenCode 那一套——大段铺开代码和 diff，用户要滚很久才能看到结论。
+
+根因（读代码找到的，不是猜的）：`Bash`/`Write`/`Edit` 三个渲染器**完全绕过了已有的
+`showDetails` 门禁**，只要 metadata 里有 output/content/diff 就无条件铺开整块正文。
+而 `GenericTool`（所有计量工具走的路径）本来就做对了，默认只显示一行摘要。
+
+- **工具输出收敛**：Bash → `$ 描述 (12 lines)`；Write → `Write path (48 lines)`；
+  Edit → `Edit path (+12 -3)`。正文/diff/命令输出全部移到 `/details` 后面
+- **prompt 加 Output Rules**：TUI 管不了模型自己往回复里贴什么，所以在 deepseek.txt 里
+  明令禁止贴代码、禁止 dump 原始数据表，改为报形状 + 指产物路径
+- **新增 `/details` 斜杠命令**：这是收敛输出的必要配套——原来的「显示工具详情」开关
+  既没绑快捷键（默认 none）也没有斜杠命令，用户只能翻 Ctrl+P 才能展开
+- **启动屏**：6 行彩虹 ASCII 巨型招牌 → 一行字标 + 一句定位
+- **Tips**：30 条（中英混杂 +「黑客级用法」「顶尖大模型为我附体」）→ 13 条克制专业的中文提示
+- **继续减法**：删 `killstata web`（**坏功能**：server 不 serve 任何前端，打开浏览器只有 404）、
+  死代码 `session/message.ts`(189行)、`kausal/runtime.ts`(309行)、`util/eventloop.ts`、`util/color.ts`
+
+**一处险些误删**：`stata-mcp-server.ts` 静态 grep 显示零引用，但它被 `mcp/stata.ts:12` 通过
+`path.resolve` **运行时字符串引用**——是 Stata MCP（项目卖点）的入口。已核实保留。
+
+验证：typecheck 通过、**51 测试全绿**、全平台 build 成功。
+
+
