@@ -291,39 +291,6 @@ export const SessionRoutes = lazy(() =>
       },
     )
     .post(
-      "/:sessionID/init",
-      describeRoute({
-        summary: "Initialize session",
-        description:
-          "Analyze the current application and create an AGENTS.md file with project-specific agent configurations.",
-        operationId: "session.init",
-        responses: {
-          200: {
-            description: "200",
-            content: {
-              "application/json": {
-                schema: resolver(z.boolean()),
-              },
-            },
-          },
-          ...errors(400, 404),
-        },
-      }),
-      validator(
-        "param",
-        z.object({
-          sessionID: z.string().meta({ description: "Session ID" }),
-        }),
-      ),
-      validator("json", Session.initialize.schema.omit({ sessionID: true })),
-      async (c) => {
-        const sessionID = c.req.valid("param").sessionID
-        const body = c.req.valid("json")
-        await Session.initialize({ ...body, sessionID })
-        return c.json(true)
-      },
-    )
-    .post(
       "/:sessionID/fork",
       describeRoute({
         summary: "Fork session",

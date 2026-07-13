@@ -3,6 +3,7 @@ import path from "path"
 import { spawn } from "child_process"
 import z from "zod"
 import DESCRIPTION from "./heterogeneity-runner.txt"
+import { PY_READ_CSV_FALLBACK } from "./python-snippets"
 import { Tool } from "./tool"
 import { Instance } from "../project/instance"
 import { Log } from "../util/log"
@@ -18,7 +19,6 @@ import {
   resolveArtifactInput,
 } from "./analysis-state"
 import { relativeWithinProject, resolveToolPath } from "./analysis-path"
-import { generateRegressionTable } from "./regression-table"
 import { createToolDisplay } from "./analysis-display"
 import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./analysis-user-view"
 
@@ -43,7 +43,6 @@ const PlaceboSchema = z.union([
   z
     .object({
       variables: z.array(z.string()).optional(),
-      policyTimes: z.array(z.string()).optional(),
       notes: z.string().optional(),
     })
     .passthrough(),
@@ -280,10 +279,12 @@ def q(name):
     escaped = str(name).replace("\\\\", "\\\\\\\\").replace('"', '\\\\\\"')
     return f'Q("{escaped}")'
 
+${PY_READ_CSV_FALLBACK}
+
 def read_table(file_path):
     suffix = Path(file_path).suffix.lower()
     if suffix == ".csv":
-        return pd.read_csv(file_path)
+        return read_csv_with_fallback(file_path)
     if suffix in [".xlsx", ".xls"]:
         return pd.read_excel(file_path)
     if suffix == ".dta":
@@ -644,8 +645,6 @@ def main():
     placebo_vars = []
     if isinstance(placebo, dict):
         placebo_vars = placebo.get("variables") or []
-        if placebo.get("policyTimes"):
-            warnings.append("policyTimes placebo placeholders were provided but are not executed in v1; variable placebos only.")
     elif placebo is True:
         warnings.append("placebo=true received without explicit variables; skipped.")
     for placebo_var in placebo_vars:
@@ -827,44 +826,9 @@ export const HeterogeneityRunnerTool = Tool.define("heterogeneity_runner", {
     const robustnessSpecs = finalizedSpecs.filter(
       (item) => item.spec_type === "placebo" || item.spec_type === "alternative_spec",
     )
-    const tableSpecs = finalizedSpecs.filter(
-      (item) => item.status === "success" && item.spec_type !== "mechanism" && item.result_dir,
-    )
-
-    let heterogeneityTablePaths: { markdown?: string; latex?: string; xlsx?: string } = {}
-    if (tableSpecs.length > 0) {
-      const tableResult = await generateRegressionTable(
-        {
-          title: "Heterogeneity, Placebo, and Alternative Specifications",
-          modelDirs: tableSpecs.map((item) => item.result_dir!),
-          columnLabels: tableSpecs.map((_, idx) => `(${idx + 1})`),
-          columnSubtitles: tableSpecs.map((item) => item.title ?? item.spec_id),
-          variables: ["primary_term"],
-          variableLabels: { primary_term: "Primary effect" },
-          notes: "Notes: each column reports the primary effect of that specification. Standard errors come from the structured outputs of the corresponding model.",
-          formats: ["markdown", "latex", "xlsx"],
-          outputDir: path.join(outputDir, "publication_table"),
-        },
-        ctx,
-      )
-      if (tableResult.success) {
-        if (tableResult.markdown_path) {
-          const target = path.join(outputDir, "heterogeneity_table.md")
-          fs.copyFileSync(tableResult.markdown_path, target)
-          heterogeneityTablePaths.markdown = target
-        }
-        if (tableResult.latex_path) {
-          const target = path.join(outputDir, "heterogeneity_table.tex")
-          fs.copyFileSync(tableResult.latex_path, target)
-          heterogeneityTablePaths.latex = target
-        }
-        if (tableResult.workbook_path) {
-          const target = path.join(outputDir, "heterogeneity_table.xlsx")
-          fs.copyFileSync(tableResult.workbook_path, target)
-          heterogeneityTablePaths.xlsx = target
-        }
-      }
-    }
+    // 三线表已从产品中移除：结果以结构化产物（results.json / coefficient_table.csv）为准，
+    // 呈现交给实验日志。这里保留空的路径对象，下游的可选字段自然全部落空。
+    const heterogeneityTablePaths: { markdown?: string; latex?: string; xlsx?: string } = {}
 
     const heterogeneitySummaryPath = path.join(outputDir, "heterogeneity_summary.json")
     const mechanismSummaryPath = path.join(outputDir, "mechanism_summary.json")

@@ -46,15 +46,16 @@ describe("DeepSeek-only provider policy", () => {
     })
   })
 
-  test("non-DeepSeek models are rejected but DeepSeek API auth can be saved", async () => {
+  test("providers outside the allowlist are rejected but DeepSeek API auth can be saved", async () => {
     await Instance.provide({
       directory: process.cwd(),
       fn: async () => {
-        await expect(Provider.getModel("openai", "gpt-5")).rejects.toThrow(/DeepSeek-only mode/)
+        // "openai" is not one of the two supported providers (deepseek | custom).
+        await expect(Provider.getModel("openai", "gpt-5")).rejects.toThrow(/two providers/)
         await expect(ProviderAuth.authorize({ providerID: "openai", method: 0 })).rejects.toThrow(
           DEEPSEEK_API_KEY_ENV,
         )
-        await expect(ProviderAuth.api({ providerID: "openai", key: "test-key" })).rejects.toThrow(DEEPSEEK_API_KEY_ENV)
+        await expect(ProviderAuth.api({ providerID: "openai", key: "test-key" })).rejects.toThrow(/two providers/)
         await expect(ProviderAuth.api({ providerID: DEEPSEEK_PROVIDER_ID, key: "test-key" })).resolves.toBeUndefined()
       },
     })

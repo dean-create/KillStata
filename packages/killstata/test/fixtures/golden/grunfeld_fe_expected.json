@@ -1,0 +1,29 @@
+{
+  "_provenance": {
+    "dataset": "statsmodels.datasets.grunfeld (11 firms x 20 years = 220 rows)",
+    "spec": "invest ~ value + capital, entity_effects=True, time_effects=True, cov_type=clustered, cluster_entity=True",
+    "generated_with": "linearmodels 6.1 PanelOLS, computed 2026-07-12 via scratchpad venv",
+    "generation_command": "PanelOLS(panel['invest'], panel[['value','capital']], entity_effects=True, time_effects=True, drop_absorbed=True).fit(cov_type='clustered', cluster_entity=True)",
+    "note": "Two-way (entity+time) FE was used, not the textbook one-way FE, because the tool's panel_fe_regression always includes time dummies alongside entity fixed effects (see design_matrix_with_fixed_effects in the pre-migration numpy implementation)."
+  },
+  "n": 220,
+  "entities": 11,
+  "time_periods": 20,
+  "treatment_var": "value",
+  "coefficient": 0.11668113209689081,
+  "std_error_clustered": 0.011254271224770728,
+  "p_value_clustered": 0.0,
+  "capital_coefficient": 0.35143569415740333,
+  "capital_std_error_clustered": 0.04696070001473767,
+  "r_squared_within": 0.7565668429373535,
+  "r_squared_overall": 0.725266994188691,
+  "r_squared_between": 0.7636833005216803,
+  "df_resid": 188,
+  "legacy_numpy": {
+    "_note": "Captured from the pre-migration numpy_fe_cluster backend before rewriting run_panel_fe. Coefficient matches linearmodels to 1e-9 (unbiased point estimate). std_error and r_squared are the buggy values this migration fixes (B4/B5): r_squared is overstated because it doesn't account for the entity fixed effects consumed as degrees of freedom, and the clustered std_error uses a slightly different small-sample correction.",
+    "coefficient": 0.1166811320968914,
+    "std_error": 0.011446608344976605,
+    "r_squared": 0.7747559733623955,
+    "backend": "numpy_fe_cluster"
+  }
+}

@@ -1063,6 +1063,32 @@ function upsertDeliveryRunOutput(input: {
   }
 }
 
+/**
+ * 发布一份「数据集级」的单例产物到用户可见的交付目录：**始终覆盖同名文件**。
+ *
+ * 与 publishDeliveryOutput 的区别：那个是「每次运行留一份」（key/runId/stageId 任一不同就
+ * 新开一个文件，于是有了 xxx_2.md、xxx_3.md），适合回归结果这种一次一份的产物。
+ * 但实验日志是整个数据集的**累积轨迹**——它每次都被重建成"截至目前的全部实验"，
+ * 只该存在最新的一份。用前者会得到一堆过时快照（实验日志.md 只有 1 次实验、
+ * 实验日志_2.md 有 2 次……），用户根本分不清哪个是全的。
+ */
+export function publishDatasetLevelOutput(input: {
+  manifest?: DatasetManifest
+  contextSourcePath?: string
+  runId?: string
+  sourcePath: string
+  fileName: string
+}) {
+  if (!fs.existsSync(input.sourcePath)) return undefined
+  const runId = normalizeRunId(input.runId ?? createRunId())
+  const contextSourcePath = input.manifest?.sourcePath ?? input.contextSourcePath
+  const { bundleDir } = ensureDeliveryBundleAllocation(runId, deliveryBundleParentDir(contextSourcePath))
+  fs.mkdirSync(bundleDir, { recursive: true })
+  const target = path.join(bundleDir, input.fileName)
+  fs.copyFileSync(input.sourcePath, target)
+  return target
+}
+
 export function publishDeliveryOutput(input: {
   manifest?: DatasetManifest
   key: string

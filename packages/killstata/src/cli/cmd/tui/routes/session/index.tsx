@@ -39,7 +39,6 @@ import { TodoWriteTool } from "@/tool/todo"
 import type { GrepTool } from "@/tool/grep"
 import type { ListTool } from "@/tool/ls"
 import type { EditTool } from "@/tool/edit"
-import type { ApplyPatchTool } from "@/tool/apply_patch"
 import type { WebFetchTool } from "@/tool/webfetch"
 import type { TaskTool } from "@/tool/task"
 import type { QuestionTool } from "@/tool/question"
@@ -365,30 +364,6 @@ export function Session() {
   const command = useCommandDialog()
   command.register(() => [
     {
-      title: "分享会话",
-      description: "生成并复制当前会话分享链接",
-      value: "session.share",
-      suggested: route.type === "session",
-      keybind: "session_share",
-      category: "会话",
-      enabled: sync.data.config.share !== "disabled" && !session()?.share?.url,
-      slash: {
-        name: "share",
-      },
-      onSelect: async (dialog) => {
-        await sdk.client.session
-          .share({
-            sessionID: route.sessionID,
-          })
-          .then((res) =>
-            Clipboard.copy(res.data!.share!.url).catch(() => toast.show({ message: "复制链接到剪贴板失败", variant: "error" })),
-          )
-          .then(() => toast.show({ message: "分享链接已复制到剪贴板", variant: "success" }))
-          .catch(() => toast.show({ message: "分享会话失败", variant: "error" }))
-        dialog.clear()
-      },
-    },
-    {
       title: "重命名会话",
       description: "修改当前会话标题",
       value: "session.rename",
@@ -426,29 +401,6 @@ export function Session() {
       },
     },
     {
-      title: "从消息创建分支",
-      description: "从选中的历史消息派生一个新会话",
-      value: "session.fork",
-      keybind: "session_fork",
-      category: "会话",
-      slash: {
-        name: "fork",
-      },
-      onSelect: (dialog) => {
-        dialog.replace(() => (
-          <DialogForkFromTimeline
-            onMove={(messageID) => {
-              const child = scroll.getChildren().find((child) => {
-                return child.id === messageID
-              })
-              if (child) scroll.scrollBy(child.y - scroll.y - 1)
-            }}
-            sessionID={route.sessionID}
-          />
-        ))
-      },
-    },
-    {
       title: "压缩会话上下文",
       description: "总结当前会话，减少后续上下文占用",
       value: "session.compact",
@@ -473,26 +425,6 @@ export function Session() {
           modelID: selectedModel.modelID,
           providerID: selectedModel.providerID,
         })
-        dialog.clear()
-      },
-    },
-    {
-      title: "取消分享会话",
-      description: "撤销当前会话的分享链接",
-      value: "session.unshare",
-      keybind: "session_unshare",
-      category: "会话",
-      enabled: !!session()?.share?.url,
-      slash: {
-        name: "unshare",
-      },
-      onSelect: async (dialog) => {
-        await sdk.client.session
-          .unshare({
-            sessionID: route.sessionID,
-          })
-          .then(() => toast.show({ message: "已取消会话分享", variant: "success" }))
-          .catch(() => toast.show({ message: "取消分享会话失败", variant: "error" }))
         dialog.clear()
       },
     },
@@ -616,23 +548,15 @@ export function Session() {
       },
     },
     {
-      title: "切换 diff 自动换行",
-      description: "切换代码差异视图的自动换行",
-      value: "session.toggle.diffwrap",
-      category: "会话",
-      slash: {
-        name: "diffwrap",
-      },
-      onSelect: (dialog) => {
-        setDiffWrapMode((prev) => (prev === "word" ? "none" : "word"))
-        dialog.clear()
-      },
-    },
-    {
       title: showDetails() ? "隐藏工具详情" : "显示工具详情",
+      description: "展开命令输出、文件正文与完整 diff（默认只显示做了什么）",
       value: "session.toggle.actions",
       keybind: "tool_details",
       category: "会话",
+      // 工具输出默认收敛成一行摘要，所以必须给一个好找的开关把正文调出来。
+      slash: {
+        name: "details",
+      },
       onSelect: (dialog) => {
         setShowDetails((prev) => !prev)
         dialog.clear()
@@ -643,10 +567,8 @@ export function Session() {
       description: "切换通用工具输出内容显示",
       value: "session.toggle.generic_tool_output",
       category: "会话",
-      slash: {
-        name: "tool-output",
-        aliases: ["generic-tool-output"],
-      },
+      // 与 /details 高度重叠，命令面板里只留 /details 一个逃生门就够了。
+      hidden: true,
       onSelect: (dialog) => {
         setShowGenericToolOutput((prev) => !prev)
         dialog.clear()
@@ -1772,9 +1694,6 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "webfetch"}>
           <WebFetch {...toolprops} />
         </Match>
-        <Match when={props.part.tool === "codesearch"}>
-          <CodeSearch {...toolprops} />
-        </Match>
         <Match when={props.part.tool === "websearch"}>
           <WebSearch {...toolprops} />
         </Match>
@@ -1786,9 +1705,6 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         </Match>
         <Match when={props.part.tool === "task"}>
           <Task {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "apply_patch"}>
-          <ApplyPatch {...toolprops} />
         </Match>
         <Match when={props.part.tool === "todowrite"}>
           <TodoWrite {...toolprops} />
@@ -2073,6 +1989,7 @@ function BlockTool(props: { title: string; children: JSX.Element; onClick?: () =
 function Bash(props: ToolProps<typeof BashTool>) {
   const { theme } = useTheme()
   const sync = useSync()
+  const ctx = use()
   const output = createMemo(() => stripAnsi(props.metadata.output?.trim() ?? ""))
   const [expanded, setExpanded] = createSignal(false)
   const lines = createMemo(() => output().split("\n"))
@@ -2080,6 +1997,12 @@ function Bash(props: ToolProps<typeof BashTool>) {
   const limited = createMemo(() => {
     if (expanded() || !overflow()) return output()
     return [...lines().slice(0, 10), "…"].join("\n")
+  })
+  // 默认只报告"跑了什么、产出多少行"，命令输出正文留给 /details 展开。
+  const outputSummary = createMemo(() => {
+    const count = output() ? lines().length : 0
+    if (!count) return ""
+    return count === 1 ? "1 line" : `${count} lines`
   })
 
   const workdirDisplay = createMemo(() => {
@@ -2109,7 +2032,7 @@ function Bash(props: ToolProps<typeof BashTool>) {
 
   return (
     <Switch>
-      <Match when={props.metadata.output !== undefined}>
+      <Match when={ctx.showDetails() && props.metadata.output !== undefined}>
         <BlockTool
           title={title()}
           part={props.part}
@@ -2126,7 +2049,8 @@ function Bash(props: ToolProps<typeof BashTool>) {
       </Match>
       <Match when={true}>
         <InlineTool icon="$" pending="Writing command..." complete={props.input.command} part={props.part}>
-          {props.input.command}
+          {props.input.description ?? props.input.command}
+          <Show when={outputSummary()}> ({outputSummary()})</Show>
         </InlineTool>
       </Match>
     </Switch>
@@ -2135,6 +2059,7 @@ function Bash(props: ToolProps<typeof BashTool>) {
 
 function Write(props: ToolProps<typeof WriteTool>) {
   const { theme, syntax } = useTheme()
+  const ctx = use()
   const code = createMemo(() => {
     if (!props.input.content) return ""
     return props.input.content
@@ -2145,9 +2070,17 @@ function Write(props: ToolProps<typeof WriteTool>) {
     return props.metadata.diagnostics?.[filePath] ?? []
   })
 
+  // 默认只说写了哪个文件、多大，正文不铺给用户。
+  const sizeSummary = createMemo(() => {
+    const content = code()
+    if (!content) return ""
+    const count = content.split("\n").length
+    return count === 1 ? "1 line" : `${count} lines`
+  })
+
   return (
     <Switch>
-      <Match when={props.metadata.diagnostics !== undefined}>
+      <Match when={ctx.showDetails() && props.metadata.diagnostics !== undefined}>
         <BlockTool title={"# Wrote " + normalizePath(props.input.filePath!)} part={props.part}>
           <line_number fg={theme.textMuted} minWidth={3} paddingRight={1}>
             <code
@@ -2172,6 +2105,7 @@ function Write(props: ToolProps<typeof WriteTool>) {
       <Match when={true}>
         <InlineTool icon="←" pending="Preparing write..." complete={props.input.filePath} part={props.part}>
           Write {normalizePath(props.input.filePath!)}
+          <Show when={sizeSummary()}> ({sizeSummary()})</Show>
         </InlineTool>
       </Match>
     </Switch>
@@ -2222,16 +2156,6 @@ function WebFetch(props: ToolProps<typeof WebFetchTool>) {
   return (
     <InlineTool icon="%" pending="Fetching from the web..." complete={(props.input as any).url} part={props.part}>
       WebFetch {(props.input as any).url}
-    </InlineTool>
-  )
-}
-
-function CodeSearch(props: ToolProps<any>) {
-  const input = props.input as any
-  const metadata = props.metadata as any
-  return (
-    <InlineTool icon="◇" pending="Searching code..." complete={input.query} part={props.part}>
-      Exa Code Search "{input.query}" <Show when={metadata.results}>({metadata.results} results)</Show>
     </InlineTool>
   )
 }
@@ -2321,9 +2245,23 @@ function Edit(props: ToolProps<typeof EditTool>) {
     return arr.filter((x) => x.severity === 1).slice(0, 3)
   })
 
+  // 默认不铺 diff，只报告改动规模（+N -M），完整 diff 留给 /details。
+  const changeSummary = createMemo(() => {
+    const diff = diffContent()
+    if (!diff) return ""
+    let added = 0
+    let removed = 0
+    for (const line of diff.split("\n")) {
+      if (line.startsWith("+") && !line.startsWith("+++")) added++
+      else if (line.startsWith("-") && !line.startsWith("---")) removed++
+    }
+    if (!added && !removed) return ""
+    return `+${added} -${removed}`
+  })
+
   return (
     <Switch>
-      <Match when={props.metadata.diff !== undefined}>
+      <Match when={ctx.showDetails() && props.metadata.diff !== undefined}>
         <BlockTool title={"← Edit " + normalizePath(props.input.filePath!)} part={props.part}>
           <box paddingLeft={1}>
             <diff
@@ -2362,81 +2300,8 @@ function Edit(props: ToolProps<typeof EditTool>) {
       </Match>
       <Match when={true}>
         <InlineTool icon="←" pending="Preparing edit..." complete={props.input.filePath} part={props.part}>
-          Edit {normalizePath(props.input.filePath!)} {input({ replaceAll: props.input.replaceAll })}
-        </InlineTool>
-      </Match>
-    </Switch>
-  )
-}
-
-function ApplyPatch(props: ToolProps<typeof ApplyPatchTool>) {
-  const ctx = use()
-  const { theme, syntax } = useTheme()
-
-  const files = createMemo(() => props.metadata.files ?? [])
-
-  const view = createMemo(() => {
-    const diffStyle = ctx.sync.data.config.tui?.diff_style
-    if (diffStyle === "stacked") return "unified"
-    return ctx.width > 120 ? "split" : "unified"
-  })
-
-  function Diff(p: { diff: string; filePath: string }) {
-    return (
-      <box paddingLeft={1}>
-        <diff
-          diff={p.diff}
-          view={view()}
-          filetype={filetype(p.filePath)}
-          syntaxStyle={syntax()}
-          showLineNumbers={true}
-          width="100%"
-          wrapMode={ctx.diffWrapMode()}
-          fg={theme.text}
-          addedBg={theme.diffAddedBg}
-          removedBg={theme.diffRemovedBg}
-          contextBg={theme.diffContextBg}
-          addedSignColor={theme.diffHighlightAdded}
-          removedSignColor={theme.diffHighlightRemoved}
-          lineNumberFg={theme.diffLineNumber}
-          lineNumberBg={theme.diffContextBg}
-          addedLineNumberBg={theme.diffAddedLineNumberBg}
-          removedLineNumberBg={theme.diffRemovedLineNumberBg}
-        />
-      </box>
-    )
-  }
-
-  function title(file: { type: string; relativePath: string; filePath: string; deletions: number }) {
-    if (file.type === "delete") return "# Deleted " + file.relativePath
-    if (file.type === "add") return "# Created " + file.relativePath
-    if (file.type === "move") return "# Moved " + normalizePath(file.filePath) + " → " + file.relativePath
-    return "← Patched " + file.relativePath
-  }
-
-  return (
-    <Switch>
-      <Match when={files().length > 0}>
-        <For each={files()}>
-          {(file) => (
-            <BlockTool title={title(file)} part={props.part}>
-              <Show
-                when={file.type !== "delete"}
-                fallback={
-                  <text fg={theme.diffRemoved}>
-                    -{file.deletions} line{file.deletions !== 1 ? "s" : ""}
-                  </text>
-                }
-              >
-                <Diff diff={file.diff} filePath={file.filePath} />
-              </Show>
-            </BlockTool>
-          )}
-        </For>
-      </Match>
-      <Match when={true}>
-        <InlineTool icon="%" pending="Preparing apply_patch..." complete={false} part={props.part}>
-          apply_patch
+          Edit {normalizePath(props.input.filePath!)}
+          <Show when={changeSummary()}> ({changeSummary()})</Show>
         </InlineTool>
       </Match>
     </Switch>

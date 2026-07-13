@@ -156,6 +156,40 @@ describe("tool.econometrics", () => {
     })
   })
 
+  test("panel_fe_regression names the offending column instead of a generic 'no usable rows' error when a covariate is text", async () => {
+    if (!(await supportsEconometricsRuntime())) return
+    await withInstance(async (root) => {
+      const csvPath = path.join(root, "panel_text_covariate.csv")
+      const rows = [
+        "firm_id,year,did,y,region",
+        "1,2020,0,1.0,north",
+        "1,2021,1,2.4,north",
+        "2,2020,0,1.5,south",
+        "2,2021,1,2.8,south",
+        "3,2020,0,0.9,east",
+        "3,2021,1,2.2,east",
+      ]
+      fs.writeFileSync(csvPath, rows.join("\n"), "utf-8")
+
+      const tool = await EconometricsTool.init()
+      await expect(
+        tool.execute(
+          {
+            methodName: "panel_fe_regression",
+            dataPath: "panel_text_covariate.csv",
+            dependentVar: "y",
+            treatmentVar: "did",
+            covariates: ["region"],
+            entityVar: "firm_id",
+            timeVar: "year",
+            outputDir: "outputs/panel_text_covariate_case",
+          },
+          ctx as any,
+        ),
+      ).rejects.toThrow(/do not look numeric.*region/s)
+    })
+  })
+
   test("runs static DID with panel identifiers and treatment timing", async () => {
     if (!(await supportsEconometricsRuntime())) return
     await withInstance(async (root) => {

@@ -11,7 +11,6 @@ import { SDKProvider, useSDK } from "@tui/context/sdk"
 import { SyncProvider, useSync } from "@tui/context/sync"
 import { LocalProvider, useLocal } from "@tui/context/local"
 import { DialogModel, useConnected } from "@tui/component/dialog-model"
-import { DialogMcp } from "@tui/component/dialog-mcp"
 import { DialogStatus } from "@tui/component/dialog-status"
 import { DialogThemeList } from "@tui/component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
@@ -327,12 +326,11 @@ function App() {
   })
   command.register(() => [
     {
-      title: "Switch session",
+      title: "切换会话",
       value: "session.list",
       keybind: "session_list",
-      category: "Session",
+      category: "核心",
       suggested: sync.data.session.length > 0,
-      hidden: !showAdvancedCommands(),
       slash: {
         name: "sessions",
         aliases: ["resume", "continue"],
@@ -342,12 +340,11 @@ function App() {
       },
     },
     {
-      title: "New session",
+      title: "开启新对话",
       suggested: route.data.type === "session",
       value: "session.new",
       keybind: "session_new",
       category: "Session",
-      hidden: !showAdvancedCommands(),
       slash: {
         name: "new",
         aliases: ["clear"],
@@ -420,6 +417,7 @@ function App() {
     },
     {
       title: "智能体",
+      hidden: !showAdvancedCommands(),
       description: "切换 Analyst、Explorer 等工作智能体",
       value: "agent.list",
       keybind: "agent_list",
@@ -430,19 +428,6 @@ function App() {
       },
       onSelect: () => {
         dialog.replace(() => <DialogAgent />)
-      },
-    },
-    {
-      title: "MCP 服务",
-      value: "mcp.list",
-      category: "高级",
-      hidden: !showAdvancedCommands(),
-      slash: {
-        name: "mcps",
-        aliases: ["mcp"],
-      },
-      onSelect: () => {
-        dialog.replace(() => <DialogMcp />)
       },
     },
     {
@@ -494,6 +479,8 @@ function App() {
       description: "查看当前会话、模型和服务状态",
       keybind: "status_view",
       value: "killstata.status",
+      // 藏进 advanced：会话/模型状态已经在底栏常驻显示，命令面板里再放一条是噪音。
+      hidden: !showAdvancedCommands(),
       slash: {
         name: "status",
       },
@@ -526,16 +513,15 @@ function App() {
       category: "System",
     },
     {
-      title: "Help",
+      title: "帮助",
       value: "help.show",
-      hidden: !showAdvancedCommands(),
       slash: {
         name: "help",
       },
       onSelect: () => {
         dialog.replace(() => <DialogHelp />)
       },
-      category: "System",
+      category: "核心",
     },
     {
       title: "Open docs",
@@ -548,25 +534,14 @@ function App() {
       category: "System",
     },
     {
-      title: "Open WebUI",
-      value: "webui.open",
-      hidden: !showAdvancedCommands(),
-      onSelect: () => {
-        open(sdk.url).catch(() => { })
-        dialog.clear()
-      },
-      category: "System",
-    },
-    {
-      title: "Exit the app",
+      title: "退出 killstata",
       value: "app.exit",
-      hidden: !showAdvancedCommands(),
       slash: {
         name: "exit",
         aliases: ["quit", "q"],
       },
       onSelect: () => exit(),
-      category: "System",
+      category: "核心",
     },
     {
       title: "Toggle debug panel",

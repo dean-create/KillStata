@@ -3,7 +3,6 @@ import { BashTool, ShellTool } from "./bash"
 import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
-import { BatchTool } from "./batch"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
 import { TodoWriteTool, TodoReadTool } from "./todo"
@@ -20,22 +19,13 @@ import { type ToolDefinition } from "@killstata/plugin"
 import z from "zod"
 import { Plugin } from "../plugin"
 import { WebSearchTool } from "./websearch"
-import { CodeSearchTool } from "./codesearch"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
-import { LspTool } from "./lsp"
 import { Truncate } from "./truncation"
-import { PlanExitTool, PlanEnterTool } from "./plan"
-import { ApplyPatchTool } from "./apply_patch"
 import { EconometricsTool } from "./econometrics"
 import { DataImportTool } from "./data-import"
-import { DataBatchTool } from "./data-batch"
-import { ManufacturingAnalysisTool } from "./manufacturing-analysis"
-import { RegressionTableTool } from "./regression-table"
-import { ResearchBriefTool } from "./research-brief"
 import { HeterogeneityRunnerTool } from "./heterogeneity-runner"
-import { PaperDraftTool } from "./paper-draft"
-import { SlideGeneratorTool } from "./slide-generator"
+import { ExperimentLogTool } from "./experiment-log"
 import { WorkflowTool } from "./workflow"
 import { resolveToolAvailability, workflowToolPolicy } from "@/runtime/workflow"
 import type { ToolAvailabilityPolicy } from "@/runtime/types"
@@ -120,22 +110,12 @@ export namespace ToolRegistry {
       TodoWriteTool,
       TodoReadTool,
       WebSearchTool,
-      CodeSearchTool,
       SkillTool,
       WorkflowTool,
-      ApplyPatchTool,
       EconometricsTool,
-      RegressionTableTool,
       DataImportTool,
-      DataBatchTool,
-      ManufacturingAnalysisTool,
-      ResearchBriefTool,
       HeterogeneityRunnerTool,
-      PaperDraftTool,
-      SlideGeneratorTool,
-      ...(Flag.KILLSTATA_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
-      ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
-      ...(Flag.KILLSTATA_EXPERIMENTAL_PLAN_MODE && Flag.KILLSTATA_CLIENT === "cli" ? [PlanExitTool, PlanEnterTool] : []),
+      ExperimentLogTool,
       ...custom,
     ]
   }
@@ -173,16 +153,10 @@ export namespace ToolRegistry {
       tools
         .filter((t) => {
           if (!workflowAllowed.has(t.id)) return false
-          // Enable websearch/codesearch for zen users OR via enable flag
-          if (t.id === "codesearch" || t.id === "websearch") {
+          // Enable websearch for zen users OR via enable flag
+          if (t.id === "websearch") {
             return model.providerID === "killstata" || Flag.KILLSTATA_ENABLE_EXA
           }
-
-          // use apply tool in same format as codex
-          const usePatch =
-            model.modelID.includes("gpt-") && !model.modelID.includes("oss") && !model.modelID.includes("gpt-4")
-          if (t.id === "apply_patch") return usePatch
-          if (t.id === "edit" || t.id === "write") return !usePatch
 
           return true
         })

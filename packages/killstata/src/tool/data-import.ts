@@ -3,6 +3,7 @@ import * as fs from "fs"
 import * as path from "path"
 import { spawn, exec } from "child_process"
 import DESCRIPTION from "./data-import.txt"
+import { PY_READ_CSV_FALLBACK } from "./python-snippets"
 import { Instance } from "../project/instance"
 import { Log } from "../util/log"
 import { Tool } from "./tool"
@@ -55,7 +56,7 @@ import {
   analysisMetric,
   createToolAnalysisView,
 } from "./analysis-user-view"
-import { formatRuntimePythonSetupError, getRuntimePythonStatus } from "@/killstata/runtime-config"
+import { ensureRuntimePythonReady, formatRuntimePythonSetupError } from "@/killstata/runtime-config"
 import { ensureAnalysisPlan, formatAnalysisChecklist, setAnalysisPlanApproval } from "@/runtime/workflow"
 import {
   workflowAnalysisPlanHeader,
@@ -208,10 +209,10 @@ export function schemaLooksLikeMojibake(schemaPath?: string) {
   try {
     const raw = fs.readFileSync(schemaPath, "utf-8")
     const parsed = JSON.parse(raw) as {
-      columns?: Array<{ name?: string; label?: string }>
+      schema?: Array<{ name?: string }>
     }
-    const columns = Array.isArray(parsed.columns) ? parsed.columns : []
-    return columns.some((column) => looksLikeMojibake(column.name) || looksLikeMojibake(column.label))
+    const columns = Array.isArray(parsed.schema) ? parsed.schema : []
+    return columns.some((column) => looksLikeMojibake(column.name))
   } catch {
     return false
   }
@@ -662,12 +663,22 @@ export const DataImportTool = Tool.define("data_import", {
         `Retry budget exhausted for data_import in this session (${retryBudget.count}/${retryBudget.max}). Inspect the reflection logs and repair the failed stage before retrying.`,
       )
     }
-    const pythonStatus = await getRuntimePythonStatus()
+    // 参数校验必须先于任何审批弹窗。否则一个根本无法执行的调用（模型对着"你好"或误触的
+    // "1" 瞎调工具、连数据路径都没给）会先弹出执行计划让用户签字，用户点了同意之后才
+    // 发现参数缺失——白白打扰一次。先在这里拒绝，模型拿到错误自己重来，用户全程无感。
+    requireResolvableInput(params.action, {
+      inputPath: params.inputPath,
+      datasetId: params.datasetId,
+      stageId: params.stageId,
+    })
+
+    const pythonStatus = await ensureRuntimePythonReady()
     if (!pythonStatus.ok || pythonStatus.missing.length) {
       throw new Error(formatRuntimePythonSetupError("data_import", pythonStatus))
     }
     const pythonCommand = pythonStatus.executable
     const installCommand = pythonStatus.installCommand
+
     if (ctx.agent === "analyst") {
       const branch = params.branch ?? "main"
       if (!ANALYST_PRE_APPROVAL_ACTIONS.has(params.action)) {
@@ -757,12 +768,6 @@ export const DataImportTool = Tool.define("data_import", {
         AnalysisIntent.confirmExplorerAction(ctx.sessionID, destructiveSignature)
       }
     }
-
-    requireResolvableInput(params.action, {
-      inputPath: params.inputPath,
-      datasetId: params.datasetId,
-      stageId: params.stageId,
-    })
 
     const directInputPath = params.inputPath
       ? await resolveToolPath({
@@ -1138,10 +1143,12 @@ def build_schema(df):
         )
     return schema
 
+${PY_READ_CSV_FALLBACK}
+
 def read_table(file_path):
     suffix = Path(file_path).suffix.lower()
     if suffix == ".csv":
-        return pd.read_csv(file_path)
+        return read_csv_with_fallback(file_path)
     if suffix in [".xlsx", ".xls"]:
         sheet_policy = payload.get("sheet_policy") or {}
         mode = sheet_policy.get("mode") or "first_sheet"
@@ -1254,14 +1261,23 @@ def apply_filter(df, rule):
         return df[series == value]
     if operator == "neq":
         return df[series != value]
-    if operator == "gt":
-        return df[pd.to_numeric(series, errors="coerce") > value]
-    if operator == "gte":
-        return df[pd.to_numeric(series, errors="coerce") >= value]
-    if operator == "lt":
-        return df[pd.to_numeric(series, errors="coerce") < value]
-    if operator == "lte":
-        return df[pd.to_numeric(series, errors="coerce") <= value]
+    if operator in ["gt", "gte", "lt", "lte"]:
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"Filter value for operator '{operator}' must be numeric, got: {value!r}")
+        numeric_series = pd.to_numeric(series, errors="coerce")
+        if numeric_series.isna().all() and series.notna().any():
+            samples = series.dropna().astype(str).head(3).tolist()
+            raise ValueError(f"Column '{column}' does not look numeric, so operator '{operator}' cannot be applied. Sample values: {samples}")
+        if operator == "gt":
+            return df[numeric_series > numeric_value]
+        if operator == "gte":
+            return df[numeric_series >= numeric_value]
+        if operator == "lt":
+            return df[numeric_series < numeric_value]
+        if operator == "lte":
+            return df[numeric_series <= numeric_value]
 
     text_series = series.astype(str)
     needle = str(value)
@@ -2080,5 +2096,3 @@ except Exception as exc:
     }
   },
 })
-
-

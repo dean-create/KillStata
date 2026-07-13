@@ -6,11 +6,9 @@ import { ConfigMarkdown } from "../config/markdown"
 import { Log } from "../util/log"
 import { Global } from "@/global"
 import { Filesystem } from "@/util/filesystem"
-import { Flag } from "@/flag/flag"
 import { Bus } from "@/bus"
 import { Session } from "@/session"
-import { builtinSkillsRoot, doctorSkillFile, pathWithin, SkillSource } from "./manage"
-import { legacyUserSkillRoot } from "@/killstata/runtime-config"
+import { doctorSkillFile, SkillSource, userSkillsRoot } from "./manage"
 
 export namespace Skill {
   const log = Log.create({ service: "skill" })
@@ -40,20 +38,7 @@ export namespace Skill {
     }),
   )
 
-  const KILLSTATA_SKILL_GLOB = new Bun.Glob("{skill,skills}/**/SKILL.md")
-  const CLAUDE_SKILL_GLOB = new Bun.Glob("skills/**/SKILL.md")
-  const BUILTIN_SKILL_GLOB = new Bun.Glob("**/SKILL.md")
-  const SKILL_SOURCE_PRIORITY: Record<SkillSource, number> = {
-    builtin: 0,
-    user: 1,
-    project: 2,
-  }
-
-  function classifyKillstataSource(root: string, match: string): SkillSource {
-    if (pathWithin(builtinSkillsRoot(), match)) return "builtin"
-    if (pathWithin(path.join(Global.Path.home, ".killstata"), root)) return "user"
-    return "project"
-  }
+  const USER_SKILL_GLOB = new Bun.Glob("**/SKILL.md")
 
   export const state = Instance.state(async () => {
     const skills: Record<string, Info> = {}
@@ -80,7 +65,7 @@ export namespace Skill {
           existing: existing.location,
           duplicate: match,
         })
-        if (SKILL_SOURCE_PRIORITY[source] < SKILL_SOURCE_PRIORITY[existing.source]) return
+        return
       }
 
       skills[parsed.data.name] = {
@@ -91,63 +76,16 @@ export namespace Skill {
       }
     }
 
-    const builtinRoot = builtinSkillsRoot()
-    if (await Filesystem.isDir(builtinRoot)) {
-      for await (const match of BUILTIN_SKILL_GLOB.scan({
-        cwd: builtinRoot,
-        absolute: true,
-        onlyFiles: true,
-        followSymlinks: true,
-      })) {
-        await addSkill(match, "builtin")
-      }
-    }
-
-    const userDirs = [path.join(Global.Path.home, ".killstata")]
-    if (!Flag.KILLSTATA_DISABLE_CLAUDE_CODE_SKILLS) {
-      userDirs.push(path.join(Global.Path.home, ".claude"))
-    }
-
-    for (const dir of userDirs) {
-      const exists = await Filesystem.isDir(dir)
-      if (!exists) continue
-
-      const glob = path.basename(dir) === ".claude" ? CLAUDE_SKILL_GLOB : KILLSTATA_SKILL_GLOB
-      const matches = await Array.fromAsync(
-        glob.scan({
-          cwd: dir,
-          absolute: true,
-          onlyFiles: true,
-          followSymlinks: true,
-          dot: true,
-        }),
-      ).catch((error) => {
-        log.error("failed user directory scan for skills", { dir, error })
-        return []
-      })
-
-      for (const match of matches) {
-        await addSkill(match, "user")
-      }
-    }
-
-    const projectDirs = await Array.fromAsync(
-      Filesystem.up({
-        targets: !Flag.KILLSTATA_DISABLE_CLAUDE_CODE_SKILLS ? [".killstata", ".claude"] : [".killstata"],
-        start: Instance.directory,
-        stop: Instance.worktree,
-      }),
-    )
-    for (const dir of projectDirs.toReversed()) {
-      const glob = path.basename(dir) === ".claude" ? CLAUDE_SKILL_GLOB : KILLSTATA_SKILL_GLOB
-      for await (const match of glob.scan({
-        cwd: dir,
+    const userRoot = userSkillsRoot()
+    if (await Filesystem.isDir(userRoot)) {
+      for await (const match of USER_SKILL_GLOB.scan({
+        cwd: userRoot,
         absolute: true,
         onlyFiles: true,
         followSymlinks: true,
         dot: true,
       })) {
-        await addSkill(match, classifyKillstataSource(dir, match))
+        await addSkill(match, "user")
       }
     }
 

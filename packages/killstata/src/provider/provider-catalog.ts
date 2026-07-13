@@ -1,35 +1,5 @@
-export const POPULAR_PROVIDER_ORDER = [
-  "anthropic",
-  "openai",
-  "google",
-  "openrouter",
-  "xai",
-  "groq",
-  "mistral",
-  "alibaba",
-  "alibaba-cn",
-  "deepseek",
-  "moonshotai-cn",
-  "moonshotai",
-  "zhipuai",
-  "zai",
-  "minimax",
-  "minimax-cn",
-  "siliconflow-cn",
-  "siliconflow",
-  "stepfun",
-  "iflowcn",
-  "modelscope",
-  "qihang-ai",
-  "jiekou",
-  "bailing",
-  "xiaomi",
-  "perplexity",
-  "cohere",
-  "togetherai",
-  "deepinfra",
-  "cerebras",
-] as const
+// Killstata supports exactly two providers. This list drives display ordering only.
+export const POPULAR_PROVIDER_ORDER = ["deepseek", "custom"] as const
 
 export const PROVIDER_PRIORITY: Record<string, number> = Object.fromEntries(
   POPULAR_PROVIDER_ORDER.map((providerID, index) => [providerID, index + 1]),
@@ -52,25 +22,10 @@ const PROVIDER_DISPLAY_OVERRIDES: Record<
     note: string
   }
 > = {
-  alibaba: {
-    name: "Alibaba International (DashScope)",
-    region: "International",
-    note: "Use Alibaba Cloud international DashScope keys",
-  },
-  "alibaba-cn": {
-    name: "Alibaba China (DashScope/Bailian)",
-    region: "China",
-    note: "Use mainland China DashScope / Bailian keys",
-  },
-  minimax: {
-    name: "MiniMax Global (minimax.io)",
-    region: "Global",
-    note: "Use keys issued for platform.minimax.io",
-  },
-  "minimax-cn": {
-    name: "MiniMax China (minimaxi.com)",
-    region: "China",
-    note: "Use keys issued for platform.minimaxi.com",
+  custom: {
+    name: "Custom (OpenAI-compatible)",
+    region: "Self-declared",
+    note: "Point provider.custom.options.baseURL at any OpenAI-compatible endpoint (Qwen, Kimi, GLM, vLLM, …)",
   },
 }
 

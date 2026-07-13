@@ -102,7 +102,7 @@ That design is what keeps the CLI usable when the analysis gets long, multi-step
 npm i -g killstata@latest
 ```
 
-This is the recommended install path right now. Windows users should usually get the bundled native binary and be able to start the CLI without installing Bun first. For data import and econometrics features, complete `killstata config` after installation.
+This is the recommended install path right now. Windows users should usually get the bundled native binary and be able to start the CLI without installing Bun first.
 
 ### Source Development
 
@@ -114,19 +114,17 @@ bun install
 
 ### Getting Started
 
-If this is your first time installing KillStata, run the basic setup before starting real work:
+Start KillStata:
 
 ```bash
-killstata config
+killstata
 ```
 
-This command helps you complete the initial configuration so the CLI is ready to use.
+On the first run, paste your DeepSeek API key. KillStata then prepares its private data-analysis environment automatically; no Python, Stata, MCP, skills, or directory configuration is required.
 
-Recommended local prerequisites:
+For source development only:
 
-- Python should already be installed and available in `PATH`
-- A normal terminal environment should be available for running CLI commands
-- If you are working from source, keep `bun` installed as well
+- Keep `bun` installed.
 
 ## Common Commands
 
@@ -134,19 +132,13 @@ Recommended local prerequisites:
 killstata
 killstata --version
 killstata config
-killstata skills list
 ```
 
 What they do:
 
 - `killstata`: start the interactive CLI
 - `killstata --version`: verify the installed version
-- `killstata config`: launch the guided setup for provider, Python, Stata, and storage paths
-- `killstata skills list`: inspect built-in and local skills
-
-Compatibility note:
-
-- `killstata init` still works and currently delegates to `killstata config`
+- `killstata config`: optional advanced model settings, such as a custom OpenAI-compatible endpoint
 
 ## Prompt Examples
 
@@ -272,7 +264,6 @@ What the release script does:
 ### Do I need Stata installed?
 
 No. KillStata is designed as its own CLI workflow layer. It can import common research data formats and run its own analysis pipeline without requiring a local Stata installation.
-If you already have a local Stata installation, you can also connect it through MCP. The current Windows setup flow is oriented around Stata 17+.
 
 ### Does it keep rereading the raw Excel file forever?
 
@@ -300,7 +291,7 @@ If the CLI still cannot find a native binary, reinstall the package and then che
 killstata --version
 ```
 
-If the CLI starts but Python, Stata, or MCP integration still looks off, run:
+If data analysis cannot start, check the automatic analysis environment:
 
 ```bash
 killstata config doctor

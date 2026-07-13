@@ -181,17 +181,6 @@ Two-way fixed-effects baseline regression on a canonical Parquet stage:
 - Read `diagnostics.json` and `model_metadata.json` after estimation
 - If the tool returns warnings or blocking errors, repair the data/specification and rerun only the failed stage
 
-## Planning And Skill Guidance
+## Planning Guidance
 
-- Before spreadsheet-heavy or table-heavy workflows, load `workflow-orchestrator` first, then the most relevant specialist skill.
-- Prefer project-local skills under `.killstata/skills` when the same skill exists at multiple tiers.
-- If no project-local override exists, prefer user-installed skills before `builtin`.
-- Prefer installed skill aliases rather than inventing names:
-  - Excel/XLSX processing -> `xlsx-processor`
-  - Descriptive profiling -> `descriptive-analysis`
-  - DID -> `did-estimation`
-  - IV -> `iv-estimation`
-  - PSM -> `psm-estimation`
-  - RDD -> `rdd-estimation`
-  - Diagnostic testing / robustness -> `robustness-check` or `regression-reporting`
-- Prefer explicit methodName, explicit identifiers, explicit clustering choice, and explicit options over implicit defaults.
+- Prefer explicit methodName, identifiers, clustering choice, and options over implicit defaults.

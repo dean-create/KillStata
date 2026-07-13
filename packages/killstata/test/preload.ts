@@ -21,3 +21,4 @@ process.env["XDG_CACHE_HOME"] = path.join(dir, "cache")
 process.env["XDG_CONFIG_HOME"] = path.join(dir, "config")
 process.env["XDG_STATE_HOME"] = path.join(dir, "state")
 process.env["KILLSTATA_DISABLE_MODELS_FETCH"] = "true"
+process.env["KILLSTATA_DISABLE_AUTO_RUNTIME"] = "true"

@@ -334,13 +334,10 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                     ✕
                   </text>
                 </box>
-                <text fg={theme.textMuted}>Connect a provider to start using killstata models.</text>
-                <text fg={theme.textMuted}>
-                  Connect a supported provider with an API key to use models such as Claude, GPT, Gemini and Kimi
-                </text>
+                <text fg={theme.textMuted}>Restart KillStata to enter your DeepSeek API key.</text>
+                <text fg={theme.textMuted}>Advanced model settings are optional and not needed for analysis.</text>
                 <box flexDirection="row" gap={1} justifyContent="space-between">
-                  <text fg={theme.text}>Connect provider</text>
-                  <text fg={theme.textMuted}>/connect</text>
+                  <text fg={theme.text}>Restart KillStata</text>
                 </box>
               </box>
             </box>

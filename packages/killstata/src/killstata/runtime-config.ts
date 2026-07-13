@@ -1,6 +1,7 @@
 import fs from "fs"
 import path from "path"
 import os from "os"
+import crypto from "crypto"
 import { spawnSync } from "child_process"
 import { applyEdits, modify, parse as parseJsonc, printParseErrorCode, type ParseError as JsoncParseError } from "jsonc-parser"
 import { Config } from "@/config/config"
@@ -34,24 +35,6 @@ export type RuntimePythonStatus = RuntimePythonSelection & {
   installCommand: string
 }
 
-export type StataProbe = {
-  input: string
-  normalized: string
-  exists: boolean
-  edition?: "mp" | "se" | "be"
-}
-
-const WINDOWS_STATA_CANDIDATES = [
-  "D:\\stata17",
-  "D:\\stata18",
-  "C:\\Program Files\\Stata17",
-  "C:\\Program Files\\Stata18",
-  "C:\\Program Files (x86)\\Stata17",
-  "C:\\Program Files\\Stata16",
-  "C:\\Program Files (x86)\\Stata18",
-  "C:\\Program Files (x86)\\Stata16",
-]
-
 const WINDOWS_PREFERRED_PYTHON_CANDIDATES = [
   "D:\\anaconda3\\envs\\trae_agent\\python.exe",
 ]
@@ -67,6 +50,9 @@ export const REQUIRED_PYTHON_PACKAGES = [
   "pyarrow",
   "python-docx",
 ] as const
+
+const MANAGED_PYTHON_VERSION = "3.12"
+const UV_VERSION = "0.11.16"
 
 export function defaultPythonCommand() {
   return process.platform === "win32" ? "python" : "python3"
@@ -115,114 +101,30 @@ export function managedPythonVenvRoot() {
   return path.join(userRoot(), "venv")
 }
 
+export function managedRuntimeRoot() {
+  return path.join(userRoot(), "runtime")
+}
+
+export function managedPythonInstallRoot() {
+  return path.join(managedRuntimeRoot(), "python")
+}
+
+export function managedUvRoot() {
+  return path.join(managedRuntimeRoot(), "uv")
+}
+
+export function managedUvExecutable() {
+  return path.join(managedUvRoot(), process.platform === "win32" ? "uv.exe" : "uv")
+}
+
 export function managedPythonExecutable() {
   return process.platform === "win32"
     ? path.join(managedPythonVenvRoot(), "Scripts", "python.exe")
     : path.join(managedPythonVenvRoot(), "bin", "python")
 }
 
-export function managedStataMcpRoot() {
-  return path.join(userRoot(), "stata-mcp")
-}
-
-export function legacyUserSkillRoot() {
-  return path.join(userRoot(), "skill")
-}
-
 export function userSkillRoot() {
   return path.join(userRoot(), "skills")
-}
-
-export function importedSkillsRoot() {
-  return path.join(userSkillRoot(), "imported")
-}
-
-export function defaultSkillsRoot() {
-  return path.join(userSkillRoot(), "default")
-}
-
-export function localSkillsRoot() {
-  return path.join(userSkillRoot(), "local")
-}
-
-export function cachedSkillsRoot() {
-  return path.join(userSkillRoot(), "cache")
-}
-
-export function defaultSkillsManifestPath() {
-  return path.join(defaultSkillsRoot(), ".managed.json")
-}
-
-export function userWorkspaceRoot() {
-  return path.join(userRoot(), "workspace")
-}
-
-export function userWorkspaceAgentsPath() {
-  return path.join(userWorkspaceRoot(), "AGENTS.md")
-}
-
-export function userWorkspaceMemoryPath() {
-  return path.join(userWorkspaceRoot(), "MEMORY.md")
-}
-
-export function userWorkspaceUserPath() {
-  return path.join(userWorkspaceRoot(), "USER.md")
-}
-
-export function userAgentsRoot() {
-  return path.join(userRoot(), "agents")
-}
-
-export function userMainAgentRoot() {
-  return path.join(userAgentsRoot(), "main")
-}
-
-export function userMainAgentStateRoot() {
-  return path.join(userMainAgentRoot(), "agent")
-}
-
-export function userMainAgentSessionsRoot() {
-  return path.join(userMainAgentRoot(), "sessions")
-}
-
-export function userMainAgentModelsPath() {
-  return path.join(userMainAgentStateRoot(), "models.json")
-}
-
-export function userMainAgentAuthProfilesPath() {
-  return path.join(userMainAgentStateRoot(), "auth-profiles.json")
-}
-
-export function userSubagentsRoot() {
-  return path.join(userRoot(), "subagents")
-}
-
-export function userSubagentRunsPath() {
-  return path.join(userSubagentsRoot(), "runs.json")
-}
-
-export function userLogsRoot() {
-  return path.join(userRoot(), "logs")
-}
-
-export function userMemoryRoot() {
-  return path.join(userRoot(), "memory")
-}
-
-export function userTmpRoot() {
-  return path.join(userRoot(), "tmp")
-}
-
-export function userStateRoot() {
-  return path.join(userRoot(), "state")
-}
-
-export function userDownloadsRoot() {
-  return path.join(userRoot(), "downloads")
-}
-
-export function userWorkspaceStatePath() {
-  return path.join(userStateRoot(), "workspace.json")
 }
 
 export function userPaths() {
@@ -232,68 +134,19 @@ export function userPaths() {
     legacyConfig: legacyUserConfigPath(),
     managedPythonVenv: managedPythonVenvRoot(),
     managedPythonExecutable: managedPythonExecutable(),
-    stataMcpRoot: managedStataMcpRoot(),
-    legacySkillRoot: legacyUserSkillRoot(),
+    managedRuntime: managedRuntimeRoot(),
+    managedPythonInstall: managedPythonInstallRoot(),
+    managedUv: managedUvExecutable(),
     skillRoot: userSkillRoot(),
-    defaultSkills: defaultSkillsRoot(),
-    defaultSkillsManifest: defaultSkillsManifestPath(),
-    importedSkills: importedSkillsRoot(),
-    localSkills: localSkillsRoot(),
-    cachedSkills: cachedSkillsRoot(),
-    workspace: userWorkspaceRoot(),
-    workspaceAgents: userWorkspaceAgentsPath(),
-    workspaceMemory: userWorkspaceMemoryPath(),
-    workspaceUser: userWorkspaceUserPath(),
-    agents: userAgentsRoot(),
-    mainAgentRoot: userMainAgentRoot(),
-    mainAgentState: userMainAgentStateRoot(),
-    mainAgentSessions: userMainAgentSessionsRoot(),
-    mainAgentModels: userMainAgentModelsPath(),
-    mainAgentAuthProfiles: userMainAgentAuthProfilesPath(),
-    subagents: userSubagentsRoot(),
-    subagentRuns: userSubagentRunsPath(),
-    logs: userLogsRoot(),
-    memory: userMemoryRoot(),
-    tmp: userTmpRoot(),
-    state: userStateRoot(),
-    workspaceState: userWorkspaceStatePath(),
-    downloads: userDownloadsRoot(),
   }
 }
-
-const USER_WORKSPACE_AGENTS_TEMPLATE = `# Killstata User-Level Rules
-
-Use this file for global Killstata preferences that should apply across projects.
-
-- Put durable personal defaults here.
-- Keep project-specific implementation rules in the project's AGENTS.md.
-- Update this file when the user wants Killstata's default behavior to change globally.
-`
-
-const USER_WORKSPACE_MEMORY_TEMPLATE = `# Killstata Persistent Memory
-
-Store only information the user explicitly asked Killstata to remember long term.
-
-- Do not store temporary task context here.
-- Prefer concise, durable rules and preferences.
-- Remove outdated items when the user supersedes them.
-`
-
-const USER_WORKSPACE_USER_TEMPLATE = `# Killstata User Profile
-
-Summarize stable user preferences or working style only when the user explicitly asks to update this profile.
-
-- This file is read by default.
-- Do not auto-write session summaries here.
-- Keep entries short and behavior-focused.
-`
 
 export function shortenHomePath(input: string) {
   const home = Global.Path.home
   return input.startsWith(home) ? input.replace(home, "~") : input
 }
 
-function runProcess(command: string, args: string[]) {
+function runProcess(command: string, args: string[], extraEnv: NodeJS.ProcessEnv = {}) {
   return spawnSync(command, args, {
     stdio: ["ignore", "pipe", "pipe"],
     encoding: "utf-8",
@@ -301,6 +154,7 @@ function runProcess(command: string, args: string[]) {
       ...process.env,
       PYTHONUTF8: "1",
       PYTHONIOENCODING: "utf-8",
+      ...extraEnv,
     },
   })
 }
@@ -394,20 +248,19 @@ export async function resolveRuntimePythonSelection(): Promise<RuntimePythonSele
     }
   }
 
+  if (fs.existsSync(managedPythonExecutable())) {
+    return {
+      executable: managedPythonExecutable(),
+      source: "managed",
+    }
+  }
+
   const config = await Config.get()
   const configured = config.killstata?.python?.executable?.trim()
   if (configured) {
     return {
       executable: configured,
       source: "config",
-    }
-  }
-
-  const managed = config.killstata?.python?.managed
-  if (managed && fs.existsSync(managedPythonExecutable())) {
-    return {
-      executable: managedPythonExecutable(),
-      source: "managed",
     }
   }
 
@@ -496,7 +349,185 @@ export function checkPythonPackages(
   }
 }
 
-export async function getRuntimePythonStatus(packages = [...REQUIRED_PYTHON_PACKAGES]): Promise<RuntimePythonStatus> {
+type UvReleaseAsset = {
+  archive: string
+  executable: string
+  compressed: "zip" | "tar.gz"
+}
+
+export function uvReleaseAsset(input = { platform: process.platform, arch: process.arch }): UvReleaseAsset | undefined {
+  const architecture = input.arch === "arm64" ? "aarch64" : input.arch === "x64" ? "x86_64" : undefined
+  if (!architecture) return undefined
+
+  if (input.platform === "win32") {
+    return {
+      archive: `uv-${architecture}-pc-windows-msvc.zip`,
+      executable: "uv.exe",
+      compressed: "zip",
+    }
+  }
+
+  if (input.platform === "darwin") {
+    return {
+      archive: `uv-${architecture}-apple-darwin.tar.gz`,
+      executable: "uv",
+      compressed: "tar.gz",
+    }
+  }
+
+  if (input.platform === "linux") {
+    return {
+      archive: `uv-${architecture}-unknown-linux-gnu.tar.gz`,
+      executable: "uv",
+      compressed: "tar.gz",
+    }
+  }
+}
+
+function releaseUrl(asset: UvReleaseAsset) {
+  return `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${asset.archive}`
+}
+
+async function downloadVerifiedFile(url: string, destination: string) {
+  const [archiveResponse, checksumResponse] = await Promise.all([
+    fetch(url, { signal: AbortSignal.timeout(120_000) }),
+    fetch(`${url}.sha256`, { signal: AbortSignal.timeout(30_000) }),
+  ])
+  if (!archiveResponse.ok) throw new Error(`Unable to download the analysis runtime (${archiveResponse.status}).`)
+  if (!checksumResponse.ok) throw new Error(`Unable to verify the analysis runtime download (${checksumResponse.status}).`)
+
+  const expected = (await checksumResponse.text()).trim().split(/\s+/)[0]?.toLowerCase()
+  if (!expected || !/^[a-f0-9]{64}$/.test(expected)) throw new Error("The analysis runtime checksum was invalid.")
+
+  const bytes = Buffer.from(await archiveResponse.arrayBuffer())
+  const actual = crypto.createHash("sha256").update(bytes).digest("hex")
+  if (actual !== expected) throw new Error("The analysis runtime download did not pass verification.")
+
+  fs.writeFileSync(destination, bytes)
+}
+
+function quotePowerShell(value: string) {
+  return `'${value.replace(/'/g, "''")}'`
+}
+
+function findFile(root: string, filename: string): string | undefined {
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const candidate = path.join(root, entry.name)
+    if (entry.isFile() && entry.name === filename) return candidate
+    if (entry.isDirectory()) {
+      const nested = findFile(candidate, filename)
+      if (nested) return nested
+    }
+  }
+}
+
+function extractUvArchive(input: { archive: string; destination: string; compressed: UvReleaseAsset["compressed"] }) {
+  const result =
+    input.compressed === "zip"
+      ? runProcess("powershell.exe", [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `Expand-Archive -LiteralPath ${quotePowerShell(input.archive)} -DestinationPath ${quotePowerShell(input.destination)} -Force`,
+        ])
+      : runProcess("tar", ["-xzf", input.archive, "-C", input.destination])
+
+  if (result.status !== 0) {
+    throw new Error((`${result.stdout}\n${result.stderr}`).trim() || "Unable to unpack the analysis runtime.")
+  }
+}
+
+async function ensureManagedUv() {
+  const executable = managedUvExecutable()
+  if (fs.existsSync(executable)) return executable
+
+  const asset = uvReleaseAsset()
+  if (!asset) throw new Error(`Automatic data-engine setup is not available for ${process.platform}/${process.arch}.`)
+
+  const root = managedUvRoot()
+  const archive = path.join(root, `uv-${UV_VERSION}.${asset.compressed === "zip" ? "zip" : "tar.gz"}`)
+  const extraction = path.join(root, "extract")
+  fs.mkdirSync(root, { recursive: true })
+  fs.rmSync(extraction, { recursive: true, force: true })
+  fs.mkdirSync(extraction, { recursive: true })
+
+  try {
+    await downloadVerifiedFile(releaseUrl(asset), archive)
+    extractUvArchive({ archive, destination: extraction, compressed: asset.compressed })
+    const extracted = findFile(extraction, asset.executable)
+    if (!extracted) throw new Error("The downloaded analysis runtime did not contain its executable.")
+    fs.copyFileSync(extracted, executable)
+    if (process.platform !== "win32") fs.chmodSync(executable, 0o755)
+    return executable
+  } finally {
+    fs.rmSync(archive, { force: true })
+    fs.rmSync(extraction, { recursive: true, force: true })
+  }
+}
+
+function managedRuntimeEnvironment(): NodeJS.ProcessEnv {
+  return {
+    UV_NO_MODIFY_PATH: "1",
+    UV_PYTHON_INSTALL_DIR: managedPythonInstallRoot(),
+    UV_CACHE_DIR: path.join(managedRuntimeRoot(), "cache"),
+  }
+}
+
+function runUv(uv: string, args: string[]) {
+  const result = runProcess(uv, args, managedRuntimeEnvironment())
+  if (result.status !== 0) {
+    throw new Error((`${result.stdout}\n${result.stderr}`).trim() || "Unable to prepare the data analysis environment.")
+  }
+}
+
+async function hasExplicitPythonOverride() {
+  if (process.env.KILLSTATA_PYTHON?.trim()) return true
+  const config = await Config.get()
+  return Boolean(config.killstata?.python?.executable?.trim())
+}
+
+let managedRuntimeProvision: Promise<RuntimePythonStatus> | undefined
+
+async function provisionManagedRuntime(packages: readonly string[]): Promise<RuntimePythonStatus> {
+  const uv = await ensureManagedUv()
+  const executable = managedPythonExecutable()
+
+  if (!fs.existsSync(executable)) {
+    fs.rmSync(managedPythonVenvRoot(), { recursive: true, force: true })
+    runUv(uv, ["venv", "--python", MANAGED_PYTHON_VERSION, "--managed-python", managedPythonVenvRoot()])
+  }
+
+  const report = checkPythonPackages(executable, packages)
+  if (report.missing.length > 0) {
+    runUv(uv, ["pip", "install", "--python", executable, "--upgrade", ...report.missing])
+  }
+
+  return getRuntimePythonStatus([...packages])
+}
+
+/**
+ * Creates and repairs KillStata's private data-analysis runtime. User supplied
+ * Python overrides remain available for advanced use, but the normal path never
+ * writes to or modifies a system Python installation.
+ */
+export async function ensureRuntimePythonReady(packages: readonly string[] = [...REQUIRED_PYTHON_PACKAGES]) {
+  if (process.env.KILLSTATA_DISABLE_AUTO_RUNTIME === "true") return getRuntimePythonStatus([...packages])
+  if (await hasExplicitPythonOverride()) return getRuntimePythonStatus([...packages])
+
+  const current = await getRuntimePythonStatus([...packages])
+  if (current.source === "managed" && current.ok && current.missing.length === 0) return current
+
+  if (!managedRuntimeProvision) {
+    managedRuntimeProvision = provisionManagedRuntime(packages).finally(() => {
+      managedRuntimeProvision = undefined
+    })
+  }
+  return managedRuntimeProvision
+}
+
+export async function getRuntimePythonStatus(
+  packages: readonly string[] = [...REQUIRED_PYTHON_PACKAGES],
+): Promise<RuntimePythonStatus> {
   const selection = await resolveRuntimePythonSelection()
   const probe = probePythonExecutable(selection.executable)
   const executable = probe.resolved || selection.executable
@@ -538,17 +569,13 @@ export async function getRuntimePythonStatus(packages = [...REQUIRED_PYTHON_PACK
 
 export function formatRuntimePythonSetupError(toolName: string, status: RuntimePythonStatus) {
   const lines = [
-    `${toolName} Python runtime is not ready.`,
-    `Interpreter: ${status.executable}`,
-    `Selected from: ${describeRuntimePythonSource(status.source)}`,
+    "KillStata could not prepare its data-analysis engine automatically.",
+    "Please check your network connection and try the analysis again.",
   ]
 
-  if (status.version) lines.push(`Version: ${status.version}`)
-  if (!status.ok && status.error) lines.push(`Probe error: ${status.error}`)
-  if (status.missing.length) lines.push(`Missing packages: ${status.missing.join(", ")}`)
+  if (!status.ok && status.error) lines.push(`Technical detail: ${status.error}`)
+  else if (status.missing.length) lines.push(`Technical detail: required analysis components are unavailable.`)
 
-  lines.push(`Install command: ${status.installCommand}`)
-  lines.push("Next step: run `killstata config` or `killstata config doctor` before retrying.")
   return lines.join("\n")
 }
 
@@ -573,35 +600,6 @@ export function installPythonPackages(pythonExecutable: string, packages = [...R
   if (install.status !== 0) {
     throw new Error((`${install.stdout}\n${install.stderr}`).trim() || "Failed to install Python packages")
   }
-}
-
-export function normalizeStataPath(input: string) {
-  const trimmed = input.trim().replace(/^["']|["']$/g, "")
-  if (!trimmed) throw new Error("Stata path is required.")
-  return path.resolve(path.normalize(trimmed))
-}
-
-export function inferStataEdition(input: string): "mp" | "se" | "be" | undefined {
-  const lower = input.toLowerCase()
-  if (lower.includes("statamp")) return "mp"
-  if (lower.includes("statase")) return "se"
-  if (lower.includes("stata")) return "be"
-  return undefined
-}
-
-export function probeStataPath(input: string): StataProbe {
-  const normalized = normalizeStataPath(input)
-  return {
-    input,
-    normalized,
-    exists: fs.existsSync(normalized),
-    edition: inferStataEdition(normalized),
-  }
-}
-
-export function detectStataCandidates() {
-  const directCandidates = process.platform === "win32" ? WINDOWS_STATA_CANDIDATES : []
-  return directCandidates.filter((candidate) => fs.existsSync(candidate))
 }
 
 type JsonPathValue = {
@@ -667,86 +665,9 @@ export async function writeUserConfigPatch(input: Config.Info) {
   await writeUserConfigValues(values)
 }
 
-async function ensureJsonFile(filepath: string, fallback: unknown) {
-  if (fs.existsSync(filepath)) return
-  fs.mkdirSync(path.dirname(filepath), { recursive: true })
-  await Bun.write(filepath, JSON.stringify(fallback, null, 2))
-}
-
-async function ensureTextFile(filepath: string, fallback: string) {
-  if (fs.existsSync(filepath)) return
-  fs.mkdirSync(path.dirname(filepath), { recursive: true })
-  await Bun.write(filepath, fallback)
-}
-
 export async function ensureKillstataHomeDirectories() {
   const paths = userPaths()
-
   fs.mkdirSync(paths.root, { recursive: true })
-
-  if (fs.existsSync(paths.legacySkillRoot) && !fs.existsSync(paths.skillRoot)) {
-    fs.renameSync(paths.legacySkillRoot, paths.skillRoot)
-  }
-
-  if (fs.existsSync(paths.legacySkillRoot) && fs.existsSync(paths.skillRoot)) {
-    for (const entry of fs.readdirSync(paths.legacySkillRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const source = path.join(paths.legacySkillRoot, entry.name)
-      const target = path.join(paths.skillRoot, entry.name)
-      if (fs.existsSync(target)) continue
-      fs.renameSync(source, target)
-    }
-    if (fs.readdirSync(paths.legacySkillRoot).length === 0) {
-      fs.rmSync(paths.legacySkillRoot, { recursive: true, force: true })
-    }
-  }
-
-  const legacySkillRoots = [paths.defaultSkills, paths.importedSkills, paths.localSkills]
-  for (const legacyRoot of legacySkillRoots) {
-    if (!fs.existsSync(legacyRoot)) continue
-    for (const entry of fs.readdirSync(legacyRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const source = path.join(legacyRoot, entry.name)
-      const target = path.join(paths.skillRoot, entry.name)
-      if (fs.existsSync(target)) continue
-      fs.renameSync(source, target)
-    }
-    const leftovers = fs.readdirSync(legacyRoot)
-    if (leftovers.length === 0) {
-      fs.rmSync(legacyRoot, { recursive: true, force: true })
-    }
-  }
-
-  const directories = [
-    paths.managedPythonVenv,
-    paths.stataMcpRoot,
-    paths.skillRoot,
-    paths.cachedSkills,
-    paths.workspace,
-    paths.agents,
-    paths.mainAgentRoot,
-    paths.mainAgentState,
-    paths.mainAgentSessions,
-    paths.subagents,
-    paths.logs,
-    paths.memory,
-    paths.tmp,
-    paths.state,
-    paths.downloads,
-  ]
-
-  for (const dir of directories) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-
-  await ensureJsonFile(paths.mainAgentModels, {})
-  await ensureJsonFile(paths.mainAgentAuthProfiles, {})
-  await ensureJsonFile(paths.subagentRuns, [])
-  await ensureJsonFile(paths.workspaceState, {})
-  await ensureTextFile(paths.workspaceAgents, USER_WORKSPACE_AGENTS_TEMPLATE)
-  await ensureTextFile(paths.workspaceMemory, USER_WORKSPACE_MEMORY_TEMPLATE)
-  await ensureTextFile(paths.workspaceUser, USER_WORKSPACE_USER_TEMPLATE)
-
   return paths
 }
 

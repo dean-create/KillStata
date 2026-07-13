@@ -17,13 +17,12 @@ import { Vcs } from "../project/vcs"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill/skill"
 import { Auth } from "../auth"
-import { deepSeekEnvOnlyAuthMessage, isDeepSeekProvider } from "../provider/deepseek-policy"
+import { allowedProvidersMessage, isAllowedProvider } from "../provider/model-policy"
 import { Flag } from "../flag/flag"
 import { Command } from "../command"
 import { Global } from "../global"
 import { ProjectRoutes } from "./routes/project"
 import { SessionRoutes } from "./routes/session"
-import { PtyRoutes } from "./routes/pty"
 import { McpRoutes } from "./routes/mcp"
 import { FileRoutes } from "./routes/file"
 import { ConfigRoutes } from "./routes/config"
@@ -151,7 +150,6 @@ export namespace Server {
         )
         .use(validator("query", z.object({ directory: z.string().optional() })))
         .route("/project", ProjectRoutes())
-        .route("/pty", PtyRoutes())
         .route("/config", ConfigRoutes())
         .route("/experimental", ExperimentalRoutes())
         .route("/session", SessionRoutes())
@@ -436,8 +434,8 @@ export namespace Server {
           async (c) => {
             const providerID = c.req.valid("param").providerID
             const auth = c.req.valid("json")
-            if (!isDeepSeekProvider(providerID)) {
-              throw new Error(deepSeekEnvOnlyAuthMessage(providerID))
+            if (!isAllowedProvider(providerID)) {
+              throw new Error(allowedProvidersMessage(providerID))
             }
             await Auth.set(providerID, auth)
             // /connect 通过 HTTP 保存密钥后，刷新当前实例，避免继续使用旧 provider 缓存。

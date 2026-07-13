@@ -16,7 +16,7 @@ import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
 import { Todo } from "./todo"
 import { Question } from "@/question"
-import { Permission } from "@/permission"
+import { PermissionNext } from "@/permission/next"
 import { RuntimeEvents } from "@/runtime/events"
 import { RuntimeHooks } from "@/runtime/hooks"
 import { workflowStatusSummary, workflowTaskLedger } from "@/runtime/workflow"
@@ -53,6 +53,12 @@ export namespace SessionCompaction {
     ),
   }
 
+  // 压缩要赶在真正撑爆之前。tokens 统计的是「上一轮结束时」的用量，而下一轮请求还会
+  // 再叠上：新的用户消息、系统提示、环境注入、全部工具的 schema。如果卡着 100% 才压缩，
+  // 这些增量会把请求顶过上限，直接被 API 拒掉——用户看到的是一次硬报错，而不是一次压缩。
+  // 留 10% 余量买的就是这个缓冲。
+  export const CONTEXT_SAFETY_RATIO = 0.9
+
   export async function isOverflow(input: { tokens: MessageV2.Assistant["tokens"]; model: Provider.Model }) {
     const config = await Config.get()
     if (config.compaction?.auto === false) return false
@@ -61,7 +67,7 @@ export namespace SessionCompaction {
     const count = input.tokens.input + input.tokens.cache.read + input.tokens.output
     const output = Math.min(input.model.limit.output, SessionPrompt.OUTPUT_TOKEN_MAX) || SessionPrompt.OUTPUT_TOKEN_MAX
     const usable = input.model.limit.input || context - output
-    return count > usable
+    return count > usable * CONTEXT_SAFETY_RATIO
   }
 
   export const PRUNE_MINIMUM = 20_000
@@ -233,9 +239,11 @@ export namespace SessionCompaction {
       )
       .slice(-5)
 
-    const pendingPermissions = Permission.list()
+    // 必须用 PermissionNext：所有真实的审批请求都走它。旧的 Permission 模块从来没人
+    // 调用过 ask()，pending 永远是空的，导致「未决审批」这一段上下文一直是空的。
+    const pendingPermissions = (await PermissionNext.list())
       .filter((permission) => permission.sessionID === input.sessionID)
-      .map((permission) => clip(permission.message, 140))
+      .map((permission) => clip(`${permission.permission} 待批准`, 140))
 
     const workflow = workflowStatusSummary(input.sessionID)
     const ledger = workflowTaskLedger(input.sessionID)

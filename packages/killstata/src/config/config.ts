@@ -173,7 +173,7 @@ export namespace Config {
       const perms: Record<string, Config.PermissionAction> = {}
       for (const [tool, enabled] of Object.entries(result.tools)) {
         const action: Config.PermissionAction = enabled ? "allow" : "deny"
-        if (tool === "write" || tool === "edit" || tool === "patch" || tool === "multiedit") {
+        if (tool === "write" || tool === "edit" || tool === "patch") {
           perms.edit = action
           continue
         }
@@ -565,7 +565,6 @@ export namespace Config {
           question: PermissionAction.optional(),
           webfetch: PermissionAction.optional(),
           websearch: PermissionAction.optional(),
-          codesearch: PermissionAction.optional(),
           lsp: PermissionRule.optional(),
           doom_loop: PermissionAction.optional(),
         })
@@ -658,8 +657,8 @@ export namespace Config {
       const permission: Permission = {}
       for (const [tool, enabled] of Object.entries(agent.tools ?? {})) {
         const action = enabled ? "allow" : "deny"
-        // write, edit, patch, multiedit all map to edit permission
-        if (tool === "write" || tool === "edit" || tool === "patch" || tool === "multiedit") {
+        // write, edit, patch all map to edit permission
+        if (tool === "write" || tool === "edit" || tool === "patch") {
           permission.edit = action
         } else {
           permission[tool] = action
@@ -745,6 +744,11 @@ export namespace Config {
       variant_cycle: z.string().optional().default("ctrl+t").describe("Cycle model variants"),
       input_clear: z.string().optional().default("none").describe("Clear input field"),
       input_paste: z.string().optional().default("ctrl+v").describe("Paste from clipboard"),
+      data_file_picker: z
+        .string()
+        .optional()
+        .default("ctrl+o")
+        .describe("Open the data file picker (Excel / CSV / DTA)"),
       input_submit: z.string().optional().default("return").describe("Submit input"),
       input_newline: z
         .string()
@@ -943,16 +947,6 @@ export namespace Config {
       ref: "KillstataPythonConfig",
     })
 
-  const KillstataStata = z
-    .object({
-      path: z.string().optional().describe("Absolute path to the Stata installation directory or executable"),
-      edition: z.enum(["mp", "se", "be"]).optional().describe("Stata edition for the built-in MCP server"),
-    })
-    .strict()
-    .meta({
-      ref: "KillstataStataConfig",
-    })
-
   const KillstataRootDirectory = z
     .object({
       root: z.string().optional().describe("Absolute path for this killstata user-level directory"),
@@ -1000,7 +994,6 @@ export namespace Config {
     .object({
       home: KillstataRootDirectory.optional(),
       python: KillstataPython.optional(),
-      stata: KillstataStata.optional(),
       workspace: KillstataWorkspace.optional(),
       skills: KillstataRootDirectory.optional(),
       agents: KillstataAgents.optional(),
@@ -1265,13 +1258,9 @@ export namespace Config {
     if (!data || typeof data !== "object" || Array.isArray(data)) return undefined
 
     const record = data as Record<string, unknown>
-    const hasLegacyShape =
-      typeof record["python_executable"] === "string" ||
-      typeof record["stata_path"] === "string" ||
-      typeof record["stata_edition"] === "string"
+    const hasLegacyShape = typeof record["python_executable"] === "string"
     if (!hasLegacyShape) return undefined
 
-    const edition = record["stata_edition"]
     return {
       $schema: "https://killstata.io/config.json",
       killstata: {
@@ -1279,13 +1268,6 @@ export namespace Config {
           typeof record["python_executable"] === "string"
             ? {
                 executable: record["python_executable"],
-              }
-            : undefined,
-        stata:
-          typeof record["stata_path"] === "string" || typeof edition === "string"
-            ? {
-                path: typeof record["stata_path"] === "string" ? record["stata_path"] : undefined,
-                edition: edition === "mp" || edition === "se" || edition === "be" ? edition : undefined,
               }
             : undefined,
       },

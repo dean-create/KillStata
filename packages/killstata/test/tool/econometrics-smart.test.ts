@@ -5,6 +5,7 @@ import path from "path"
 import { EconometricsTool } from "../../src/tool/econometrics"
 import { buildSmartDatasetProfile, recommendEconometricsPlan } from "../../src/tool/econometrics-smart"
 import { Instance } from "../../src/project/instance"
+import { getRuntimePythonStatus } from "../../src/killstata/runtime-config"
 
 const ctx = {
   sessionID: "test",
@@ -103,6 +104,9 @@ describe("tool.econometrics-smart", () => {
 
   test("auto_recommend generates profile and recommendation artifacts", async () => {
     await withInstance(async (root) => {
+      const runtime = await getRuntimePythonStatus()
+      if (!runtime.ok || runtime.missing.length > 0) return
+
       const csvPath = path.join(root, "panel.csv")
       const rows = ["firm_id,year,did,y"]
       for (let firm = 1; firm <= 8; firm += 1) {

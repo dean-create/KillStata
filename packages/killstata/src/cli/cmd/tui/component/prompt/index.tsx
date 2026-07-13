@@ -1,3 +1,4 @@
+import path from "path"
 import { BoxRenderable, TextareaRenderable, MouseEvent, PasteEvent, t, dim, fg } from "@opentui/core"
 import { createEffect, createMemo, type JSX, onMount, createSignal, onCleanup, Show, Switch, Match, on } from "solid-js"
 import "opentui-spinner/solid"
@@ -13,6 +14,7 @@ import { useKeybind } from "@tui/context/keybind"
 import { usePromptHistory, type PromptInfo } from "./history"
 import { usePromptStash } from "./stash"
 import { DialogStash } from "../dialog-stash"
+import { DialogDataFile } from "../dialog-data-file"
 import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useCommandDialog } from "../dialog-command"
 import { useRenderer } from "@opentui/solid"
@@ -742,6 +744,19 @@ export function Prompt(props: PromptProps) {
   }
   const exit = useExit()
 
+  // 选中数据文件后，输入框里显示一枚紧凑的附件标记（[数据文件 panel.xlsx]），
+  // 真正发给模型的是完整路径 —— 由 pasteText 的 virtual/real 映射负责。
+  //
+  // 关键：这里传的是**路径**而不是文件内容。图片走的 pasteAttachment 会把 base64 正文
+  // 塞进消息，对一份几 MB 的 Excel 那样做会当场撑爆上下文窗口。数据文件的正文只能由
+  // data_import 工具去读，模型永远只该看到路径。
+  function insertDataFilePath(filePath: string) {
+    const needsSpace = input.plainText.length > 0 && !input.plainText.endsWith(" ")
+    if (needsSpace) input.insertText(" ")
+    pasteText(filePath, `[数据文件 ${path.basename(filePath)}]`)
+    input.focus()
+  }
+
   function pasteText(text: string, virtualText: string) {
     const currentOffset = input.visualCursor.offset
     const extmarkStart = currentOffset
@@ -899,7 +914,17 @@ export function Prompt(props: PromptProps) {
             backgroundColor={theme.backgroundElement}
             flexGrow={1}
           >
-            <textarea
+            <box flexDirection="row" gap={1}>
+              {/* 数据文件入口。终端没有真正的文件选择器，所以这个标志是「按 Ctrl+O 打开
+                  数据文件浏览器」的可见提示 —— 否则用户根本不知道有这个功能。 */}
+              <text
+                flexShrink={0}
+                fg={theme.textMuted}
+                onMouseDown={() => dialog.replace(() => <DialogDataFile onPick={insertDataFilePath} />)}
+              >
+                📎
+              </text>
+              <textarea
               placeholder={
                 props.showPlaceholder === false
                   ? undefined
@@ -941,6 +966,10 @@ export function Prompt(props: PromptProps) {
                     return
                   }
                   // If no image, let the default paste behavior continue
+                }
+                if (keybind.match("data_file_picker", e)) {
+                  dialog.replace(() => <DialogDataFile onPick={insertDataFilePath} />)
+                  return
                 }
                 if (keybind.match("input_clear", e) && store.prompt.input !== "") {
                   input.clear()
@@ -1081,7 +1110,9 @@ export function Prompt(props: PromptProps) {
               focusedBackgroundColor={theme.backgroundElement}
               cursorColor={theme.text}
               syntaxStyle={syntax()}
+              flexGrow={1}
             />
+            </box>
             <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
               <text fg={highlight()}>
                 {store.mode === "shell" ? "Shell" : Locale.titlecase(local.agent.current()?.name ?? "agent")}{" "}

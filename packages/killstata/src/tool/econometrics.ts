@@ -3,6 +3,7 @@ import * as fs from "fs"
 import * as path from "path"
 import { spawn, exec } from "child_process"
 import DESCRIPTION from "./econometrics.txt"
+import { PY_READ_CSV_FALLBACK } from "./python-snippets"
 import { Instance } from "../project/instance"
 import { Log } from "../util/log"
 import { Tool } from "./tool"
@@ -14,6 +15,7 @@ import {
   inferRunId,
   projectErrorsRoot,
   projectTempRoot,
+  publishDatasetLevelOutput,
   publishDeliveryOutput,
   publishVisibleOutput,
   reportOutputPath,
@@ -27,11 +29,11 @@ import {
   runPostEstimationGates,
 } from "./analysis-reflection"
 import { AnalysisIntent } from "./analysis-intent"
+import { refreshExperimentLog } from "./analysis-experiment-log"
 import {
   createEconometricsNumericSnapshot,
   type NumericSnapshotDocument,
 } from "./analysis-grounding"
-import { generateRegressionTable } from "./regression-table"
 import { relativeWithinProject, resolveToolPath } from "./analysis-path"
 import {
   artifactGroup,
@@ -44,7 +46,7 @@ import {
 import { numericSnapshotPreview } from "./analysis-tool-metadata"
 import { createToolDisplay } from "./analysis-display"
 import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./analysis-user-view"
-import { formatRuntimePythonSetupError, getRuntimePythonStatus } from "@/killstata/runtime-config"
+import { ensureRuntimePythonReady, formatRuntimePythonSetupError } from "@/killstata/runtime-config"
 import { ensureAnalysisPlan, formatAnalysisChecklist, setAnalysisPlanApproval } from "@/runtime/workflow"
 import {
   workflowAnalysisPlanHeader,
@@ -170,6 +172,7 @@ async function runInlinePython(input: { command: string; script: string; cwd: st
       stderr += chunk.toString()
     })
     proc.on("error", (error) => {
+      fs.rmSync(tempScriptPath, { force: true })
       reject(error)
     })
     proc.on("close", (code) => {
@@ -277,6 +280,7 @@ type PythonResult = {
   narrative_path?: string
   summary_path?: string
   numeric_snapshot_path?: string
+  experiment_log_path?: string
   qa_status?: string
   warnings?: string[]
   blocking_errors?: string[]
@@ -291,10 +295,6 @@ type PythonResult = {
   run_id?: string
   branch?: string
   table_variables?: string[]
-  academic_table_markdown_path?: string
-  academic_table_latex_path?: string
-  academic_table_workbook_path?: string
-  academic_table_docx_path?: string
   delivery_report_docx_path?: string
   final_analysis_workbook_path?: string
   journal_paper_docx_path?: string
@@ -831,10 +831,6 @@ function buildEconometricsPresentation(input: {
       artifactGroup("可引用表格", [
         presentationArtifact("系数表 CSV", result.coefficients_path),
         presentationArtifact("系数表工作簿", result.workbook_path),
-        presentationArtifact("三线表 Markdown", result.academic_table_markdown_path),
-        presentationArtifact("三线表 LaTeX", result.academic_table_latex_path),
-        presentationArtifact("三线表 Excel", result.academic_table_workbook_path),
-        presentationArtifact("三线表 Word", result.academic_table_docx_path),
       ]),
       artifactGroup("诊断与风险", [
         presentationArtifact("诊断文件", result.diagnostics_path),
@@ -1401,16 +1397,15 @@ def safe_error_path():
     error_dir.mkdir(parents=True, exist_ok=True)
     return str(error_dir / "econometrics_analysis_workbook_error.json")
 
+${PY_READ_CSV_FALLBACK}
+
 def read_table(file_path):
     path = Path(file_path)
     suffix = path.suffix.lower()
     if suffix in [".xlsx", ".xls"]:
         return pd.read_excel(path)
     if suffix == ".csv":
-        try:
-            return pd.read_csv(path, encoding="utf-8-sig")
-        except UnicodeDecodeError:
-            return pd.read_csv(path, encoding="gbk")
+        return read_csv_with_fallback(path)
     if suffix == ".dta":
         return pd.read_stata(path, convert_categoricals=False)
     if suffix == ".parquet":
@@ -1681,10 +1676,12 @@ PREFIX = "${PYTHON_RESULT_PREFIX}"
 def emit(obj):
     print(PREFIX + json.dumps(obj, ensure_ascii=False))
 
+${PY_READ_CSV_FALLBACK}
+
 def load_dataframe(data_path: str):
     suffix = Path(data_path).suffix.lower()
     if suffix == ".csv":
-        return pd.read_csv(data_path)
+        return read_csv_with_fallback(data_path)
     if suffix in [".xlsx", ".xls"]:
         return pd.read_excel(data_path)
     if suffix == ".dta":
@@ -1966,561 +1963,6 @@ function regressionTableSubtitle(methodName: MethodName) {
   }
 }
 
-function buildPanelFePythonScript(payloadB64: string) {
-  return `
-import base64
-import json
-import sys
-import traceback
-from pathlib import Path
-
-import numpy as np
-import pandas as pd
-import statsmodels.api as sm
-from scipy import stats
-
-RESULT_PREFIX = "${PYTHON_RESULT_PREFIX}"
-PROJECT_DIR = r"${Instance.directory.replace(/\\/g, "\\\\")}"
-ECONOMETRICS_DIR = r"${ECONOMETRICS_DIR.replace(/\\/g, "\\\\")}"
-ERRORS_DIR = r"${projectErrorsRoot().replace(/\\/g, "\\\\")}"
-
-sys.path.insert(0, ECONOMETRICS_DIR)
-
-from econometric_algorithm import run_core_diagnostics, run_robustness_checks
-
-def emit(result):
-    print(f"{RESULT_PREFIX}{json.dumps(result, ensure_ascii=False)}")
-
-def save_json(file_path, payload):
-    Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-
-def safe_error_path(method_name):
-    error_dir = Path(ERRORS_DIR)
-    error_dir.mkdir(parents=True, exist_ok=True)
-    from datetime import datetime
-    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    return str(error_dir / f"econometrics_{method_name}_{stamp}_error.json")
-
-def read_table(file_path):
-    suffix = Path(file_path).suffix.lower()
-    if suffix == ".csv":
-        return pd.read_csv(file_path)
-    if suffix in [".xlsx", ".xls"]:
-        return pd.read_excel(file_path)
-    if suffix == ".dta":
-        read_error = None
-        for encoding in [None, "gbk", "latin1"]:
-            try:
-                kwargs = {"preserve_dtypes": False}
-                if encoding is not None:
-                    kwargs["encoding"] = encoding
-                df = pd.read_stata(file_path, **kwargs)
-                df.attrs["_source_encoding"] = encoding or "default"
-                return df
-            except Exception as exc:
-                read_error = exc
-                message = str(exc).lower()
-                if encoding is None and not isinstance(exc, UnicodeDecodeError) and "unicode" not in message and "codec" not in message:
-                    raise
-        raise read_error
-    if suffix == ".parquet":
-        return pd.read_parquet(file_path)
-    raise ValueError(f"Unsupported econometrics input format: {suffix}")
-
-def build_model_qa(df, entity_var=None, time_var=None, cluster_var=None):
-    warnings = []
-    blocking_errors = []
-    suggested_repairs = []
-    duplicate_rows = 0
-    cluster_count = None
-
-    if entity_var and time_var:
-        missing_keys = [item for item in [entity_var, time_var] if item not in df.columns]
-        if missing_keys:
-            blocking_errors.append(f"Panel identifiers not found: {missing_keys}")
-        else:
-            duplicate_rows = int(df.duplicated(subset=[entity_var, time_var]).sum())
-            if duplicate_rows > 0:
-                warnings.append(f"Found {duplicate_rows} duplicate entity-time rows")
-                suggested_repairs.append("Aggregate or deduplicate entity-time rows before regression")
-
-    if cluster_var and cluster_var in df.columns:
-        cluster_count = int(df[cluster_var].nunique(dropna=True))
-        if cluster_count < 10:
-            warnings.append(f"Cluster count is low ({cluster_count}); clustered standard errors may be unstable")
-
-    return {
-        "warnings": warnings,
-        "blocking_errors": blocking_errors,
-        "suggested_repairs": suggested_repairs,
-        "duplicate_entity_time_rows": duplicate_rows,
-        "cluster_count": cluster_count,
-    }
-
-def vif_report(frame):
-    clean = frame.dropna()
-    if clean.empty or clean.shape[1] <= 1:
-        return []
-    matrix = np.column_stack([np.ones(len(clean)), clean.to_numpy(dtype=float)])
-    result = []
-    for idx, column in enumerate(clean.columns, start=1):
-        target = matrix[:, idx]
-        others = np.delete(matrix, idx, axis=1)
-        beta = np.linalg.pinv(others.T @ others) @ (others.T @ target)
-        fitted = others @ beta
-        ssr = float(np.sum((target - fitted) ** 2))
-        tss = float(np.sum((target - target.mean()) ** 2))
-        vif_value = None if tss == 0 else float(1.0 / (1.0 - max(0.0, min(0.999999, 1 - ssr / tss))))
-        result.append({"variable": column, "vif": vif_value})
-    return result
-
-def breusch_pagan(residuals, design_matrix):
-    if design_matrix.shape[1] <= 1:
-        return {"breusch_pagan_stat": 0.0, "breusch_pagan_pvalue": 1.0}
-    target = residuals ** 2
-    beta = np.linalg.pinv(design_matrix.T @ design_matrix) @ (design_matrix.T @ target)
-    fitted = design_matrix @ beta
-    tss = float(np.sum((target - target.mean()) ** 2))
-    rss = float(np.sum((target - fitted) ** 2))
-    r_squared = 0.0 if tss == 0 else max(0.0, min(0.999999, 1 - rss / tss))
-    lm = len(residuals) * r_squared
-    dof = max(design_matrix.shape[1] - 1, 1)
-    return {
-        "breusch_pagan_stat": float(lm),
-        "breusch_pagan_pvalue": float(stats.chi2.sf(lm, dof)),
-    }
-
-def cluster_covariance(design_matrix, residuals, groups):
-    xtx_inv = np.linalg.pinv(design_matrix.T @ design_matrix)
-    meat = np.zeros((design_matrix.shape[1], design_matrix.shape[1]))
-    unique_groups = np.unique(groups)
-    for group in unique_groups:
-        mask = groups == group
-        xg = design_matrix[mask]
-        ug = residuals[mask]
-        score = xg.T @ ug
-        meat += np.outer(score, score)
-    n = design_matrix.shape[0]
-    k = design_matrix.shape[1]
-    g = len(unique_groups)
-    correction = 1.0 if g <= 1 or n <= k else (g / (g - 1)) * ((n - 1) / (n - k))
-    return correction * (xtx_inv @ meat @ xtx_inv)
-
-def hc1_covariance(design_matrix, residuals):
-    xtx_inv = np.linalg.pinv(design_matrix.T @ design_matrix)
-    xru = design_matrix * residuals[:, None]
-    meat = xru.T @ xru
-    n = design_matrix.shape[0]
-    k = design_matrix.shape[1]
-    correction = 1.0 if n <= k else n / max(n - k, 1)
-    return correction * (xtx_inv @ meat @ xtx_inv)
-
-def build_coefficient_table(term_names, beta, std_error, p_value, dof):
-    critical = float(stats.t.ppf(0.975, dof)) if dof > 0 else 1.96
-    rows = []
-    for idx, term in enumerate(term_names):
-        t_stat = None if std_error[idx] == 0 else float(beta[idx] / std_error[idx])
-        rows.append({
-            "term": term,
-            "coefficient": float(beta[idx]),
-            "std_error": float(std_error[idx]),
-            "t_stat": t_stat,
-            "p_value": float(p_value[idx]),
-            "ci_lower": float(beta[idx] - critical * std_error[idx]),
-            "ci_upper": float(beta[idx] + critical * std_error[idx]),
-        })
-    return pd.DataFrame(rows)
-
-def adjusted_r_squared(outcome, residuals, n, k):
-    tss = float(np.sum((outcome - outcome.mean()) ** 2))
-    rss = float(np.sum(residuals ** 2))
-    if tss == 0 or n <= k:
-        return 0.0
-    return float(1 - (rss / (n - k)) / (tss / (n - 1)))
-
-def empty_coefficient_table():
-    return pd.DataFrame(columns=["term", "coefficient", "std_error", "t_stat", "p_value", "ci_lower", "ci_upper"])
-
-def scalar_coefficient_table(term, coefficient=None, std_error=None, p_value=None, ci_lower=None, ci_upper=None):
-    t_stat = None
-    if coefficient is not None and std_error not in [None, 0]:
-        t_stat = float(coefficient / std_error)
-    return pd.DataFrame([{
-        "term": term,
-        "coefficient": None if coefficient is None else float(coefficient),
-        "std_error": None if std_error is None else float(std_error),
-        "t_stat": t_stat,
-        "p_value": None if p_value is None else float(p_value),
-        "ci_lower": None if ci_lower is None else float(ci_lower),
-        "ci_upper": None if ci_upper is None else float(ci_upper),
-    }])
-
-def model_coefficient_table(model):
-    if model is None or not hasattr(model, "params"):
-        return empty_coefficient_table()
-    params = model.params
-    std_errors = getattr(model, "std_errors", getattr(model, "bse", None))
-    p_values = getattr(model, "pvalues", None)
-    conf_int = model.conf_int() if hasattr(model, "conf_int") else None
-    rows = []
-    for term, coefficient in params.items():
-        std_error = None if std_errors is None else std_errors.get(term)
-        p_value = None if p_values is None else p_values.get(term)
-        ci_lower = None
-        ci_upper = None
-        if conf_int is not None and term in conf_int.index:
-            if "lower" in conf_int.columns and "upper" in conf_int.columns:
-                ci_lower = conf_int.loc[term, "lower"]
-                ci_upper = conf_int.loc[term, "upper"]
-            else:
-                ci_lower = conf_int.loc[term].iloc[0]
-                ci_upper = conf_int.loc[term].iloc[-1]
-        t_stat = None
-        if std_error not in [None, 0]:
-            t_stat = float(coefficient / std_error)
-        rows.append({
-            "term": str(term),
-            "coefficient": float(coefficient),
-            "std_error": None if std_error is None else float(std_error),
-            "t_stat": t_stat,
-            "p_value": None if p_value is None else float(p_value),
-            "ci_lower": None if ci_lower is None else float(ci_lower),
-            "ci_upper": None if ci_upper is None else float(ci_upper),
-        })
-    return pd.DataFrame(rows, columns=["term", "coefficient", "std_error", "t_stat", "p_value", "ci_lower", "ci_upper"])
-
-def first_non_const_term(coefficients):
-    if coefficients.empty:
-        return None
-    for term in coefficients["term"].tolist():
-        if term != "const":
-            return term
-    return coefficients.iloc[0]["term"]
-
-def build_table_variables(method, treatment_name, covariate_names, coefficients, explicit_primary_term=None):
-    if method == "did_static":
-        return ["treatment_group_treated", *covariate_names]
-    if method == "did_staggered":
-        return [explicit_primary_term or "treatment_entity_treated", *covariate_names]
-    if method == "did_event_study":
-        terms = [term for term in coefficients["term"].tolist() if term != "const"]
-        return terms
-    if method in ["ols_regression", "iv_2sls", "psm_regression", "psm_dr_ipw_ra", "rdd_sharp", "rdd_fuzzy_global"]:
-        primary_term = explicit_primary_term or treatment_name or first_non_const_term(coefficients)
-        return [item for item in [primary_term, *covariate_names] if item]
-    return []
-
-def iv_strength_diagnostic(treatment_series, iv_series, covariate_frame=None):
-    try:
-        if treatment_series is None or iv_series is None:
-            return {"status": "skipped", "reason": "instrument not available"}
-        treatment = pd.to_numeric(treatment_series, errors="coerce")
-        if isinstance(iv_series, pd.DataFrame):
-            instrument_frame = iv_series.apply(pd.to_numeric, errors="coerce")
-        else:
-            instrument_name = getattr(iv_series, "name", None) or "instrument"
-            instrument_frame = pd.DataFrame({instrument_name: pd.to_numeric(iv_series, errors="coerce")})
-        pieces = [treatment.rename("treatment"), instrument_frame]
-        if covariate_frame is not None and not covariate_frame.empty:
-            pieces.append(covariate_frame.apply(pd.to_numeric, errors="coerce"))
-        joined = pd.concat(pieces, axis=1).dropna()
-        if joined.empty:
-            return {"status": "skipped", "reason": "no complete rows"}
-        outcome = joined.iloc[:, 0].to_numpy(dtype=float)
-        regressors = sm.add_constant(joined.iloc[:, 1:].to_numpy(dtype=float))
-        first_stage = sm.OLS(outcome, regressors).fit()
-        instrument_count = instrument_frame.shape[1]
-        if instrument_count == 1:
-            f_stat = float(first_stage.tvalues[1] ** 2) if len(first_stage.tvalues) > 1 else None
-        else:
-            restriction = np.zeros((instrument_count, regressors.shape[1]))
-            restriction[:, 1:1 + instrument_count] = np.eye(instrument_count)
-            test = first_stage.f_test(restriction)
-            f_stat = float(np.asarray(test.fvalue).item()) if getattr(test, "fvalue", None) is not None else None
-        return {
-            "status": "pass",
-            "f_stat": f_stat,
-            "instrument_count": int(instrument_count),
-            "n_obs": int(len(joined)),
-        }
-    except Exception as exc:
-        return {"status": "skipped", "reason": str(exc)}
-
-def parallel_trends_diagnostic(coefficients):
-    try:
-        if coefficients is None or coefficients.empty or "term" not in coefficients.columns:
-            return {"status": "skipped", "reason": "coefficient table unavailable"}
-        lead_rows = coefficients[coefficients["term"].astype(str).str.startswith("Lead_")].copy()
-        if lead_rows.empty:
-            return {"status": "skipped", "reason": "no lead terms found"}
-        lead_rows["p_value"] = pd.to_numeric(lead_rows["p_value"], errors="coerce")
-        significant = lead_rows[lead_rows["p_value"] < 0.05].copy()
-        min_lead_p_value = None if lead_rows["p_value"].dropna().empty else float(lead_rows["p_value"].dropna().min())
-        return {
-            "status": "pass",
-            "passed": significant.empty,
-            "significant_lead_count": int(len(significant)),
-            "min_lead_p_value": min_lead_p_value,
-            "significant_leads": significant[["term", "coefficient", "p_value"]].to_dict(orient="records"),
-        }
-    except Exception as exc:
-        return {"status": "skipped", "reason": str(exc)}
-
-def load_matplotlib_pyplot():
-    import matplotlib
-    matplotlib.use("Agg")
-    from matplotlib import pyplot as plt
-    return plt
-
-def prepare_panel_inputs(df, payload, covariate_names):
-    entity_var = payload.get("entity_var")
-    time_var = payload.get("time_var")
-    if not entity_var or not time_var:
-        raise ValueError(f"Method {method} requires entity_var and time_var")
-    required = [entity_var, time_var, payload["dependent_var"], *covariate_names]
-    treatment_name = payload.get("treatment_var")
-    if treatment_name:
-        required.append(treatment_name)
-    missing = sorted(set([col for col in required if col not in df.columns]))
-    if missing:
-        raise ValueError(f"Missing panel columns in dataset: {missing}")
-    panel_df = df.set_index([entity_var, time_var]).sort_index()
-    dependent_var = panel_df[payload["dependent_var"]]
-    treatment_var = panel_df[treatment_name] if treatment_name else None
-    covariates = panel_df[covariate_names] if covariate_names else None
-    return panel_df, dependent_var, treatment_var, covariates
-
-def persist_common_outputs(payload, result, qa, diagnostics, metadata, coefficients, summary_text, narrative_text):
-    output_dir = Path(payload["output_dir"])
-    output_dir.mkdir(parents=True, exist_ok=True)
-    coefficients_path = output_dir / "coefficient_table.csv"
-    workbook_path = output_dir / "coefficient_table.xlsx"
-    diagnostics_path = output_dir / "diagnostics.json"
-    metadata_path = output_dir / "model_metadata.json"
-    narrative_path = output_dir / "narrative.md"
-    output_path = output_dir / "results.json"
-    summary_path = output_dir / "model_summary.txt"
-
-    coefficients = coefficients if coefficients is not None else empty_coefficient_table()
-    coefficients.to_csv(coefficients_path, index=False, encoding="utf-8-sig")
-    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
-        coefficients.to_excel(writer, sheet_name="coefficients", index=False)
-
-    result["output_path"] = str(output_path)
-    result["coefficients_path"] = str(coefficients_path)
-    result["workbook_path"] = str(workbook_path)
-    result["diagnostics_path"] = str(diagnostics_path)
-    result["metadata_path"] = str(metadata_path)
-    result["narrative_path"] = str(narrative_path)
-    result["summary_path"] = str(summary_path)
-    result["qa_status"] = "fail" if qa["blocking_errors"] else "warn" if qa["warnings"] else "pass"
-    result["warnings"] = qa["warnings"]
-    result["blocking_errors"] = qa["blocking_errors"]
-    result["suggested_repairs"] = qa["suggested_repairs"]
-
-    save_json(diagnostics_path, diagnostics)
-    save_json(metadata_path, metadata)
-    save_json(output_path, result)
-    with open(summary_path, "w", encoding="utf-8") as f:
-        f.write(summary_text)
-    with open(narrative_path, "w", encoding="utf-8") as f:
-        f.write(narrative_text)
-
-    return result
-
-payload = json.loads(base64.b64decode("${payloadB64}").decode("utf-8"))
-method = payload["method"]
-
-try:
-    df = read_table(payload["data_path"])
-    dependent_var = payload["dependent_var"]
-    treatment_var = payload["treatment_var"]
-    covariates = payload.get("covariates", [])
-    entity_var = payload["entity_var"]
-    time_var = payload["time_var"]
-    cluster_var = payload.get("cluster_var") or entity_var
-
-    required_columns = [dependent_var, treatment_var, entity_var, time_var] + covariates
-    missing_columns = sorted(set([col for col in required_columns if col not in df.columns]))
-    if missing_columns:
-        raise ValueError(f"Missing columns in dataset: {missing_columns}")
-
-    qa = build_model_qa(df, entity_var, time_var, cluster_var)
-    model_columns = required_columns + ([cluster_var] if cluster_var not in required_columns else [])
-    model_df = df[model_columns].copy()
-    for column in [dependent_var, treatment_var, *covariates]:
-        model_df[column] = pd.to_numeric(model_df[column], errors="coerce")
-
-    rows_before = len(model_df)
-    model_df = model_df.dropna(subset=[dependent_var, treatment_var, entity_var, time_var, *covariates])
-    dropped_rows = int(rows_before - len(model_df))
-    if dropped_rows > 0:
-        qa["warnings"].append(f"Dropped {dropped_rows} rows with missing model variables")
-    if model_df.empty:
-        raise ValueError("No usable rows remain after dropping missing model variables")
-
-    duplicate_rows = int(model_df.duplicated(subset=[entity_var, time_var]).sum())
-    if duplicate_rows > 0:
-        aggregations = {}
-        for column in model_df.columns:
-            if column in [entity_var, time_var]:
-                continue
-            if pd.api.types.is_numeric_dtype(model_df[column]):
-                aggregations[column] = "mean"
-            else:
-                aggregations[column] = "first"
-        model_df = model_df.groupby([entity_var, time_var], as_index=False).agg(aggregations)
-        qa["warnings"].append(f"Aggregated {duplicate_rows} duplicate entity-time rows by panel key mean")
-
-    main = model_df[[treatment_var, *covariates]].to_numpy(dtype=float)
-    entity_dummies = pd.get_dummies(model_df[entity_var], prefix=entity_var, drop_first=True, dtype=float)
-    time_dummies = pd.get_dummies(model_df[time_var], prefix=time_var, drop_first=True, dtype=float)
-    term_names = ["const", treatment_var, *covariates, *entity_dummies.columns.tolist(), *time_dummies.columns.tolist()]
-    matrix_parts = [np.ones((len(model_df), 1)), main]
-    if not entity_dummies.empty:
-        matrix_parts.append(entity_dummies.to_numpy(dtype=float))
-    if not time_dummies.empty:
-        matrix_parts.append(time_dummies.to_numpy(dtype=float))
-    design_matrix = np.column_stack(matrix_parts)
-    raw_outcome = model_df[dependent_var].to_numpy(dtype=float)
-    outcome = raw_outcome
-    beta = np.linalg.pinv(design_matrix.T @ design_matrix) @ (design_matrix.T @ outcome)
-    fitted = design_matrix @ beta
-    residuals = outcome - fitted
-    groups = pd.factorize(model_df[cluster_var])[0]
-    covariance = cluster_covariance(design_matrix, residuals, groups)
-    std_error = np.sqrt(np.clip(np.diag(covariance), a_min=0, a_max=None))
-    dof = max(len(outcome) - design_matrix.shape[1], 1)
-    t_stats = np.divide(beta, std_error, out=np.zeros_like(beta), where=std_error > 0)
-    p_value = 2 * stats.t.sf(np.abs(t_stats), dof)
-
-    coefficients = build_coefficient_table(term_names, beta, std_error, p_value, dof)
-    output_dir = Path(payload["output_dir"])
-    output_dir.mkdir(parents=True, exist_ok=True)
-    coefficients_path = output_dir / "coefficient_table.csv"
-    workbook_path = output_dir / "coefficient_table.xlsx"
-    diagnostics_path = output_dir / "diagnostics.json"
-    metadata_path = output_dir / "model_metadata.json"
-    narrative_path = output_dir / "narrative.md"
-    output_path = output_dir / "results.json"
-    summary_path = output_dir / "model_summary.txt"
-
-    coefficients.to_csv(coefficients_path, index=False, encoding="utf-8-sig")
-    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
-        coefficients.to_excel(writer, sheet_name="coefficients", index=False)
-
-    diagnostic_model = sm.OLS(outcome, design_matrix).fit()
-    panel_info = {
-        "entity_var": entity_var,
-        "time_var": time_var,
-        "cluster_var": cluster_var,
-        "entity_count": int(model_df[entity_var].nunique(dropna=True)),
-        "time_count": int(model_df[time_var].nunique(dropna=True)),
-        "cluster_count": qa["cluster_count"],
-        "duplicate_entity_time_rows": qa["duplicate_entity_time_rows"],
-        "dropped_rows": dropped_rows,
-    }
-    diagnostics = {
-        "core": run_core_diagnostics(
-            diagnostic_model,
-            regressors=model_df[[treatment_var, *covariates]],
-            treatment_variable=model_df[treatment_var],
-            panel_info=panel_info,
-        ),
-        "robustness": run_robustness_checks(
-            diagnostic_model,
-            frame=model_df,
-            outcome_var=dependent_var,
-            treatment_var=treatment_var,
-            covariates=covariates,
-            cluster_var=cluster_var,
-            placebo_var=payload.get("options", {}).get("placebo_var"),
-            alternative_sets=payload.get("options", {}).get("alternative_specifications"),
-            groups=model_df[cluster_var],
-        ),
-        "qa": {
-            "warnings": qa["warnings"],
-            "blocking_errors": qa["blocking_errors"],
-            "suggested_repairs": qa["suggested_repairs"],
-            **panel_info,
-        },
-    }
-    metadata = {
-        "method": method,
-        "backend": "numpy_fe_cluster",
-        "covariance": "cluster",
-        "dependent_var": dependent_var,
-        "treatment_var": treatment_var,
-        "covariates": covariates,
-        "entity_var": entity_var,
-        "time_var": time_var,
-        "cluster_var": cluster_var,
-        "rows_used": int(len(model_df)),
-        "rows_dropped": dropped_rows,
-        "term_names": term_names,
-        "input_encoding": df.attrs.get("_source_encoding", "default"),
-        "output_kind": "regression",
-    }
-    treatment_idx = term_names.index(treatment_var)
-    result = {
-        "success": True,
-        "method": "Panel FE",
-        "dataset_id": payload.get("dataset_id"),
-        "stage_id": payload.get("stage_id"),
-        "branch": payload.get("branch"),
-        "coefficient": float(beta[treatment_idx]),
-        "std_error": float(std_error[treatment_idx]),
-        "p_value": float(p_value[treatment_idx]),
-        "r_squared": adjusted_r_squared(outcome, residuals, len(outcome), design_matrix.shape[1]),
-        "output_path": str(output_path),
-        "coefficients_path": str(coefficients_path),
-        "workbook_path": str(workbook_path),
-        "diagnostics_path": str(diagnostics_path),
-        "metadata_path": str(metadata_path),
-        "narrative_path": str(narrative_path),
-        "qa_status": "fail" if qa["blocking_errors"] else "warn" if qa["warnings"] else "pass",
-        "warnings": qa["warnings"],
-        "blocking_errors": qa["blocking_errors"],
-        "suggested_repairs": qa["suggested_repairs"],
-        "backend": "numpy_fe_cluster",
-        "dropped_rows": dropped_rows,
-        "rows_used": int(len(model_df)),
-        "cluster_var": cluster_var,
-    }
-
-    save_json(output_path, result)
-    save_json(diagnostics_path, diagnostics)
-    save_json(metadata_path, metadata)
-    with open(summary_path, "w", encoding="utf-8") as f:
-        f.write(coefficients.to_string(index=False))
-    with open(narrative_path, "w", encoding="utf-8") as f:
-        f.write("# Panel FE Regression Summary\\\\n\\\\n")
-        f.write(f"- Dependent variable: {dependent_var}\\\\n")
-        f.write(f"- Key regressor: {treatment_var}\\\\n")
-        f.write(f"- Controls: {covariates}\\\\n")
-        f.write(f"- Fixed effects: {entity_var}, {time_var}\\\\n")
-        f.write(f"- Clustered SE: {cluster_var}\\\\n")
-        f.write(f"- Coefficient: {result['coefficient']:.6f}\\\\n")
-        f.write(f"- Std. error: {result['std_error']:.6f}\\\\n")
-        f.write(f"- P-value: {result['p_value']:.6f}\\\\n")
-        f.write(f"- Adjusted R-squared: {result['r_squared']:.6f}\\\\n")
-    emit(result)
-
-except Exception as e:
-    result = {
-        "success": False,
-        "error": str(e),
-        "traceback": traceback.format_exc(),
-    }
-    error_path = safe_error_path(method)
-    result["error_log_path"] = error_path
-    save_json(error_path, result)
-    emit(result)
-`
-}
-
 export const EconometricsTool = Tool.define("econometrics", async () => ({
   description: DESCRIPTION,
   parameters: z.object({
@@ -2555,12 +1997,19 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
       timeVar: params.timeVar,
     })
 
-    const pythonStatus = await getRuntimePythonStatus()
+    // 参数校验必须先于审批弹窗：没有数据来源的调用根本跑不起来（resolveArtifactInput
+    // 不会凭空找出一个数据集），不该先弹执行计划打扰用户、等用户点了同意才报错。
+    if (!params.dataPath && !params.datasetId) {
+      throw new Error("Econometrics requires dataPath or datasetId/stageId")
+    }
+
+    const pythonStatus = await ensureRuntimePythonReady()
     if (!pythonStatus.ok || pythonStatus.missing.length) {
       throw new Error(formatRuntimePythonSetupError("econometrics", pythonStatus))
     }
     const pythonCommand = pythonStatus.executable
     const installCommand = pythonStatus.installCommand
+
     if (ctx.agent === "analyst" && params.methodName !== "auto_recommend") {
       const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
       if (!analystState.planApproved) {
@@ -2930,9 +2379,12 @@ import sys
 import traceback
 from pathlib import Path
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from linearmodels.panel import PanelOLS
 from scipy import stats
 
 RESULT_PREFIX = "${PYTHON_RESULT_PREFIX}"
@@ -2995,10 +2447,12 @@ def safe_error_path(method_name):
     stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     return str(error_dir / f"econometrics_{method_name}_{stamp}_error.json")
 
+${PY_READ_CSV_FALLBACK}
+
 def read_table(file_path):
     suffix = Path(file_path).suffix.lower()
     if suffix == ".csv":
-        return pd.read_csv(file_path)
+        return read_csv_with_fallback(file_path)
     if suffix in [".xlsx", ".xls"]:
         return pd.read_excel(file_path)
     if suffix == ".dta":
@@ -3029,7 +2483,7 @@ def nested_pvalue(block, key):
         return None
     value = block.get(key)
     if isinstance(value, dict):
-        for candidate in ["p_value", "pvalue", "breusch_pagan_pvalue", "white_pvalue"]:
+        for candidate in ["p_value", "pvalue", "lm_pvalue", "breusch_pagan_pvalue", "white_pvalue"]:
             if candidate in value and value[candidate] is not None:
                 try:
                     return float(value[candidate])
@@ -3058,8 +2512,8 @@ def build_model_qa(df, entity_var=None, time_var=None, cluster_var=None):
         else:
             duplicate_rows = int(df.duplicated(subset=[entity_var, time_var]).sum())
             if duplicate_rows > 0:
-                blocking_errors.append(f"Found {duplicate_rows} duplicate entity-time rows")
-                suggested_repairs.append("Deduplicate entity-time rows before regression")
+                warnings.append(f"Found {duplicate_rows} duplicate entity-time rows")
+                suggested_repairs.append("Aggregate or deduplicate entity-time rows before regression")
 
     if cluster_var and cluster_var in df.columns:
         cluster_count = int(df[cluster_var].nunique(dropna=True))
@@ -3073,6 +2527,70 @@ def build_model_qa(df, entity_var=None, time_var=None, cluster_var=None):
         "duplicate_entity_time_rows": duplicate_rows,
         "cluster_count": cluster_count,
     }
+
+def empty_coefficient_table():
+    return pd.DataFrame(columns=["term", "coefficient", "std_error", "t_stat", "p_value", "ci_lower", "ci_upper"])
+
+def scalar_coefficient_table(term, coefficient=None, std_error=None, p_value=None, ci_lower=None, ci_upper=None):
+    t_stat = None
+    if coefficient is not None and std_error not in [None, 0]:
+        t_stat = float(coefficient / std_error)
+    return pd.DataFrame([{
+        "term": term,
+        "coefficient": None if coefficient is None else float(coefficient),
+        "std_error": None if std_error is None else float(std_error),
+        "t_stat": t_stat,
+        "p_value": None if p_value is None else float(p_value),
+        "ci_lower": None if ci_lower is None else float(ci_lower),
+        "ci_upper": None if ci_upper is None else float(ci_upper),
+    }])
+
+def model_coefficient_table(model):
+    if model is None or not hasattr(model, "params"):
+        return empty_coefficient_table()
+    params = model.params
+    std_errors = getattr(model, "std_errors", getattr(model, "bse", None))
+    p_values = getattr(model, "pvalues", None)
+    conf_int = model.conf_int() if hasattr(model, "conf_int") else None
+    # statsmodels' get_robustcov_results() (used for the HC1 auto-upgrade path) drops the
+    # pandas wrapper: params/bse/pvalues/conf_int come back as bare numpy arrays instead of
+    # a Series/DataFrame indexed by term name. Re-wrap them here so the rest of this function
+    # can keep assuming pandas semantics (.items(), .get(), .loc).
+    if isinstance(params, np.ndarray):
+        term_names = list(getattr(getattr(model, "model", None), "exog_names", None) or [f"x{i}" for i in range(len(params))])
+        params = pd.Series(params, index=term_names)
+        if isinstance(std_errors, np.ndarray):
+            std_errors = pd.Series(std_errors, index=term_names)
+        if isinstance(p_values, np.ndarray):
+            p_values = pd.Series(p_values, index=term_names)
+        if isinstance(conf_int, np.ndarray):
+            conf_int = pd.DataFrame(conf_int, index=term_names, columns=["lower", "upper"])
+    rows = []
+    for term, coefficient in params.items():
+        std_error = None if std_errors is None else std_errors.get(term)
+        p_value = None if p_values is None else p_values.get(term)
+        ci_lower = None
+        ci_upper = None
+        if conf_int is not None and term in conf_int.index:
+            if "lower" in conf_int.columns and "upper" in conf_int.columns:
+                ci_lower = conf_int.loc[term, "lower"]
+                ci_upper = conf_int.loc[term, "upper"]
+            else:
+                ci_lower = conf_int.loc[term].iloc[0]
+                ci_upper = conf_int.loc[term].iloc[-1]
+        t_stat = None
+        if std_error not in [None, 0]:
+            t_stat = float(coefficient / std_error)
+        rows.append({
+            "term": str(term),
+            "coefficient": float(coefficient),
+            "std_error": None if std_error is None else float(std_error),
+            "t_stat": t_stat,
+            "p_value": None if p_value is None else float(p_value),
+            "ci_lower": None if ci_lower is None else float(ci_lower),
+            "ci_upper": None if ci_upper is None else float(ci_upper),
+        })
+    return pd.DataFrame(rows, columns=["term", "coefficient", "std_error", "t_stat", "p_value", "ci_lower", "ci_upper"])
 
 def vif_report(frame):
     clean = frame.dropna()
@@ -3111,71 +2629,6 @@ def breusch_pagan(residuals, design_matrix):
         "breusch_pagan_pvalue": float(stats.chi2.sf(lm, dof)),
     }
 
-def cluster_covariance(design_matrix, residuals, groups):
-    xtx_inv = np.linalg.pinv(design_matrix.T @ design_matrix)
-    meat = np.zeros((design_matrix.shape[1], design_matrix.shape[1]))
-    unique_groups = np.unique(groups)
-    for group in unique_groups:
-        mask = groups == group
-        xg = design_matrix[mask]
-        ug = residuals[mask]
-        score = xg.T @ ug
-        meat += np.outer(score, score)
-    n = design_matrix.shape[0]
-    k = design_matrix.shape[1]
-    g = len(unique_groups)
-    correction = 1.0
-    if g > 1 and n > k:
-        correction = (g / (g - 1)) * ((n - 1) / (n - k))
-    return correction * (xtx_inv @ meat @ xtx_inv)
-
-def hc1_covariance(design_matrix, residuals):
-    xtx_inv = np.linalg.pinv(design_matrix.T @ design_matrix)
-    xru = design_matrix * residuals[:, None]
-    meat = xru.T @ xru
-    n = design_matrix.shape[0]
-    k = design_matrix.shape[1]
-    correction = 1.0 if n <= k else n / max(n - k, 1)
-    return correction * (xtx_inv @ meat @ xtx_inv)
-
-def build_coefficient_table(term_names, beta, std_error, p_value, dof):
-    critical = float(stats.t.ppf(0.975, dof)) if dof > 0 else 1.96
-    rows = []
-    for idx, term in enumerate(term_names):
-        t_stat = None if std_error[idx] == 0 else float(beta[idx] / std_error[idx])
-        rows.append({
-            "term": term,
-            "coefficient": float(beta[idx]),
-            "std_error": float(std_error[idx]),
-            "t_stat": t_stat,
-            "p_value": float(p_value[idx]),
-            "ci_lower": float(beta[idx] - critical * std_error[idx]),
-            "ci_upper": float(beta[idx] + critical * std_error[idx]),
-        })
-    return pd.DataFrame(rows)
-
-def design_matrix_with_fixed_effects(model_df, treatment_var, covariates, entity_var, time_var):
-    transformed = model_df[[entity_var, treatment_var, *covariates]].copy()
-    for column in [treatment_var, *covariates]:
-        transformed[column] = transformed[column] - transformed.groupby(entity_var)[column].transform("mean")
-
-    time_dummies = pd.get_dummies(model_df[time_var], prefix=time_var, drop_first=True, dtype=float)
-    if not time_dummies.empty:
-        time_dummies = time_dummies - time_dummies.groupby(model_df[entity_var]).transform("mean")
-
-    matrix_parts = [transformed[[treatment_var, *covariates]].to_numpy(dtype=float)]
-    term_names = [treatment_var, *covariates]
-    if not time_dummies.empty:
-        matrix_parts.append(time_dummies.to_numpy(dtype=float))
-        term_names.extend(time_dummies.columns.tolist())
-    return np.column_stack(matrix_parts), term_names
-
-def adjusted_r_squared(outcome, residuals, n, k):
-    tss = float(np.sum((outcome - outcome.mean()) ** 2))
-    rss = float(np.sum(residuals ** 2))
-    if tss == 0 or n <= k:
-        return 0.0
-    return float(1 - (rss / (n - k)) / (tss / (n - 1)))
 
 def run_panel_fe(df, payload):
     dependent_var = payload["dependent_var"]
@@ -3205,8 +2658,21 @@ def run_panel_fe(df, payload):
 
     model_columns = required_columns + ([cluster_var] if cluster_var not in required_columns else [])
     model_df = df[model_columns].copy()
+    non_numeric_columns = []
     for column in [dependent_var, treatment_var, *covariates]:
-        model_df[column] = pd.to_numeric(model_df[column], errors="coerce")
+        original = model_df[column]
+        coerced = pd.to_numeric(original, errors="coerce")
+        original_non_null = int(original.notna().sum())
+        newly_missing = int((original.notna() & coerced.isna()).sum())
+        if original_non_null > 0 and newly_missing / original_non_null > 0.5:
+            samples = original[original.notna() & coerced.isna()].astype(str).head(3).tolist()
+            non_numeric_columns.append(f"{column} (sample values: {samples})")
+        model_df[column] = coerced
+
+    if non_numeric_columns:
+        raise ValueError(
+            "These columns do not look numeric and cannot be used in panel_fe_regression: " + "; ".join(non_numeric_columns)
+        )
 
     rows_before = len(model_df)
     model_df = model_df.dropna(subset=[dependent_var, treatment_var, entity_var, time_var, *covariates])
@@ -3217,7 +2683,6 @@ def run_panel_fe(df, payload):
     if model_df.empty:
         raise ValueError("No usable rows remain after dropping missing model variables")
 
-    outcome = model_df[dependent_var].to_numpy(dtype=float)
     effective_method = "panel_fe"
     degraded_from = None
     effective_covariance = "cluster"
@@ -3236,30 +2701,47 @@ def run_panel_fe(df, payload):
             "message": f"Cluster count is low ({qa['cluster_count']}), so switched clustered SE to HC1 robust SE.",
         })
 
+    absorbed_terms = []
+    r_squared_overall = None
+    r_squared_between = None
     if effective_method == "panel_fe":
-        outcome = (model_df[dependent_var] - model_df.groupby(entity_var)[dependent_var].transform("mean")).to_numpy(dtype=float)
-        design_matrix, term_names = design_matrix_with_fixed_effects(model_df, treatment_var, covariates, entity_var, time_var)
+        panel_df = model_df.set_index([entity_var, time_var])
+        exog = panel_df[[treatment_var, *covariates]]
+        mod = PanelOLS(panel_df[dependent_var], exog, entity_effects=True, time_effects=True, drop_absorbed=True, check_rank=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if effective_covariance == "cluster":
+                if cluster_var in panel_df.index.names:
+                    cluster_series = panel_df.index.get_level_values(cluster_var).to_series(index=panel_df.index)
+                else:
+                    cluster_series = panel_df[cluster_var]
+                fit_result = mod.fit(cov_type="clustered", clusters=cluster_series)
+            else:
+                fit_result = mod.fit(cov_type="robust")
+        absorbed_terms = sorted(set(exog.columns) - set(fit_result.params.index))
+        if absorbed_terms:
+            qa["warnings"].append(f"These variables were fully absorbed by fixed effects and dropped from the model: {absorbed_terms}")
+        coefficients = model_coefficient_table(fit_result)
+        residual_values = fit_result.resids.to_numpy(dtype=float)
+        r_squared = float(fit_result.rsquared_within)
+        r_squared_overall = float(fit_result.rsquared_overall)
+        r_squared_between = float(fit_result.rsquared_between)
+        backend = "linearmodels_panelols"
     else:
-        design_matrix = np.column_stack([
-            np.ones((len(model_df), 1)),
-            model_df[[treatment_var, *covariates]].to_numpy(dtype=float),
-        ])
-        term_names = ["const", treatment_var, *covariates]
+        design = sm.add_constant(model_df[[treatment_var, *covariates]].astype(float))
+        fit_result = sm.OLS(model_df[dependent_var].astype(float), design).fit(cov_type="HC1")
+        coefficients = model_coefficient_table(fit_result)
+        residual_values = fit_result.resid.to_numpy(dtype=float)
+        r_squared = float(fit_result.rsquared)
+        backend = "statsmodels_ols_hc1"
 
-    beta = np.linalg.pinv(design_matrix.T @ design_matrix) @ (design_matrix.T @ outcome)
-    fitted = design_matrix @ beta
-    residuals = outcome - fitted
-    groups = pd.factorize(model_df[cluster_var])[0] if cluster_var in model_df.columns else None
-    if effective_covariance == "cluster" and groups is not None:
-        covariance = cluster_covariance(design_matrix, residuals, groups)
-    else:
-        covariance = hc1_covariance(design_matrix, residuals)
-    std_error = np.sqrt(np.clip(np.diag(covariance), a_min=0, a_max=None))
-    dof = max(len(np.unique(groups)) - 1, 1) if effective_covariance == "cluster" and groups is not None else max(len(outcome) - design_matrix.shape[1], 1)
-    t_stats = np.divide(beta, std_error, out=np.zeros_like(beta), where=std_error > 0)
-    p_value = 2 * stats.t.sf(np.abs(t_stats), dof)
+    term_names = coefficients["term"].tolist()
+    if treatment_var not in term_names:
+        raise ValueError(
+            f"Treatment variable '{treatment_var}' was fully absorbed by fixed effects and dropped from the model; "
+            "add it as a time-varying regressor or remove entity/time fixed effects."
+        )
 
-    coefficients = build_coefficient_table(term_names, beta, std_error, p_value, dof)
     coefficients_path = Path(payload["output_dir"]) / "coefficient_table.csv"
     workbook_path = Path(payload["output_dir"]) / "coefficient_table.xlsx"
     diagnostics_path = Path(payload["output_dir"]) / "diagnostics.json"
@@ -3286,11 +2768,15 @@ def run_panel_fe(df, payload):
         "heteroskedasticity": {"status": "skipped", "reason": "lightweight panel_fe diagnostics path"},
         "multicollinearity": {"status": "skipped", "reason": "lightweight panel_fe diagnostics path"},
         "residuals": {
-            "mean": float(residuals.mean()),
-            "std": float(residuals.std()),
-            "min": float(residuals.min()),
-            "max": float(residuals.max()),
+            "mean": float(residual_values.mean()),
+            "std": float(residual_values.std()),
+            "min": float(residual_values.min()),
+            "max": float(residual_values.max()),
         },
+        "r_squared_within": r_squared if effective_method == "panel_fe" else None,
+        "r_squared_overall": r_squared_overall,
+        "r_squared_between": r_squared_between,
+        "absorbed_terms": absorbed_terms,
         "qa": {
             "warnings": qa["warnings"],
             "blocking_errors": qa["blocking_errors"],
@@ -3300,7 +2786,7 @@ def run_panel_fe(df, payload):
     }
     metadata = {
         "method": method,
-        "backend": "numpy_fe_cluster",
+        "backend": backend,
         "covariance": effective_covariance,
         "dependent_var": dependent_var,
         "treatment_var": treatment_var,
@@ -3315,14 +2801,14 @@ def run_panel_fe(df, payload):
         "degraded_from": degraded_from,
         "decision_trace": decision_trace,
     }
-    treatment_idx = term_names.index(treatment_var)
+    treatment_row = coefficients.loc[coefficients["term"] == treatment_var].iloc[0]
     result = {
         "success": True,
         "method": "Panel FE" if effective_method == "panel_fe" else "Pooled OLS (auto downgrade from Panel FE)",
-        "coefficient": float(beta[treatment_idx]),
-        "std_error": float(std_error[treatment_idx]),
-        "p_value": float(p_value[treatment_idx]),
-        "r_squared": adjusted_r_squared(outcome, residuals, len(outcome), design_matrix.shape[1]),
+        "coefficient": float(treatment_row["coefficient"]),
+        "std_error": float(treatment_row["std_error"]),
+        "p_value": float(treatment_row["p_value"]),
+        "r_squared": r_squared,
         "output_path": str(output_path),
         "coefficients_path": str(coefficients_path),
         "workbook_path": str(workbook_path),
@@ -3334,7 +2820,7 @@ def run_panel_fe(df, payload):
         "warnings": qa["warnings"],
         "blocking_errors": qa["blocking_errors"],
         "suggested_repairs": qa["suggested_repairs"],
-        "backend": "numpy_fe_cluster",
+        "backend": backend,
         "dropped_rows": dropped_rows,
         "rows_used": int(len(model_df)),
         "cluster_var": cluster_var,
@@ -3364,9 +2850,130 @@ def run_panel_fe(df, payload):
         f.write(f"- Coefficient: {result['coefficient']:.6f}\\n")
         f.write(f"- Std. error: {result['std_error']:.6f}\\n")
         f.write(f"- P-value: {result['p_value']:.6f}\\n")
-        f.write(f"- Adjusted R-squared: {result['r_squared']:.6f}\\n")
+        f.write(f"- R-squared: {result['r_squared']:.6f}\\n")
         if decision_trace:
             f.write(f"- Decision trace: {decision_trace}\\n")
+    return result
+
+def first_non_const_term(coefficients):
+    if coefficients.empty:
+        return None
+    for term in coefficients["term"].tolist():
+        if term != "const":
+            return term
+    return coefficients.iloc[0]["term"]
+
+def build_table_variables(method, treatment_name, covariate_names, coefficients, explicit_primary_term=None):
+    if method == "did_static":
+        return ["treatment_group_treated", *covariate_names]
+    if method == "did_staggered":
+        return [explicit_primary_term or "treatment_entity_treated", *covariate_names]
+    if method == "did_event_study":
+        terms = [term for term in coefficients["term"].tolist() if term != "const"]
+        return terms
+    if method in ["ols_regression", "iv_2sls", "psm_regression", "psm_dr_ipw_ra", "rdd_sharp", "rdd_fuzzy_global"]:
+        primary_term = explicit_primary_term or treatment_name or first_non_const_term(coefficients)
+        return [item for item in [primary_term, *covariate_names] if item]
+    return []
+
+def iv_strength_diagnostic(treatment_series, iv_series, covariate_frame=None):
+    try:
+        if treatment_series is None or iv_series is None:
+            return {"status": "skipped", "reason": "instrument not available"}
+        treatment = pd.to_numeric(treatment_series, errors="coerce")
+        if isinstance(iv_series, pd.DataFrame):
+            instrument_frame = iv_series.apply(pd.to_numeric, errors="coerce")
+        else:
+            instrument_name = getattr(iv_series, "name", None) or "instrument"
+            instrument_frame = pd.DataFrame({instrument_name: pd.to_numeric(iv_series, errors="coerce")})
+        pieces = [treatment.rename("treatment"), instrument_frame]
+        if covariate_frame is not None and not covariate_frame.empty:
+            pieces.append(covariate_frame.apply(pd.to_numeric, errors="coerce"))
+        joined = pd.concat(pieces, axis=1).dropna()
+        if joined.empty:
+            return {"status": "skipped", "reason": "no complete rows"}
+        outcome = joined.iloc[:, 0].to_numpy(dtype=float)
+        regressors = sm.add_constant(joined.iloc[:, 1:].to_numpy(dtype=float))
+        first_stage = sm.OLS(outcome, regressors).fit()
+        instrument_count = instrument_frame.shape[1]
+        if instrument_count == 1:
+            f_stat = float(first_stage.tvalues[1] ** 2) if len(first_stage.tvalues) > 1 else None
+        else:
+            restriction = np.zeros((instrument_count, regressors.shape[1]))
+            restriction[:, 1:1 + instrument_count] = np.eye(instrument_count)
+            test = first_stage.f_test(restriction)
+            f_stat = float(np.asarray(test.fvalue).item()) if getattr(test, "fvalue", None) is not None else None
+        return {
+            "status": "pass",
+            "f_stat": f_stat,
+            "instrument_count": int(instrument_count),
+            "n_obs": int(len(joined)),
+        }
+    except Exception as exc:
+        return {"status": "skipped", "reason": str(exc)}
+
+def parallel_trends_diagnostic(coefficients):
+    try:
+        if coefficients is None or coefficients.empty or "term" not in coefficients.columns:
+            return {"status": "skipped", "reason": "coefficient table unavailable"}
+        lead_rows = coefficients[coefficients["term"].astype(str).str.startswith("Lead_")].copy()
+        if lead_rows.empty:
+            return {"status": "skipped", "reason": "no lead terms found"}
+        lead_rows["p_value"] = pd.to_numeric(lead_rows["p_value"], errors="coerce")
+        significant = lead_rows[lead_rows["p_value"] < 0.05].copy()
+        min_lead_p_value = None if lead_rows["p_value"].dropna().empty else float(lead_rows["p_value"].dropna().min())
+        return {
+            "status": "pass",
+            "passed": significant.empty,
+            "significant_lead_count": int(len(significant)),
+            "min_lead_p_value": min_lead_p_value,
+            "significant_leads": significant[["term", "coefficient", "p_value"]].to_dict(orient="records"),
+        }
+    except Exception as exc:
+        return {"status": "skipped", "reason": str(exc)}
+
+def load_matplotlib_pyplot():
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+    return plt
+
+def persist_common_outputs(payload, result, qa, diagnostics, metadata, coefficients, summary_text, narrative_text):
+    output_dir = Path(payload["output_dir"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    coefficients_path = output_dir / "coefficient_table.csv"
+    workbook_path = output_dir / "coefficient_table.xlsx"
+    diagnostics_path = output_dir / "diagnostics.json"
+    metadata_path = output_dir / "model_metadata.json"
+    narrative_path = output_dir / "narrative.md"
+    output_path = output_dir / "results.json"
+    summary_path = output_dir / "model_summary.txt"
+
+    coefficients = coefficients if coefficients is not None else empty_coefficient_table()
+    coefficients.to_csv(coefficients_path, index=False, encoding="utf-8-sig")
+    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+        coefficients.to_excel(writer, sheet_name="coefficients", index=False)
+
+    result["output_path"] = str(output_path)
+    result["coefficients_path"] = str(coefficients_path)
+    result["workbook_path"] = str(workbook_path)
+    result["diagnostics_path"] = str(diagnostics_path)
+    result["metadata_path"] = str(metadata_path)
+    result["narrative_path"] = str(narrative_path)
+    result["summary_path"] = str(summary_path)
+    result["qa_status"] = "fail" if qa["blocking_errors"] else "warn" if qa["warnings"] else "pass"
+    result["warnings"] = qa["warnings"]
+    result["blocking_errors"] = qa["blocking_errors"]
+    result["suggested_repairs"] = qa["suggested_repairs"]
+
+    save_json(diagnostics_path, diagnostics)
+    save_json(metadata_path, metadata)
+    save_json(output_path, result)
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write(summary_text)
+    with open(narrative_path, "w", encoding="utf-8") as f:
+        f.write(narrative_text)
+
     return result
 
 try:
@@ -4191,34 +3798,6 @@ except Exception as e:
     const publishedFiles: EconometricsPublishedFile[] = []
     let deliveryBundlePath: string | undefined
 
-    if (hasNonEmptyCoefficientTable(result.coefficients_path)) {
-      try {
-        const tableResult = await generateRegressionTable({
-          title: regressionTableTitle(params.methodName),
-          modelDirs: [outputDir],
-          columnLabels: ["(1)"],
-          columnSubtitles: [regressionTableSubtitle(params.methodName)],
-          variables: result.table_variables,
-          notes: undefined,
-          formats: ["markdown", "latex", "xlsx", "docx"],
-          outputDir,
-          branch,
-          runId: effectiveRunId,
-        }, ctx)
-        if (tableResult.success) {
-          result.academic_table_markdown_path = tableResult.markdown_path
-          result.academic_table_latex_path = tableResult.latex_path
-          result.academic_table_workbook_path = tableResult.workbook_path
-          result.academic_table_docx_path = tableResult.docx_path
-        }
-      } catch (error) {
-        log.warn("failed to generate academic table", {
-          method: params.methodName,
-          error: String(error),
-        })
-      }
-    }
-
     let numericSnapshot: NumericSnapshotDocument | undefined
     if (result.output_path) {
       numericSnapshot = createEconometricsNumericSnapshot({
@@ -4279,48 +3858,6 @@ except Exception as e:
       methodName: params.methodName,
     })
 
-    if (params.methodName === "panel_fe_regression") {
-      try {
-        result.delivery_report_docx_path = await generateBaselineReportDocx({
-          methodName: params.methodName,
-          outputDir,
-          pythonCommand,
-          result,
-          dependentVar: params.dependentVar,
-          treatmentVar: params.treatmentVar,
-          covariates: params.covariates,
-          entityVar: params.entityVar,
-          timeVar: params.timeVar,
-          clusterVar: params.clusterVar,
-          qaGateReason: qaGate.qaGateReason,
-        })
-      } catch (error) {
-        log.warn("failed to generate baseline report docx", {
-          method: params.methodName,
-          error: String(error),
-        })
-      }
-    }
-
-    const shouldGenerateJournalPaper =
-      (params.options?.["generateJournalPaper"] === true || params.options?.["generate_journal_paper"] === true) &&
-      hasSignificantRegressionResult(result)
-    if (shouldGenerateJournalPaper) {
-      result.journal_paper_docx_path = await generateJournalPaperDocx({
-        methodName: params.methodName,
-        outputDir,
-        pythonCommand,
-        result,
-        dependentVar: params.dependentVar,
-        treatmentVar: params.treatmentVar,
-        covariates: params.covariates,
-        entityVar: params.entityVar,
-        timeVar: params.timeVar,
-        clusterVar: params.clusterVar,
-        qaGateReason: qaGate.qaGateReason,
-      })
-    }
-
     if (datasetManifest) {
       appendArtifact(datasetManifest, {
         artifactId: `${params.methodName}_${Date.now()}`,
@@ -4341,8 +3878,22 @@ except Exception as e:
           warnings: result.warnings,
           blocking_errors: result.blocking_errors,
           suggested_repairs: result.suggested_repairs,
+          // 实验日志要靠它复原"这一次到底是怎么设定的"
+          spec: {
+            dependentVar: params.dependentVar,
+            treatmentVar: params.treatmentVar,
+            covariates: params.covariates,
+            entityVar: params.entityVar,
+            timeVar: params.timeVar,
+            clusterVar: params.clusterVar,
+          },
         },
       })
+
+      // 每跑完一次回归就把实验日志刷新一遍。做成自动而非"等模型想起来调工具"，
+      // 是因为留痕的价值恰恰在于它不依赖任何人记得——包括模型。
+      const logPath = refreshExperimentLog(datasetManifest.datasetId)
+      if (logPath) result.experiment_log_path = logPath
     }
 
     const stageKey = params.stageId ?? sourceStage?.stageId ?? result.stage_id ?? "stage"
@@ -4383,24 +3934,18 @@ except Exception as e:
       result.final_analysis_workbook_path,
       `计量分析数据_${sanitizeDeliveryFilePart(params.methodName)}.xlsx`,
     )
-    publish(
-      `${params.methodName}_academic_latex`,
-      `${params.methodName}_table_latex`,
-      result.academic_table_latex_path,
-      `三线表_${sanitizeDeliveryFilePart(params.methodName)}.tex`,
-    )
-    publish(
-      `${params.methodName}_academic_docx`,
-      `${params.methodName}_table_docx`,
-      result.academic_table_docx_path,
-      `三线表_${sanitizeDeliveryFilePart(params.methodName)}.docx`,
-    )
-    publish(
-      `${params.methodName}_journal_paper`,
-      `${params.methodName}_journal_paper`,
-      result.journal_paper_docx_path,
-      `期刊小论文_${sanitizeDeliveryFilePart(params.methodName)}.docx`,
-    )
+    // 实验日志必须放到用户看得见的地方——一份埋在 .killstata 深处的日志对用户等于不存在。
+    // 用 publishDatasetLevelOutput 而不是上面的 publish()：日志是整个数据集的累积轨迹，
+    // 每次回归都重建成"截至目前的全部实验"，只该有最新的一份（详见该函数的注释）。
+    if (result.experiment_log_path) {
+      publishDatasetLevelOutput({
+        manifest: datasetManifest,
+        contextSourcePath: dataPath,
+        runId: effectiveRunId,
+        sourcePath: result.experiment_log_path,
+        fileName: "实验日志.md",
+      })
+    }
 
     if (result.output_path) {
       fs.writeFileSync(result.output_path, JSON.stringify(result, null, 2), "utf-8")
@@ -4463,10 +4008,6 @@ except Exception as e:
     if (result.narrative_path) output += `- Narrative summary: ${relativeWithinProject(result.narrative_path)}\n`
     if (result.numeric_snapshot_path) output += `- Numeric snapshot: ${relativeWithinProject(result.numeric_snapshot_path)}\n`
     if (result.final_analysis_workbook_path) output += `- Final analysis Excel: ${relativeWithinProject(result.final_analysis_workbook_path)}\n`
-    if (result.academic_table_markdown_path) output += `- Three-line table Markdown: ${relativeWithinProject(result.academic_table_markdown_path)}\n`
-    if (result.academic_table_latex_path) output += `- Three-line table LaTeX: ${relativeWithinProject(result.academic_table_latex_path)}\n`
-    if (result.academic_table_workbook_path) output += `- Three-line table Excel: ${relativeWithinProject(result.academic_table_workbook_path)}\n`
-    if (result.academic_table_docx_path) output += `- Three-line table Word: ${relativeWithinProject(result.academic_table_docx_path)}\n`
     if (result.delivery_report_docx_path) output += `- Result report Word: ${relativeWithinProject(result.delivery_report_docx_path)}\n`
     output += `- Concise result summary: ${relativeWithinProject(conciseResultPath)}\n`
     if (result.output_path) output += `- Result JSON: ${relativeWithinProject(result.output_path)}\n`
@@ -4612,6 +4153,4 @@ except Exception as e:
     }
   },
 }))
-
-
 

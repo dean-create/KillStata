@@ -26,9 +26,11 @@ bun install
 ```bash
 killstata
 killstata --version
-killstata init
-killstata skills list
 ```
+
+On first run, enter a DeepSeek API key. KillStata prepares its private data-analysis environment automatically; Python, Stata, MCP, and skills setup are not required.
+
+`killstata config` remains available only for optional advanced model settings.
 
 ## Screenshots
 

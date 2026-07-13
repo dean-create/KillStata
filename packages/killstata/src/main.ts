@@ -15,21 +15,13 @@ import { FormatError, FormatUnknownError } from "./cli/error"
 import { ServeCommand } from "./cli/cmd/serve"
 import { DebugCommand } from "./cli/cmd/debug"
 import { StatsCommand } from "./cli/cmd/stats"
-import { McpCommand } from "./cli/cmd/mcp"
-import { GithubCommand } from "./cli/cmd/github"
 import { ExportCommand } from "./cli/cmd/export"
 import { ImportCommand } from "./cli/cmd/import"
 import { AttachCommand } from "./cli/cmd/tui/attach"
 import { TuiThreadCommand } from "./cli/cmd/tui/thread"
-import { AcpCommand } from "./cli/cmd/acp"
 import { EOL } from "os"
-import { WebCommand } from "./cli/cmd/web"
-import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
-import { InitCommand } from "./cli/cmd/init"
-import { SkillsCommand } from "./cli/cmd/skills"
 import { ConfigCommand } from "./cli/cmd/config"
-import { ensureKillstataHomeDirectories } from "./killstata/runtime-config"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -73,8 +65,6 @@ const parser = yargs(hideBin(process.argv))
 
     process.env.AGENT = "1"
     process.env.KILLSTATA = "1"
-    await ensureKillstataHomeDirectories()
-
     Log.Default.info("killstata", {
       version: Installation.VERSION,
       args: process.argv.slice(2),
@@ -82,8 +72,6 @@ const parser = yargs(hideBin(process.argv))
   })
   .usage("\n" + UI.logo())
   .completion("completion", "generate shell completion script")
-  .command(AcpCommand)
-  .command(McpCommand)
   .command(TuiThreadCommand)
   .command(AttachCommand)
   .command(RunCommand)
@@ -94,17 +82,12 @@ const parser = yargs(hideBin(process.argv))
   .command(UpgradeCommand)
   .command(UninstallCommand)
   .command(ServeCommand)
-  .command(WebCommand)
   .command(ModelsCommand)
   .command(StatsCommand)
   .command(ExportCommand)
   .command(ImportCommand)
-  .command(GithubCommand)
-  .command(PrCommand)
   .command(SessionCommand)
   .command(ConfigCommand)
-  .command(InitCommand)
-  .command(SkillsCommand)
   .fail((msg, err) => {
     if (
       msg?.startsWith("Unknown argument") ||

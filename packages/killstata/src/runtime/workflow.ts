@@ -1793,10 +1793,6 @@ async function loadWorkflowExecutableTool(toolName: string) {
       const { EconometricsTool } = await import("@/tool/econometrics")
       return EconometricsTool
     }
-    case "regression_table": {
-      const { RegressionTableTool } = await import("@/tool/regression-table")
-      return RegressionTableTool
-    }
     case "workflow": {
       const { WorkflowTool } = await import("@/tool/workflow")
       return WorkflowTool
@@ -2662,7 +2658,7 @@ export function resolveToolAvailability(input: {
       if (input.policy.repairOnly && ["paper_draft", "slide_generator", "research_brief"].includes(toolID)) {
         reasons.push("blocked while repairOnly is active")
       }
-      if (input.policy.platformCapabilities?.remote && ["bash", "shell", "edit", "write", "apply_patch"].includes(toolID)) {
+      if (input.policy.platformCapabilities?.remote && ["bash", "shell", "edit", "write"].includes(toolID)) {
         reasons.push("blocked for remote platform safety")
       }
       if (input.policy.modelCapabilities?.supportsTools === false && !["workflow", "read", "glob", "grep", "skill"].includes(toolID)) {
@@ -2671,7 +2667,7 @@ export function resolveToolAvailability(input: {
       if (input.policy.modelCapabilities?.supportsImages === false && toolID === "slide_generator") {
         reasons.push("blocked because the selected model does not support image-related workflow")
       }
-      if (input.policy.platformCapabilities?.mcp === false && ["codesearch", "websearch"].includes(toolID)) {
+      if (input.policy.platformCapabilities?.mcp === false && ["websearch"].includes(toolID)) {
         reasons.push("blocked because MCP/search capability is unavailable")
       }
       const blockedByReason = reasons.some((reason) => reason.startsWith("blocked"))
@@ -2714,7 +2710,7 @@ export function resolveToolAvailability(input: {
           toolID,
           reason: explanations.find((item) => item.toolID === toolID)?.reasons.join("; ") ?? "deferred by policy",
           enableWhen: ["matching stage", "matching agent", "matching model/platform capability"],
-          remoteSafe: !["bash", "shell", "edit", "write", "apply_patch"].includes(toolID),
+          remoteSafe: !["bash", "shell", "edit", "write"].includes(toolID),
           repairOnlyAllowed: !["paper_draft", "slide_generator", "research_brief"].includes(toolID),
         })),
         blockedTools: blocked,
@@ -2757,10 +2753,10 @@ export function resolveToolAvailability(input: {
       filtered = filtered.filter((tool) => !["slide_generator"].includes(tool))
     }
     if (input.policy.platformCapabilities?.mcp === false) {
-      filtered = filtered.filter((tool) => tool !== "codesearch" && tool !== "websearch")
+      filtered = filtered.filter((tool) => tool !== "websearch")
     }
     if (input.policy.platformCapabilities?.remote) {
-      filtered = filtered.filter((tool) => !["bash", "shell", "edit", "write", "apply_patch"].includes(tool))
+      filtered = filtered.filter((tool) => !["bash", "shell", "edit", "write"].includes(tool))
     }
     return filtered
   }
@@ -2899,9 +2895,6 @@ export function explainMcpToolForWorkflow(input: {
   if (input.toolName.startsWith("context7_")) {
     reasons.push("blocked because documentation MCP tools are not part of the econometrics workflow")
   }
-  if (input.toolName.startsWith("stata_")) {
-    reasons.push("blocked because Stata MCP is sidecar-only and must not replace core killstata tools")
-  }
   const sidecarIntentReason = explainMcpSidecarIntent(input.toolName)
   if (sidecarIntentReason) {
     reasons.push(sidecarIntentReason)
@@ -2920,7 +2913,7 @@ export function explainMcpToolForWorkflow(input: {
   }
 
   if (reasons.length === 0) {
-    reasons.push("available as a non-Stata MCP sidecar after the core workflow has reached a safe stage")
+    reasons.push("available as an advanced sidecar after the core workflow has reached a safe stage")
   }
 
   return {

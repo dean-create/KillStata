@@ -234,7 +234,7 @@ def build_quality_report(
     if warnings:
         status = "warn"
     if blocking_errors:
-        status = "fail"
+        status = "block"
 
     report = {
         "operation": "build_quality_report",
