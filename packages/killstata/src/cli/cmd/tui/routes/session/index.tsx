@@ -1771,9 +1771,6 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "webfetch"}>
           <WebFetch {...toolprops} />
         </Match>
-        <Match when={props.part.tool === "codesearch"}>
-          <CodeSearch {...toolprops} />
-        </Match>
         <Match when={props.part.tool === "websearch"}>
           <WebSearch {...toolprops} />
         </Match>
@@ -2069,6 +2066,7 @@ function BlockTool(props: { title: string; children: JSX.Element; onClick?: () =
 function Bash(props: ToolProps<typeof BashTool>) {
   const { theme } = useTheme()
   const sync = useSync()
+  const ctx = use()
   const output = createMemo(() => stripAnsi(props.metadata.output?.trim() ?? ""))
   const [expanded, setExpanded] = createSignal(false)
   const lines = createMemo(() => output().split("\n"))
@@ -2076,6 +2074,12 @@ function Bash(props: ToolProps<typeof BashTool>) {
   const limited = createMemo(() => {
     if (expanded() || !overflow()) return output()
     return [...lines().slice(0, 10), "…"].join("\n")
+  })
+  // 默认只报告"跑了什么、产出多少行"，命令输出正文留给 /details 展开。
+  const outputSummary = createMemo(() => {
+    const count = output() ? lines().length : 0
+    if (!count) return ""
+    return count === 1 ? "1 line" : `${count} lines`
   })
 
   const workdirDisplay = createMemo(() => {
@@ -2105,7 +2109,7 @@ function Bash(props: ToolProps<typeof BashTool>) {
 
   return (
     <Switch>
-      <Match when={props.metadata.output !== undefined}>
+      <Match when={ctx.showDetails() && props.metadata.output !== undefined}>
         <BlockTool
           title={title()}
           part={props.part}
@@ -2122,7 +2126,8 @@ function Bash(props: ToolProps<typeof BashTool>) {
       </Match>
       <Match when={true}>
         <InlineTool icon="$" pending="Writing command..." complete={props.input.command} part={props.part}>
-          {props.input.command}
+          {props.input.description ?? props.input.command}
+          <Show when={outputSummary()}> ({outputSummary()})</Show>
         </InlineTool>
       </Match>
     </Switch>
@@ -2131,6 +2136,7 @@ function Bash(props: ToolProps<typeof BashTool>) {
 
 function Write(props: ToolProps<typeof WriteTool>) {
   const { theme, syntax } = useTheme()
+  const ctx = use()
   const code = createMemo(() => {
     if (!props.input.content) return ""
     return props.input.content
@@ -2141,9 +2147,17 @@ function Write(props: ToolProps<typeof WriteTool>) {
     return props.metadata.diagnostics?.[filePath] ?? []
   })
 
+  // 默认只说写了哪个文件、多大，正文不铺给用户。
+  const sizeSummary = createMemo(() => {
+    const content = code()
+    if (!content) return ""
+    const count = content.split("\n").length
+    return count === 1 ? "1 line" : `${count} lines`
+  })
+
   return (
     <Switch>
-      <Match when={props.metadata.diagnostics !== undefined}>
+      <Match when={ctx.showDetails() && props.metadata.diagnostics !== undefined}>
         <BlockTool title={"# Wrote " + normalizePath(props.input.filePath!)} part={props.part}>
           <line_number fg={theme.textMuted} minWidth={3} paddingRight={1}>
             <code
@@ -2168,6 +2182,7 @@ function Write(props: ToolProps<typeof WriteTool>) {
       <Match when={true}>
         <InlineTool icon="←" pending="Preparing write..." complete={props.input.filePath} part={props.part}>
           Write {normalizePath(props.input.filePath!)}
+          <Show when={sizeSummary()}> ({sizeSummary()})</Show>
         </InlineTool>
       </Match>
     </Switch>
@@ -2218,16 +2233,6 @@ function WebFetch(props: ToolProps<typeof WebFetchTool>) {
   return (
     <InlineTool icon="%" pending="Fetching from the web..." complete={(props.input as any).url} part={props.part}>
       WebFetch {(props.input as any).url}
-    </InlineTool>
-  )
-}
-
-function CodeSearch(props: ToolProps<any>) {
-  const input = props.input as any
-  const metadata = props.metadata as any
-  return (
-    <InlineTool icon="◇" pending="Searching code..." complete={input.query} part={props.part}>
-      Exa Code Search "{input.query}" <Show when={metadata.results}>({metadata.results} results)</Show>
     </InlineTool>
   )
 }
@@ -2317,9 +2322,23 @@ function Edit(props: ToolProps<typeof EditTool>) {
     return arr.filter((x) => x.severity === 1).slice(0, 3)
   })
 
+  // 默认不铺 diff，只报告改动规模（+N -M），完整 diff 留给 /details。
+  const changeSummary = createMemo(() => {
+    const diff = diffContent()
+    if (!diff) return ""
+    let added = 0
+    let removed = 0
+    for (const line of diff.split("\n")) {
+      if (line.startsWith("+") && !line.startsWith("+++")) added++
+      else if (line.startsWith("-") && !line.startsWith("---")) removed++
+    }
+    if (!added && !removed) return ""
+    return `+${added} -${removed}`
+  })
+
   return (
     <Switch>
-      <Match when={props.metadata.diff !== undefined}>
+      <Match when={ctx.showDetails() && props.metadata.diff !== undefined}>
         <BlockTool title={"← Edit " + normalizePath(props.input.filePath!)} part={props.part}>
           <box paddingLeft={1}>
             <diff
@@ -2358,7 +2377,8 @@ function Edit(props: ToolProps<typeof EditTool>) {
       </Match>
       <Match when={true}>
         <InlineTool icon="←" pending="Preparing edit..." complete={props.input.filePath} part={props.part}>
-          Edit {normalizePath(props.input.filePath!)} {input({ replaceAll: props.input.replaceAll })}
+          Edit {normalizePath(props.input.filePath!)}
+          <Show when={changeSummary()}> ({changeSummary()})</Show>
         </InlineTool>
       </Match>
     </Switch>
