@@ -1,29 +1,20 @@
 import { TextAttributes } from "@opentui/core"
 import { useTheme } from "@tui/context/theme"
-import { For } from "solid-js"
 
-// KILLSTATA Logo - 纯文本高亮显示
+// 克制的品牌标识：一行字标 + 一句定位。
+// 刻意不用大块 ASCII art——启动屏应该让用户马上看到输入框，而不是一面招牌。
 export function Logo() {
   const { theme } = useTheme()
 
-  const LOGO_LINES = [
-    { text: "██╗  ██╗██╗██╗     ██╗     ███████╗████████╗ █████╗ ████████╗ █████╗ ", color: theme.primary },
-    { text: "██║ ██╔╝██║██║     ██║     ██╔════╝╚══██╔══╝██╔══██╗╚══██╔══╝██╔══██╗", color: theme.info },
-    { text: "█████╔╝ ██║██║     ██║     ███████╗   ██║   ███████║   ██║   ███████║", color: theme.success },
-    { text: "██╔═██╗ ██║██║     ██║     ╚════██║   ██║   ██╔══██║   ██║   ██╔══██║", color: theme.text },
-    { text: "██║  ██╗██║███████╗███████╗███████║   ██║   ██║  ██║   ██║   ██║  ██║", color: theme.textMuted },
-    { text: "╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝", color: theme.border }
-  ]
-
   return (
-    <box flexDirection="column" alignItems="center" justifyContent="center">
-      <For each={LOGO_LINES}>
-        {(line) => (
-          <text fg={line.color} attributes={TextAttributes.BOLD} selectable={false}>
-            {line.text}
-          </text>
-        )}
-      </For>
+    <box flexDirection="column" alignItems="center" justifyContent="center" gap={0}>
+      <text selectable={false}>
+        <span style={{ fg: theme.primary, attributes: TextAttributes.BOLD }}>◆ </span>
+        <span style={{ fg: theme.text, attributes: TextAttributes.BOLD }}>killstata</span>
+      </text>
+      <text fg={theme.textMuted} selectable={false}>
+        econometric analysis, from raw table to paper-ready table
+      </text>
     </box>
   )
 }

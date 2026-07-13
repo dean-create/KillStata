@@ -44,4 +44,16 @@ describe("session output style", () => {
       expect(source).not.toContain(dead)
     }
   })
+
+  test("hiding tool bodies by default requires a discoverable way to get them back", () => {
+    const source = fs.readFileSync(SESSION_VIEW, "utf-8")
+
+    // 收敛输出的前提是逃生门必须存在且好找：/details 斜杠命令。
+    // 若有人删掉它，默认隐藏就变成了「用户永远看不到正文」。
+    const detailsToggle = source.slice(
+      source.indexOf('value: "session.toggle.actions"') - 400,
+      source.indexOf('value: "session.toggle.actions"') + 200,
+    )
+    expect(detailsToggle).toContain('name: "details"')
+  })
 })

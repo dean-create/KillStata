@@ -629,9 +629,14 @@ export function Session() {
     },
     {
       title: showDetails() ? "隐藏工具详情" : "显示工具详情",
+      description: "展开命令输出、文件正文与完整 diff（默认只显示做了什么）",
       value: "session.toggle.actions",
       keybind: "tool_details",
       category: "会话",
+      // 工具输出默认收敛成一行摘要，所以必须给一个好找的开关把正文调出来。
+      slash: {
+        name: "details",
+      },
       onSelect: (dialog) => {
         setShowDetails((prev) => !prev)
         dialog.clear()
