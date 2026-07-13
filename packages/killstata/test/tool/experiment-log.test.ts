@@ -187,6 +187,19 @@ describe("experiment log", () => {
     expect(md).toContain("p = <0.0001 ***")
   })
 
+  test("the log is a dataset-level singleton, not one snapshot per stage", () => {
+    // 曾经的 bug：日志走 publishDeliveryOutput 发布，而那个函数按 key+runId+stageId 分版本，
+    // 于是每跑一次回归就多出一份过时快照（实验日志.md 只有 1 次实验、实验日志_2.md 有 2 次），
+    // 用户根本分不清哪份是全的。日志是累积轨迹，必须永远只有最新的一份。
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src", "tool", "econometrics.ts"),
+      "utf-8",
+    )
+    expect(source).toContain("publishDatasetLevelOutput({")
+    // 反向断言：不能再退回用按 run/stage 分版本的 publish() 发布日志
+    expect(source).not.toContain('publish("experiment_log"')
+  })
+
   test("two p-values that are indistinguishable at reporting precision are not ranked against each other", () => {
     // 两次 p 都极小（底层浮点不同，但报告出来都是 <0.0001）
     const entries = [

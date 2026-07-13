@@ -15,6 +15,7 @@ import {
   inferRunId,
   projectErrorsRoot,
   projectTempRoot,
+  publishDatasetLevelOutput,
   publishDeliveryOutput,
   publishVisibleOutput,
   reportOutputPath,
@@ -3933,6 +3934,18 @@ except Exception as e:
       result.final_analysis_workbook_path,
       `计量分析数据_${sanitizeDeliveryFilePart(params.methodName)}.xlsx`,
     )
+    // 实验日志必须放到用户看得见的地方——一份埋在 .killstata 深处的日志对用户等于不存在。
+    // 用 publishDatasetLevelOutput 而不是上面的 publish()：日志是整个数据集的累积轨迹，
+    // 每次回归都重建成"截至目前的全部实验"，只该有最新的一份（详见该函数的注释）。
+    if (result.experiment_log_path) {
+      publishDatasetLevelOutput({
+        manifest: datasetManifest,
+        contextSourcePath: dataPath,
+        runId: effectiveRunId,
+        sourcePath: result.experiment_log_path,
+        fileName: "实验日志.md",
+      })
+    }
 
     if (result.output_path) {
       fs.writeFileSync(result.output_path, JSON.stringify(result, null, 2), "utf-8")
