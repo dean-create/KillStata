@@ -37,6 +37,46 @@ describe("session output style", () => {
     expect(prompt).toContain("Point to artifacts by path")
   })
 
+  test("the prompt never promises a capability the code does not have", () => {
+    const prompt = fs.readFileSync(DEEPSEEK_PROMPT, "utf-8")
+    const econ = fs.readFileSync(path.join(process.cwd(), "src", "tool", "econometrics.ts"), "utf-8")
+
+    // 每一个 prompt 里点名的估计方法，都必须真实存在于 SUPPORTED_METHODS。
+    // 否则模型会拿着一个不存在的方法名去调工具，或者向用户承诺做不到的事。
+    // （改造前就踩过：prompt 承诺 DID 交错采纳用 Callaway-Sant'Anna，代码里根本没有这个估计量。）
+    const methodsBlock = econ.slice(econ.indexOf("const SUPPORTED_METHODS"))
+    const supported = new Set(
+      (methodsBlock.slice(0, methodsBlock.indexOf("]")).match(/"[a-z_0-9]+"/g) ?? []).map((m) => m.replace(/"/g, "")),
+    )
+    expect(supported.size).toBeGreaterThan(10)
+
+    for (const named of prompt.match(/`([a-z_]+_[a-z_0-9]+)`/g) ?? []) {
+      const id = named.replace(/`/g, "")
+      // 只校验看起来像估计方法的（含下划线且不是工具名/文件名）
+      const toolsAndFiles = ["data_import", "experiment_log", "numeric_snapshot", "results_json"]
+      if (toolsAndFiles.includes(id) || id.includes(".")) continue
+      if (!supported.has(id)) {
+        throw new Error(`prompt 点名了一个不存在的方法: ${id}（不在 SUPPORTED_METHODS 里）`)
+      }
+    }
+
+    // 已删除的产物不该再出现在 prompt 里
+    expect(prompt).not.toContain("three_line_table")
+    expect(prompt).not.toContain("三线表")
+    expect(prompt).not.toContain("Callaway")
+  })
+
+  test("the prompt pins a steady, no-filler persona", () => {
+    const prompt = fs.readFileSync(DEEPSEEK_PROMPT, "utf-8")
+
+    // 性格必须是可执行的行为准则，不是"沉稳务实"四个空洞的形容词
+    expect(prompt).toContain("No preamble")
+    expect(prompt).toContain("No exclamation marks")
+    expect(prompt).toContain('Say "I don\'t know" when you don\'t know')
+    // 编造系数是这里最坏的产出——必须明说
+    expect(prompt).toContain("A fabricated coefficient is the worst thing you can produce")
+  })
+
   test("removed tools leave no renderer behind in the session view", () => {
     const source = fs.readFileSync(SESSION_VIEW, "utf-8")
 
