@@ -28,7 +28,6 @@ logs/
 *.bun-build
 
 .killstata
-.killstata
 results
 .test-logs/
 .tmp-e2e-logs/
@@ -42,5 +41,4 @@ packages/nul
 
 # analysis scratch artifacts (never commit)
 temp_data_for_regression*
-.venv-dev/
 .venv-dev/
