@@ -21,7 +21,6 @@ import { ImportCommand } from "./cli/cmd/import"
 import { AttachCommand } from "./cli/cmd/tui/attach"
 import { TuiThreadCommand } from "./cli/cmd/tui/thread"
 import { EOL } from "os"
-import { WebCommand } from "./cli/cmd/web"
 import { SessionCommand } from "./cli/cmd/session"
 import { InitCommand } from "./cli/cmd/init"
 import { SkillsCommand } from "./cli/cmd/skills"
@@ -90,7 +89,6 @@ const parser = yargs(hideBin(process.argv))
   .command(UpgradeCommand)
   .command(UninstallCommand)
   .command(ServeCommand)
-  .command(WebCommand)
   .command(ModelsCommand)
   .command(StatsCommand)
   .command(ExportCommand)
