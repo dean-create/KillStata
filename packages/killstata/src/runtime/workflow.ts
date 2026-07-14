@@ -2725,6 +2725,11 @@ export function resolveToolAvailability(input: {
   const repairOnly = input.policy.repairOnly === true
   const approvalStatus = input.policy.approvalStatus
 
+  // Conversation is intentionally tool-free, even if an older workflow is
+  // blocked or has an active stage. This prevents casual replies from resuming
+  // import, cleaning, or estimation.
+  if (inputIntent === "conversation") return finalize([])
+
   const readCore: string[] = [...WORKFLOW_READ_CORE_TOOL_IDS]
   const analysisShellTools: string[] = [...WORKFLOW_ANALYSIS_SHELL_TOOL_IDS]
   const importBundle: string[] = uniqueToolIDs([...readCore, ...analysisShellTools, ...WORKFLOW_IMPORT_TOOL_IDS])
@@ -2885,6 +2890,10 @@ export function explainMcpToolForWorkflow(input: {
   const repairOnly = input.policy.repairOnly === true
   const agent = input.policy.agent
   const reasons: string[] = []
+
+  if (input.policy.inputIntent === "conversation") {
+    reasons.push("blocked during normal conversation")
+  }
 
   if (input.policy.platformCapabilities?.mcp === false) {
     reasons.push("blocked because MCP/search capability is unavailable")

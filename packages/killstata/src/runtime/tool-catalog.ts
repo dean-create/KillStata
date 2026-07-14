@@ -54,6 +54,7 @@ export const WORKFLOW_KNOWN_TOOL_IDS = [
 ] as const
 
 export const WORKFLOW_INPUT_INTENT_TOOL_BUNDLES = {
+  conversation: [],
   ingest: [...WORKFLOW_READ_CORE_TOOL_IDS, ...WORKFLOW_IMPORT_TOOL_IDS],
   status: [...WORKFLOW_READ_CORE_TOOL_IDS],
   verify: [...WORKFLOW_READ_CORE_TOOL_IDS],

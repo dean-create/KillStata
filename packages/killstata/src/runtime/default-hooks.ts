@@ -17,7 +17,10 @@ export function registerDefaultRuntimeHooks() {
   if (registered) return
   registered = true
 
-  RuntimeHooks.registerPromptAssembled(({ sessionID }) => {
+  RuntimeHooks.registerPromptAssembled(({ sessionID, inputIntent }) => {
+    // Old stages are analysis memory, not a command to resume. Keep them out of
+    // ordinary conversations so a greeting cannot be pulled into repair mode.
+    if (inputIntent === "conversation") return {}
     return {
       appendSystem: workflowPromptSummary(sessionID),
     }

@@ -84,4 +84,24 @@ describe("runtime tool policy", () => {
     expect(available.directToolIDs).toContain("data_import")
     expect(available.deferredToolIDs).toContain("econometrics")
   })
+
+  test("conversation never inherits tools from an unfinished analysis workflow", () => {
+    const available = resolveToolAvailability({
+      policy: {
+        inputIntent: "conversation",
+        currentStage: "import",
+        currentStageStatus: "blocked",
+        repairOnly: true,
+        platformCapabilities: { mcp: true, images: true, remote: false },
+        modelCapabilities: { supportsTools: true, supportsImages: true },
+      },
+      toolIDs: ["read", "workflow", "data_import", "econometrics"],
+    })
+
+    expect(available.directToolIDs).toEqual([])
+    expect(allowMcpToolForWorkflow({
+      toolName: "safe_search",
+      policy: { inputIntent: "conversation", currentStage: "baseline_estimate" },
+    })).toBe(false)
+  })
 })

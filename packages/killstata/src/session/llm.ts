@@ -25,6 +25,7 @@ import { Flag } from "@/flag/flag"
 import { PermissionNext } from "@/permission/next"
 import { Auth } from "@/auth"
 import { RuntimeHooks } from "@/runtime/hooks"
+import type { WorkflowInputIntent } from "@/runtime/types"
 
 export namespace LLM {
   const log = Log.create({ service: "llm" })
@@ -42,6 +43,7 @@ export namespace LLM {
     small?: boolean
     tools: Record<string, Tool>
     retries?: number
+    inputIntent?: WorkflowInputIntent
   }
 
   export type StreamOutput = StreamTextResult<ToolSet, unknown>
@@ -99,6 +101,7 @@ export namespace LLM {
     const promptHook = await RuntimeHooks.promptAssembled({
       sessionID: input.sessionID,
       agent: input.agent.name,
+      inputIntent: input.inputIntent,
       system,
     })
     if (promptHook.appendSystem?.length) {

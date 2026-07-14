@@ -1,4 +1,4 @@
-import type { LifecycleHookResult } from "./types"
+import type { LifecycleHookResult, WorkflowInputIntent } from "./types"
 
 export type InputAcceptedHook = (input: {
   sessionID: string
@@ -9,6 +9,7 @@ export type InputAcceptedHook = (input: {
 export type PromptAssembledHook = (input: {
   sessionID: string
   agent: string
+  inputIntent?: WorkflowInputIntent
   system: string[]
 }) => Promise<LifecycleHookResult | void> | LifecycleHookResult | void
 

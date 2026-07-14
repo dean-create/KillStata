@@ -1,7 +1,6 @@
 import { Plugin } from "../plugin"
 import { Share } from "../share/share"
 import { Format } from "../format"
-import { LSP } from "../lsp"
 import { FileWatcher } from "../file/watcher"
 import { File } from "../file"
 import { Project } from "./project"
@@ -20,7 +19,6 @@ export async function InstanceBootstrap() {
   Share.init()
   ShareNext.init()
   Format.init()
-  await LSP.init()
   FileWatcher.init()
   File.init()
   Vcs.init()

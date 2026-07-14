@@ -1,9 +1,6 @@
 
 import { Instance } from "../project/instance"
-import path from "path"
 import type { MessageV2 } from "./message-v2"
-import { getStage, readDatasetManifest } from "../tool/analysis-state"
-import { relativeWithinProject } from "../tool/analysis-path"
 
 import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
 import PROMPT_GENERIC from "./prompt/qwen.txt"
@@ -23,7 +20,7 @@ const ECONOMETRICS_CONTEXT = `
 You are operating as an econometric analysis assistant. When working with data:
 
 ## Data Awareness Priority
-- Always scan the working directory for data files (csv, xlsx, dta, sav, parquet) before analysis
+- Only inspect files or start data work after the user explicitly asks for a data task or attaches/selects a data file. Normal conversation is not an analysis request.
 - Parquet files may be discovered as canonical artifacts, but do not read parquet files as plain text with the read tool
 - Summarize dataset structure: rows, columns, variable types, missing values
 - Identify potential panel structure (unit ID + time variables)
@@ -231,120 +228,18 @@ export namespace SystemPrompt {
   }
 
   export async function environment(input?: { messages?: MessageV2.WithParts[] }) {
-    const project = Instance.project
-    const dataSummary = await buildDataSummary(input?.messages)
-
     return [
       [
         `Here is some useful information about the environment you are running in:`,
         `<env>`,
         `  Working directory: ${Instance.directory}`,
-        `  Is directory a git repo: ${project.vcs === "git" ? "yes" : "no"}`,
         `  Platform: ${process.platform}`,
         `  Today's date: ${new Date().toDateString()}`,
         `</env>`,
-        dataSummary,
       ]
         .filter(Boolean)
         .join("\n"),
     ]
-  }
-
-  async function scanDataFiles(directory: string): Promise<string[]> {
-    const dataExtensions = ["csv", "xlsx", "xls", "dta", "sav", "parquet"]
-    const results: string[] = []
-
-    try {
-      for (const ext of dataExtensions) {
-        const glob = new Bun.Glob(`**/*.${ext}`)
-        const matches = await Array.fromAsync(
-          glob.scan({
-            cwd: directory,
-            absolute: false,
-            onlyFiles: true,
-          }),
-        ).catch(() => [])
-        results.push(...matches.slice(0, 5))
-      }
-    } catch {
-      return results
-    }
-
-    return results.slice(0, 20)
-  }
-
-  function currentDatasetContext(messages: MessageV2.WithParts[] = []) {
-    for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-      const message = messages[messageIndex]
-      if (message.info.role !== "assistant") continue
-      for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
-        const part = message.parts[partIndex]
-        if (part.type !== "tool" || part.state.status !== "completed") continue
-        const metadata = (part.state.metadata ?? {}) as Record<string, unknown>
-        const result = (metadata.result ?? {}) as Record<string, unknown>
-        const datasetId =
-          (typeof metadata.datasetId === "string" ? metadata.datasetId : undefined) ??
-          (typeof result.dataset_id === "string" ? result.dataset_id : undefined)
-        if (!datasetId) continue
-        const stageId =
-          (typeof metadata.stageId === "string" ? metadata.stageId : undefined) ??
-          (typeof result.stage_id === "string" ? result.stage_id : undefined)
-        const runId =
-          (typeof metadata.runId === "string" ? metadata.runId : undefined) ??
-          (typeof result.run_id === "string" ? result.run_id : undefined)
-        return { datasetId, stageId, runId }
-      }
-    }
-    return undefined
-  }
-
-  async function buildDataSummary(messages?: MessageV2.WithParts[]) {
-    const current = currentDatasetContext(messages)
-    if (current?.datasetId) {
-      try {
-        const manifest = readDatasetManifest(current.datasetId)
-        const stage = getStage(manifest, current.stageId)
-        const rows = stage.rowCount !== undefined ? `${stage.rowCount} rows` : "rows unknown"
-        const columns = stage.columnCount !== undefined ? `${stage.columnCount} columns` : "columns unknown"
-        return [
-          "<data_summary>",
-          `  Current canonical dataset: ${manifest.datasetId}`,
-          `  Source file: ${relativeWithinProject(manifest.sourcePath)}`,
-          `  Current stage: ${stage.stageId} (${stage.action}, branch=${stage.branch})`,
-          `  Working parquet: ${relativeWithinProject(stage.workingPath)}`,
-          `  Shape: ${rows}, ${columns}`,
-          current.runId ? `  Current run: ${current.runId}` : "",
-          "</data_summary>",
-        ]
-          .filter(Boolean)
-          .join("\n")
-      } catch {}
-    }
-
-    const dataFiles = await scanDataFiles(Instance.directory)
-    if (dataFiles.length === 0) return ""
-    const counts = dataFiles.reduce<Record<string, number>>((acc, item) => {
-      const ext = path.extname(item).replace(/^\./, "").toLowerCase() || "unknown"
-      acc[ext] = (acc[ext] ?? 0) + 1
-      return acc
-    }, {})
-    const candidates = [...dataFiles]
-      .sort((a, b) => {
-        const depthDiff = a.split(/[\\/]+/).length - b.split(/[\\/]+/).length
-        if (depthDiff !== 0) return depthDiff
-        return a.length - b.length
-      })
-      .slice(0, 3)
-    return [
-      "<data_summary>",
-      `  Candidate source files: ${dataFiles.length}`,
-      `  By extension: ${Object.entries(counts)
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([ext, count]) => `${ext}=${count}`)
-        .join(", ")}`,
-      `  Top candidates: ${candidates.join(", ")}`,
-      "</data_summary>",
-    ].join("\n")
   }
 
   export async function custom() {

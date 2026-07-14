@@ -85,7 +85,7 @@ export namespace SessionPrompt {
     SessionRunCoordinator.resolveAction(sessionID, message, actionID)
   }
 
-  function detectInputIntent(parts: PromptInput["parts"], explicitIntent?: WorkflowInputIntent): WorkflowInputIntent | undefined {
+  function detectInputIntent(parts: PromptInput["parts"], explicitIntent?: WorkflowInputIntent): WorkflowInputIntent {
     if (explicitIntent) return explicitIntent
 
     const text = parts
@@ -108,8 +108,17 @@ export namespace SessionPrompt {
       return "analysis"
 
     // Excel/CSV/DTA 这类原始表格输入必须先走 intake 阶段，避免模型跳过 data_import 直接回归。
-    if (/\.(xlsx|xls|csv|dta|sav)\b/.test(text) || /\b(excel|spreadsheet|workbook)\b/.test(text)) return "ingest"
-    return undefined
+    if (
+      parts.some((part) => part.type === "file" && !part.mime?.startsWith("image/")) ||
+      /\.(xlsx|xls|csv|dta|sav)\b/.test(text) ||
+      /\b(excel|spreadsheet|workbook|import)\b/.test(text) ||
+      /导入|读取数据|上传数据|数据文件/.test(text)
+    )
+      return "ingest"
+
+    // Small talk, questions, and unrelated short replies are a first-class mode.
+    // They must not continue an unfinished empirical workflow.
+    return "conversation"
   }
 
   function inputGraphFromParts(parts: PromptInput["parts"], intent?: WorkflowInputIntent): InputGraphNode[] {
@@ -207,7 +216,7 @@ export namespace SessionPrompt {
     queuePriority: z.number().int().optional(),
     queueActionType: z.enum(["prompt", "command", "shell", "continue", "retry", "repair", "compaction"]).optional(),
     queueMetadata: z.record(z.string(), z.any()).optional(),
-    intent: z.enum(["status", "repair", "verify", "report", "analysis", "ingest"]).optional(),
+    intent: z.enum(["conversation", "status", "repair", "verify", "report", "analysis", "ingest"]).optional(),
     parts: z.array(
       z.discriminatedUnion("type", [
         MessageV2.TextPart.omit({
@@ -404,7 +413,6 @@ export namespace SessionPrompt {
     })
 
     let step = 0
-    let analysisRepairAttempts = 0
     const session = await Session.get(sessionID)
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
@@ -772,47 +780,22 @@ export namespace SessionPrompt {
         ],
         tools,
         model,
+        inputIntent: activeAction?.metadata?.["intent"] as WorkflowInputIntent | undefined,
       })
       if (result === "stop") break
       if (typeof result === "object" && result.type === "repair") {
-        analysisRepairAttempts += 1
-        if (analysisRepairAttempts > 2) break
-        SessionStatus.set(sessionID, {
-          type: "repair",
-          tool: result.toolName,
-          retryStage: result.retryStage,
-          message: result.repairAction,
-        })
-
-        const repairUserMessage: MessageV2.User = {
-          id: Identifier.ascending("message"),
-          sessionID,
-          role: "user",
-          time: {
-            created: Date.now(),
-          },
-          agent: lastUser.agent,
-          model: lastUser.model,
-        }
-        await Session.updateMessage(repairUserMessage)
+        SessionStatus.set(sessionID, { type: "idle" })
+        // A failed operation stops here. Do not manufacture a user message and
+        // silently retry: the user decides whether to resume the analysis later.
         await Session.updatePart({
           id: Identifier.ascending("part"),
-          messageID: repairUserMessage.id,
+          messageID: processor.message.id,
           sessionID,
           type: "text",
-          synthetic: true,
-          text: [
-            `The ${result.toolName} step failed during ${result.retryStage}.`,
-            `Repair action: ${result.repairAction}`,
-            result.reflectionPath ? `Reflection log: ${result.reflectionPath}` : "",
-            "Retry only the failed stage. Reuse successful stages and saved artifacts instead of restarting the whole workflow.",
-          ]
-            .filter(Boolean)
-            .join("\n"),
+          text: "这一步没有完成，已停止执行，不会自动重试。若你希望继续，请明确告诉我“重试刚才的数据处理”或说明新的任务。",
         } satisfies MessageV2.TextPart)
-        continue
+        break
       }
-      analysisRepairAttempts = 0
       if (result === "compact") {
         await SessionCompaction.create({
           sessionID,
@@ -851,7 +834,7 @@ export namespace SessionPrompt {
   }) {
     using _ = log.time("resolveTools")
     const tools: Record<string, AITool> = {}
-    const resolvedIntent: WorkflowInputIntent = input.intent ?? "analysis"
+    const resolvedIntent: WorkflowInputIntent = input.intent ?? "conversation"
 
     const extractKeyedValue = (input: string, key: string): string | undefined => {
       const match = new RegExp(`\\b${key}\\s*[:=]\\s*([^\\n\\r}]+)`, "i").exec(input)
