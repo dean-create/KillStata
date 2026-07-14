@@ -65,7 +65,6 @@ import { useKV } from "../../context/kv.tsx"
 import { Editor } from "../../util/editor"
 import stripAnsi from "strip-ansi"
 import { Footer } from "./footer.tsx"
-import { SubagentFooter } from "./subagent-footer.tsx"
 import { usePromptRef } from "../../context/prompt"
 import { useExit } from "../../context/exit"
 import { Filesystem } from "@/util/filesystem"
@@ -83,7 +82,6 @@ import {
 } from "@/runtime/analysis-text-sanitizer"
 import { isAnalysisTurn } from "@/runtime/analysis-user-view"
 import { isReasoningExpanded, toggleReasoningExpandedState } from "./reasoning-state"
-import { workflowStageLabel } from "@/runtime/workflow-locale"
 
 addDefaultParsers(parsers.parsers)
 
@@ -939,50 +937,10 @@ export function Session() {
 
   const dialog = useDialog()
   const renderer = useRenderer()
-  const runtimeQuery = createMemo(() => sync.data.runtimeQuery[route.sessionID])
-  const runtimeQueue = createMemo(() => sync.data.runtimeQueue[route.sessionID])
-  const workflow = createMemo(() => sync.data.workflow[route.sessionID])
   const promptHint = createMemo(() => {
-    const workflowState = workflow()
-    if (workflowState?.repairOnly || workflowState?.verifierStatus === "block") {
-      return <text fg={theme.error}>verifier blocked; repair the failed stage before report</text>
-    }
-    const query = runtimeQuery()
-    if (query && query.phase !== "idle") {
-      return (
-        <text fg={theme.textMuted}>
-          {query.phase}
-          {query.action ? `:${query.action}` : ""}
-          {(runtimeQueue()?.pending ?? 0) > 0 ? ` queue ${runtimeQueue()?.pending}` : ""}
-        </text>
-      )
-    }
     return undefined
   })
-  const promptRight = createMemo(() => {
-    const workflowState = workflow()
-    if (!workflowState?.activeStage && !workflowState?.verifierStatus && !workflowState?.activeCoordinatorAgent) return
-    const workflowLocale = workflowState.workflowLocale ?? "en"
-    return (
-      <>
-        <Show when={workflowState.activeStage}>
-          <text fg={theme.textMuted}>
-            {workflowStageLabel(workflowLocale, workflowState.activeStage) ?? workflowState.activeStage}
-          </text>
-        </Show>
-        <Show when={workflowState.verifierStatus}>
-          <text fg={workflowState.verifierStatus === "block" ? theme.error : theme.textMuted}>
-            {workflowLocale === "zh-CN"
-              ? `校验器 ${workflowState.verifierStatus === "pass" ? "通过" : workflowState.verifierStatus === "warn" ? "警告" : "阻塞"}`
-              : `verifier ${workflowState.verifierStatus}`}
-          </text>
-        </Show>
-        <Show when={workflowState.activeCoordinatorAgent}>
-          <text fg={theme.textMuted}>{workflowState.activeCoordinatorAgent}</text>
-        </Show>
-      </>
-    )
-  })
+  const promptRight = createMemo(() => undefined)
 
   // snap to bottom when session changes
   createEffect(on(() => route.sessionID, toBottom))
@@ -1133,7 +1091,6 @@ export function Session() {
               <Show when={permissions().length === 0 && questions().length > 0}>
                 <QuestionPrompt request={questions()[0]} />
               </Show>
-              <SubagentFooter />
               <Prompt
                 visible={!session()?.parentID && permissions().length === 0 && questions().length === 0}
                 ref={(r) => {
@@ -1204,12 +1161,9 @@ function UserMessage(props: {
   const local = useLocal()
   const text = createMemo(() => props.parts.flatMap((x) => (x.type === "text" && !x.synthetic ? [x] : []))[0])
   const files = createMemo(() => props.parts.flatMap((x) => (x.type === "file" ? [x] : [])))
-  const sync = useSync()
   const { theme } = useTheme()
-  const [hover, setHover] = createSignal(false)
   const queued = createMemo(() => props.pending && props.message.id > props.pending)
   const color = createMemo(() => (queued() ? theme.accent : local.agent.color(props.message.agent)))
-  const metadataVisible = createMemo(() => queued() || ctx.showTimestamps())
 
   const compaction = createMemo(() => props.parts.find((x) => x.type === "compaction"))
 
@@ -1218,28 +1172,18 @@ function UserMessage(props: {
       <Show when={text()}>
         <box
           id={props.message.id}
-          border={["left"]}
-          borderColor={color()}
-          customBorderChars={SplitBorder.customBorderChars}
-          marginTop={props.index === 0 ? 0 : 1}
+          onMouseUp={props.onMouseUp}
+          marginTop={props.index === 0 ? 0 : 2}
+          paddingLeft={1}
+          flexShrink={0}
         >
-          <box
-            onMouseOver={() => {
-              setHover(true)
-            }}
-            onMouseOut={() => {
-              setHover(false)
-            }}
-            onMouseUp={props.onMouseUp}
-            paddingTop={1}
-            paddingBottom={1}
-            paddingLeft={2}
-            backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
-            flexShrink={0}
-          >
+          <box flexDirection="row" gap={1}>
+            <text fg={color()} flexShrink={0}>●</text>
+            <text fg={theme.textMuted} flexShrink={0}>你</text>
             <text fg={theme.text}>{text()?.text}</text>
+          </box>
             <Show when={files().length}>
-              <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
+              <box flexDirection="row" paddingLeft={3} paddingTop={1} gap={1} flexWrap="wrap">
                 <For each={files()}>
                   {(file) => {
                     const bg = createMemo(() => {
@@ -1250,7 +1194,7 @@ function UserMessage(props: {
                     return (
                       <text fg={theme.text}>
                         <span style={{ bg: bg(), fg: theme.background }}> {MIME_BADGE[file.mime] ?? file.mime} </span>
-                        <span style={{ bg: theme.backgroundElement, fg: theme.textMuted }}> {file.filename} </span>
+                        <span style={{ fg: theme.textMuted }}> {file.filename} </span>
                       </text>
                     )
                   }}
@@ -1261,19 +1205,14 @@ function UserMessage(props: {
               when={queued()}
               fallback={
                 <Show when={ctx.showTimestamps()}>
-                  <text fg={theme.textMuted}>
-                    <span style={{ fg: theme.textMuted }}>
-                      {Locale.todayTimeOrDateTime(props.message.time.created)}
-                    </span>
+                  <text paddingLeft={3} fg={theme.textMuted}>
+                    {Locale.todayTimeOrDateTime(props.message.time.created)}
                   </text>
                 </Show>
               }
             >
-              <text fg={theme.textMuted}>
-                <span style={{ bg: theme.accent, fg: theme.backgroundPanel, bold: true }}> QUEUED </span>
-              </text>
+              <text paddingLeft={3} fg={theme.accent}>等待处理</text>
             </Show>
-          </box>
         </box>
       </Show>
       <Show when={compaction()}>
@@ -1291,22 +1230,8 @@ function UserMessage(props: {
 
 function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; last: boolean }) {
   const ctx = use()
-  const local = useLocal()
   const { theme } = useTheme()
   const sync = useSync()
-  const messages = createMemo(() => sync.data.message[props.message.sessionID] ?? [])
-
-  const final = createMemo(() => {
-    return props.message.finish && !["tool-calls", "unknown"].includes(props.message.finish)
-  })
-
-  const duration = createMemo(() => {
-    if (!final()) return 0
-    if (!props.message.time.completed) return 0
-    const user = messages().find((x) => x.role === "user" && x.id === props.message.parentID)
-    if (!user || !user.time) return 0
-    return props.message.time.completed - user.time.created
-  })
 
   const visibleError = createMemo(() => {
     const error = props.message.error
@@ -1340,43 +1265,19 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
       <Show when={visibleError()}>
         <box
           border={["left"]}
-          paddingTop={1}
-          paddingBottom={1}
-          paddingLeft={2}
+          paddingTop={0}
+          paddingBottom={0}
+          paddingLeft={1}
           marginTop={1}
-          backgroundColor={theme.backgroundPanel}
           customBorderChars={SplitBorder.customBorderChars}
           borderColor={theme.error}
         >
           <text fg={theme.textMuted}>{visibleError()}</text>
         </box>
       </Show>
-      <Switch>
-        <Match when={props.last || final() || props.message.error?.name === "MessageAbortedError"}>
-          <box paddingLeft={3}>
-            <text marginTop={1}>
-              <span
-                style={{
-                  fg:
-                    props.message.error?.name === "MessageAbortedError"
-                      ? theme.textMuted
-                      : local.agent.color(props.message.agent),
-                }}
-              >
-                ▣{" "}
-              </span>{" "}
-              <span style={{ fg: theme.text }}>{Locale.titlecase(props.message.mode)}</span>
-              <span style={{ fg: theme.textMuted }}> · {props.message.modelID}</span>
-              <Show when={duration()}>
-                <span style={{ fg: theme.textMuted }}> · {Locale.duration(duration())}</span>
-              </Show>
-              <Show when={props.message.error?.name === "MessageAbortedError"}>
-                <span style={{ fg: theme.textMuted }}> · interrupted</span>
-              </Show>
-            </text>
-          </box>
-        </Match>
-      </Switch>
+      <Show when={props.message.error?.name === "MessageAbortedError"}>
+        <text paddingLeft={2} fg={theme.textMuted}>回答已停止</text>
+      </Show>
     </>
   )
 }
@@ -1518,23 +1419,21 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
     <Show when={shouldShow()}>
       <box
         id={"text-" + props.part.id}
-        paddingLeft={2}
+        paddingLeft={1}
         marginTop={1}
         flexDirection="column"
         border={["left"]}
-        paddingTop={1}
-        paddingBottom={1}
+        paddingTop={0}
+        paddingBottom={0}
         customBorderChars={SplitBorder.customBorderChars}
-        borderColor={theme.backgroundElement}
-        backgroundColor={theme.backgroundPanel}
+        borderColor={theme.borderSubtle}
         onMouseUp={() => {
           if (renderer.getSelection()?.getSelectedText()) return
           ctx.toggleReasoningExpanded(props.part.id)
         }}
       >
         <text fg={theme.textMuted} paddingLeft={1}>
-          {expanded() ? "[-] Thinking" : "[+] Thinking"}
-          <span style={{ fg: theme.textMuted }}> {expanded() ? "click to collapse" : "click to expand"}</span>
+          {expanded() ? "收起分析过程" : "展开分析过程"}
         </text>
         <Show when={expanded()}>
           <code
@@ -1603,7 +1502,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
   })
   return (
     <Show when={content()}>
-      <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
+      <box id={"text-" + props.part.id} paddingLeft={2} marginTop={2} flexShrink={0}>
         <code
           filetype="markdown"
           drawUnstyledText={false}
@@ -1960,14 +1859,13 @@ function BlockTool(props: { title: string; children: JSX.Element; onClick?: () =
   return (
     <box
       border={["left"]}
-      paddingTop={1}
-      paddingBottom={1}
-      paddingLeft={2}
+      paddingTop={0}
+      paddingBottom={0}
+      paddingLeft={1}
       marginTop={1}
       gap={1}
-      backgroundColor={hover() ? theme.backgroundMenu : theme.backgroundPanel}
       customBorderChars={SplitBorder.customBorderChars}
-      borderColor={theme.background}
+      borderColor={theme.borderSubtle}
       onMouseOver={() => props.onClick && setHover(true)}
       onMouseOut={() => setHover(false)}
       onMouseUp={() => {
@@ -1975,7 +1873,7 @@ function BlockTool(props: { title: string; children: JSX.Element; onClick?: () =
         props.onClick?.()
       }}
     >
-      <text paddingLeft={3} fg={theme.textMuted}>
+      <text paddingLeft={1} fg={theme.textMuted}>
         {props.title}
       </text>
       {props.children}
