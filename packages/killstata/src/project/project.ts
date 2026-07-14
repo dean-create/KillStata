@@ -13,9 +13,16 @@ import { BusEvent } from "@/bus/bus-event"
 import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
 import { existsSync } from "fs"
+import { createHash } from "crypto"
 
 export namespace Project {
   const log = Log.create({ service: "project" })
+
+  // git 项目的 id 沿用 root commit hash（保持既有会话可读）。非 git 项目没有这样的天然标识，
+  // 就用项目根路径的哈希——同一个目录永远得到同一个 id，不同目录一定得到不同 id。
+  function projectIdFromPath(root: string) {
+    return createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 16)
+  }
   export const Info = z
     .object({
       id: z.string(),
@@ -162,10 +169,24 @@ export namespace Project {
         }
       }
 
+      // 到这里说明没有 git 仓库——这是 killstata 用户的常态：数据目录就是个放 excel 的
+      // 普通文件夹。旧实现在这里返回 id="global" + worktree="/"，代价很大：
+      //   - 所有非 git 目录共用同一个 project，会话互相串台，"总是允许"的权限授权也会泄漏
+      //   - 权限 pattern 是相对 worktree 算的（tool/edit.ts:56），worktree="/" 让它退化成
+      //     "去掉开头斜杠的绝对路径"，用户写的规则永远匹配不上
+      //   - 配置与 AGENTS.md 的向上查找以 worktree 为 stop，会一路扫到文件系统根
+      //
+      // 改为：向上找 .killstata/（跑过一次分析就会有），找不到就以当前目录为项目根。
+      // worktree 从此永远是一个真实目录，不再是 "/"。
+      const analysisRoot = Filesystem.up({ targets: [".killstata"], start: directory })
+      const found = await analysisRoot.next().then((x) => x.value)
+      await analysisRoot.return()
+      const root = found ? path.dirname(found) : directory
+
       return {
-        id: "global",
-        worktree: "/",
-        sandbox: "/",
+        id: projectIdFromPath(root),
+        worktree: root,
+        sandbox: root,
         vcs: Info.shape.vcs.parse(Flag.KILLSTATA_FAKE_VCS),
       }
     })
