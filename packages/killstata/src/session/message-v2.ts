@@ -4,7 +4,6 @@ import { NamedError } from "@killstata/util/error"
 import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessage, type UIMessage } from "ai"
 import type { JSONValue, SharedV2ProviderMetadata } from "@ai-sdk/provider"
 import { Identifier } from "../id/id"
-import { LSP } from "../lsp"
 import { fn } from "@/util/fn"
 import { Storage } from "@/storage/storage"
 import { ProviderTransform } from "@/provider/transform"
@@ -158,7 +157,10 @@ export namespace MessageV2 {
   export const SymbolSource = FilePartSourceBase.extend({
     type: z.literal("symbol"),
     path: z.string(),
-    range: LSP.Range,
+    range: z.object({
+      start: z.object({ line: z.number(), character: z.number() }),
+      end: z.object({ line: z.number(), character: z.number() }),
+    }),
     name: z.string(),
     kind: z.number().int(),
   }).meta({

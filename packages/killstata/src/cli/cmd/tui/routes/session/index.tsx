@@ -58,7 +58,7 @@ import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
 import { Sidebar } from "./sidebar"
-import { LANGUAGE_EXTENSIONS } from "@/lsp/language"
+import { LANGUAGE_EXTENSIONS } from "@tui/util/language"
 import parsers from "../../../../../../parsers-config.ts"
 import { Clipboard } from "../../util/clipboard"
 import { Toast, useToast } from "../../ui/toast"
@@ -68,7 +68,6 @@ import stripAnsi from "strip-ansi"
 import { Footer } from "./footer.tsx"
 import { usePromptRef } from "../../context/prompt"
 import { useExit } from "../../context/exit"
-import { Filesystem } from "@/util/filesystem"
 import { Global } from "@/global"
 import { PermissionPrompt } from "./permission"
 import { QuestionPrompt } from "./question"
@@ -82,7 +81,7 @@ import {
   userFacingAnalysisErrorText,
   type AnalysisToolPartLike,
 } from "@/runtime/analysis-text-sanitizer"
-import { isAnalysisTurn } from "@/runtime/analysis-user-view"
+import { isAnalysisTurn, pendingTaskLabel, shouldShowReasoning } from "@/runtime/analysis-user-view"
 import { isReasoningExpanded, toggleReasoningExpandedState } from "./reasoning-state"
 
 addDefaultParsers(parsers.parsers)
@@ -122,9 +121,10 @@ function analysisErrorDisplayText(input: {
   const message = input.text?.trim()
   if (!message) return undefined
   const friendly = userFacingAnalysisErrorText(message)
-  if (friendly && !input.showDetails) return friendly
-  if (!input.isAnalysis || input.showDetails) return message
+  if (friendly) return friendly
+  if (!input.isAnalysis) return message
   if (input.waitingForAccess) return undefined
+  if (/[A-Za-z]{3}/.test(message)) return "分析未完成，未生成可用结果。请检查任务参数后重试。"
   return isInternalAnalysisErrorText(message) ? undefined : message
 }
 
@@ -1129,32 +1129,12 @@ function UserMessage(props: {
   const { theme } = useTheme()
   const queued = createMemo(() => props.pending && props.message.id > props.pending)
   const color = createMemo(() => (queued() ? theme.accent : local.agent.color(props.message.agent)))
-  const queuedTask = createMemo(() => {
-    const source = [
-      text()?.text ?? "",
-      ...files().map((file) => `${file.filename} ${file.url}`),
-    ]
-      .join(" ")
-      .toLowerCase()
-
-    if (
-      /\b(regression|econometric|econometrics|panel_fe|smart_baseline|auto_recommend|did|ols|2sls|iv|psm|rdd)\b/.test(
-        source,
-      ) ||
-      /计量|回归|固定效应|面板|基准模型|双重差分|工具变量|倾向得分|控制变量|稳健性|再分析|重新回归|再估计/.test(source)
-    ) {
-      return "正在进行计量分析"
-    }
-
-    if (
-      files().length > 0 ||
-      /\.(xlsx|xls|csv|dta|sav)\b/.test(source) ||
-      /\b(excel|spreadsheet|workbook|import)\b/.test(source) ||
-      /导入|读取数据|上传数据|数据文件|清洗数据|处理数据/.test(source)
-    ) {
-      return "正在处理数据"
-    }
-  })
+  const queuedTask = createMemo(() =>
+    pendingTaskLabel({
+      text: text()?.text,
+      files: files().map((file) => ({ filename: file.filename, url: file.url, mime: file.mime })),
+    }),
+  )
 
   const compaction = createMemo(() => props.parts.find((x) => x.type === "compaction"))
 
@@ -1408,9 +1388,12 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
   })
   const expanded = createMemo(() => ctx.reasoningExpanded(props.part.id))
   const shouldShow = createMemo(() => {
-    if (!content() || !ctx.showThinking()) return false
-    if (isAnalysisAssistantMessage(props.message, sync) && !ctx.showDetails()) return false
-    return !isAnalysisAssistantWaitingForAccess(props.message, sync)
+    return shouldShowReasoning({
+      hasContent: Boolean(content()),
+      showThinking: ctx.showThinking(),
+      isAnalysis: isAnalysisAssistantMessage(props.message, sync),
+      waitingForAccess: isAnalysisAssistantWaitingForAccess(props.message, sync),
+    })
   })
   return (
     <Show when={shouldShow()}>
@@ -1519,6 +1502,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
 function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMessage }) {
   const ctx = use()
   const sync = useSync()
+  const { theme } = useTheme()
   const latestUserText = createMemo(() => latestUserTextForMessage(props.message, sync))
   const metadata = createMemo(() => (props.part.state.status === "pending" ? {} : (props.part.state.metadata ?? {})))
   const display = createMemo(() => readToolDisplay(metadata()))
@@ -1537,14 +1521,15 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         "slide_generator",
       ].includes(props.part.tool),
   )
-  const analysisToolErrorText = createMemo(() =>
-    analysisErrorDisplayText({
+  const analysisToolErrorText = createMemo(() => {
+    if (props.part.state.status !== "error" || !isAnalysisAssistantMessage(props.message, sync)) return undefined
+    return analysisErrorDisplayText({
       text: props.part.state.status === "error" ? props.part.state.error : undefined,
-      isAnalysis: isAnalysisAssistantMessage(props.message, sync),
+      isAnalysis: true,
       showDetails: ctx.showDetails(),
       waitingForAccess: waitingForAccess(),
-    }),
-  )
+    })
+  })
 
   // Hide tool if showDetails is false and tool completed successfully
   const shouldHide = createMemo(() => {
@@ -1586,7 +1571,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
 
   return (
     <Show when={!shouldHide()} fallback={<Show when={showProgress()}><AnalysisProgress part={props.part} /></Show>}>
-      <Switch>
+      <Show
+        when={analysisToolErrorText()}
+        fallback={<Switch>
         <Match when={props.part.tool === "bash" || props.part.tool === "shell"}>
           <Bash {...toolprops} />
         </Match>
@@ -1626,7 +1613,13 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={true}>
           <GenericTool {...toolprops} />
         </Match>
-      </Switch>
+      </Switch>}
+      >
+        <box marginTop={1} paddingLeft={2} flexDirection="row" gap={1} flexShrink={0}>
+          <text fg={theme.error}>×</text>
+          <text fg={theme.error}>{analysisToolErrorText()}</text>
+        </box>
+      </Show>
     </Show>
   )
 }
@@ -2030,11 +2023,6 @@ function Write(props: ToolProps<typeof WriteTool>) {
     return props.input.content
   })
 
-  const diagnostics = createMemo(() => {
-    const filePath = Filesystem.normalizePath(props.input.filePath ?? "")
-    return props.metadata.diagnostics?.[filePath] ?? []
-  })
-
   // 默认只说写了哪个文件、多大，正文不铺给用户。
   const sizeSummary = createMemo(() => {
     const content = code()
@@ -2045,7 +2033,7 @@ function Write(props: ToolProps<typeof WriteTool>) {
 
   return (
     <Switch>
-      <Match when={ctx.showDetails() && props.metadata.diagnostics !== undefined}>
+      <Match when={ctx.showDetails()}>
         <BlockTool title={"# Wrote " + normalizePath(props.input.filePath!)} part={props.part}>
           <line_number fg={theme.textMuted} minWidth={3} paddingRight={1}>
             <code
@@ -2056,15 +2044,6 @@ function Write(props: ToolProps<typeof WriteTool>) {
               content={code()}
             />
           </line_number>
-          <Show when={diagnostics().length}>
-            <For each={diagnostics()}>
-              {(diagnostic) => (
-                <text fg={theme.error}>
-                  Error [{diagnostic.range.start.line}:{diagnostic.range.start.character}]: {diagnostic.message}
-                </text>
-              )}
-            </For>
-          </Show>
         </BlockTool>
       </Match>
       <Match when={true}>
@@ -2204,12 +2183,6 @@ function Edit(props: ToolProps<typeof EditTool>) {
 
   const diffContent = createMemo(() => props.metadata.diff)
 
-  const diagnostics = createMemo(() => {
-    const filePath = Filesystem.normalizePath(props.input.filePath ?? "")
-    const arr = props.metadata.diagnostics?.[filePath] ?? []
-    return arr.filter((x) => x.severity === 1).slice(0, 3)
-  })
-
   // 默认不铺 diff，只报告改动规模（+N -M），完整 diff 留给 /details。
   const changeSummary = createMemo(() => {
     const diff = diffContent()
@@ -2249,18 +2222,6 @@ function Edit(props: ToolProps<typeof EditTool>) {
               removedLineNumberBg={theme.diffRemovedLineNumberBg}
             />
           </box>
-          <Show when={diagnostics().length}>
-            <box>
-              <For each={diagnostics()}>
-                {(diagnostic) => (
-                  <text fg={theme.error}>
-                    Error [{diagnostic.range.start.line + 1}:{diagnostic.range.start.character + 1}]{" "}
-                    {diagnostic.message}
-                  </text>
-                )}
-              </For>
-            </box>
-          </Show>
         </BlockTool>
       </Match>
       <Match when={true}>

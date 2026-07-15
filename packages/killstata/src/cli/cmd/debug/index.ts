@@ -3,7 +3,6 @@ import { bootstrap } from "../../bootstrap"
 import { cmd } from "../cmd"
 import { ConfigCommand } from "./config"
 import { FileCommand } from "./file"
-import { LSPCommand } from "./lsp"
 import { RipgrepCommand } from "./ripgrep"
 import { ScrapCommand } from "./scrap"
 import { SkillCommand } from "./skill"
@@ -15,7 +14,6 @@ export const DebugCommand = cmd({
   builder: (yargs) =>
     yargs
       .command(ConfigCommand)
-      .command(LSPCommand)
       .command(RipgrepCommand)
       .command(FileCommand)
       .command(ScrapCommand)

@@ -6,17 +6,14 @@
 import z from "zod"
 import * as path from "path"
 import { Tool } from "./tool"
-import { LSP } from "../lsp"
 import { createTwoFilesPatch } from "diff"
 import DESCRIPTION from "./edit.txt"
 import { File } from "../file"
 import { Bus } from "../bus"
 import { FileTime } from "../file/time"
-import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { assertExternalDirectory } from "./external-directory"
 
-const MAX_DIAGNOSTICS_PER_FILE = 20
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -101,30 +98,17 @@ export const EditTool = Tool.define("edit", {
     ctx.metadata({
       metadata: {
         diff,
-        diagnostics: {},
       },
     })
 
-    let output = "Edit applied successfully."
-    await LSP.touchFile(filePath, true)
-    const diagnostics = await LSP.diagnostics()
-    const normalizedFilePath = Filesystem.normalizePath(filePath)
-    const issues = diagnostics[normalizedFilePath] ?? []
-    const errors = issues.filter((item) => item.severity === 1)
-    if (errors.length > 0) {
-      const limited = errors.slice(0, MAX_DIAGNOSTICS_PER_FILE)
-      const suffix =
-        errors.length > MAX_DIAGNOSTICS_PER_FILE ? `\n... and ${errors.length - MAX_DIAGNOSTICS_PER_FILE} more` : ""
-      output += `\n\nLSP errors detected in this file, please fix:\n<diagnostics file="${filePath}">\n${limited.map(LSP.Diagnostic.pretty).join("\n")}${suffix}\n</diagnostics>`
-    }
-
+    // 不再拉起语言服务器对刚改的文件挑错（见 write.ts 同段说明）。metadata.diff 保留——
+    // TUI 的编辑卡片和权限弹窗的"写前预览"都靠它，与已删除的 LSP 诊断无关。
     return {
       metadata: {
-        diagnostics,
         diff,
       },
       title: `${path.relative(Instance.worktree, filePath)}`,
-      output,
+      output: "Edit applied successfully.",
     }
   },
 })

@@ -29,14 +29,11 @@ import type {
   FileReadResponses,
   FileStatusResponses,
   FindFilesResponses,
-  FindSymbolsResponses,
   FindTextResponses,
-  FormatterStatusResponses,
   GlobalDisposeResponses,
   GlobalEventResponses,
   GlobalHealthResponses,
   InstanceDisposeResponses,
-  LspStatusResponses,
   McpAddErrors,
   McpAddResponses,
   McpAuthAuthenticateErrors,
@@ -1715,36 +1712,6 @@ export class Find extends HeyApiClient {
       ...params,
     })
   }
-
-  /**
-   * Find symbols
-   *
-   * Search for workspace symbols like functions, classes, and variables using LSP.
-   */
-  public symbols<ThrowOnError extends boolean = false>(
-    parameters: {
-      directory?: string
-      query: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "query", key: "directory" },
-            { in: "query", key: "query" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).get<FindSymbolsResponses, unknown, ThrowOnError>({
-      url: "/find/symbol",
-      ...options,
-      ...params,
-    })
-  }
 }
 
 export class File extends HeyApiClient {
@@ -2583,48 +2550,6 @@ export class App extends HeyApiClient {
   }
 }
 
-export class Lsp extends HeyApiClient {
-  /**
-   * Get LSP status
-   *
-   * Get LSP server status
-   */
-  public status<ThrowOnError extends boolean = false>(
-    parameters?: {
-      directory?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "directory" }] }])
-    return (options?.client ?? this.client).get<LspStatusResponses, unknown, ThrowOnError>({
-      url: "/lsp",
-      ...options,
-      ...params,
-    })
-  }
-}
-
-export class Formatter extends HeyApiClient {
-  /**
-   * Get formatter status
-   *
-   * Get formatter status
-   */
-  public status<ThrowOnError extends boolean = false>(
-    parameters?: {
-      directory?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "directory" }] }])
-    return (options?.client ?? this.client).get<FormatterStatusResponses, unknown, ThrowOnError>({
-      url: "/formatter",
-      ...options,
-      ...params,
-    })
-  }
-}
-
 export class Auth2 extends HeyApiClient {
   /**
    * Set auth credentials
@@ -2786,16 +2711,6 @@ export class KillstataClient extends HeyApiClient {
   private _app?: App
   get app(): App {
     return (this._app ??= new App({ client: this.client }))
-  }
-
-  private _lsp?: Lsp
-  get lsp(): Lsp {
-    return (this._lsp ??= new Lsp({ client: this.client }))
-  }
-
-  private _formatter?: Formatter
-  get formatter(): Formatter {
-    return (this._formatter ??= new Formatter({ client: this.client }))
   }
 
   private _auth?: Auth2

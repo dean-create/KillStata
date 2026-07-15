@@ -10,7 +10,6 @@ export function DialogStatus() {
   const sync = useSync()
   const { theme } = useTheme()
 
-  const enabledFormatters = createMemo(() => sync.data.formatter.filter((f) => f.enabled))
 
   const plugins = createMemo(() => {
     const list = sync.data.config.plugin ?? []
@@ -83,53 +82,6 @@ export function DialogStatus() {
                       </Match>
                     </Switch>
                   </span>
-                </text>
-              </box>
-            )}
-          </For>
-        </box>
-      </Show>
-      {sync.data.lsp.length > 0 && (
-        <box>
-          <text fg={theme.text}>{sync.data.lsp.length} LSP Servers</text>
-          <For each={sync.data.lsp}>
-            {(item) => (
-              <box flexDirection="row" gap={1}>
-                <text
-                  flexShrink={0}
-                  style={{
-                    fg: {
-                      connected: theme.success,
-                      error: theme.error,
-                    }[item.status],
-                  }}
-                >
-                  •
-                </text>
-                <text fg={theme.text} wrapMode="word">
-                  <b>{item.id}</b> <span style={{ fg: theme.textMuted }}>{item.root}</span>
-                </text>
-              </box>
-            )}
-          </For>
-        </box>
-      )}
-      <Show when={enabledFormatters().length > 0} fallback={<text fg={theme.text}>No Formatters</text>}>
-        <box>
-          <text fg={theme.text}>{enabledFormatters().length} Formatters</text>
-          <For each={enabledFormatters()}>
-            {(item) => (
-              <box flexDirection="row" gap={1}>
-                <text
-                  flexShrink={0}
-                  style={{
-                    fg: theme.success,
-                  }}
-                >
-                  •
-                </text>
-                <text wrapMode="word" fg={theme.text}>
-                  <b>{item.name}</b>
                 </text>
               </box>
             )}

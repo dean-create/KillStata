@@ -9,10 +9,8 @@ import type {
   Command,
   PermissionRequest,
   QuestionRequest,
-  LspStatus,
   McpStatus,
   McpResource,
-  FormatterStatus,
   SessionStatus,
   ProviderListResponse,
   ProviderAuthMethod,
@@ -80,14 +78,12 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       part: {
         [messageID: string]: Part[]
       }
-      lsp: LspStatus[]
       mcp: {
         [key: string]: McpStatus
       }
       mcp_resource: {
         [key: string]: McpResource
       }
-      formatter: FormatterStatus[]
       vcs: VcsInfo | undefined
       path: Path
     }>({
@@ -119,10 +115,8 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       todo: {},
       message: {},
       part: {},
-      lsp: [],
       mcp: {},
       mcp_resource: {},
-      formatter: [],
       vcs: undefined,
       path: { state: "", config: "", worktree: "", directory: "" },
     })
@@ -336,11 +330,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           break
         }
 
-        case "lsp.updated": {
-          sdk.client.lsp.status().then((x) => setStore("lsp", x.data!))
-          break
-        }
-
         case "vcs.branch.updated": {
           setStore("vcs", { branch: event.properties.branch })
           break
@@ -504,7 +493,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           Promise.all([
             ...(args.continue ? [] : [sessionListPromise]),
             sdk.client.command.list().then((x) => setStore("command", reconcile(x.data ?? []))),
-            sdk.client.formatter.status().then((x) => setStore("formatter", reconcile(x.data!))),
             sdk.client.session.status().then((x) => {
               setStore("session_status", reconcile(x.data!))
             }),

@@ -23,7 +23,6 @@ import { defer } from "../util/defer"
 import { clone } from "remeda"
 import { ToolRegistry } from "../tool/registry"
 import { MCP } from "../mcp"
-import { LSP } from "../lsp"
 import { ReadTool } from "../tool/read"
 import { ListTool } from "../tool/ls"
 import { FileTime } from "../file/time"
@@ -50,6 +49,7 @@ import { RuntimeHooks } from "@/runtime/hooks"
 import { allowMcpToolForWorkflow } from "@/runtime/workflow"
 import { SessionRunCoordinator } from "./run-state"
 import { detectWorkflowLocaleFromText } from "@/runtime/workflow-locale"
+import { isNegatedWorkflowRequest } from "@/runtime/input-intent"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -85,7 +85,10 @@ export namespace SessionPrompt {
     SessionRunCoordinator.resolveAction(sessionID, message, actionID)
   }
 
-  function detectInputIntent(parts: PromptInput["parts"], explicitIntent?: WorkflowInputIntent): WorkflowInputIntent {
+  export function detectInputIntent(
+    parts: PromptInput["parts"],
+    explicitIntent?: WorkflowInputIntent,
+  ): WorkflowInputIntent {
     if (explicitIntent) return explicitIntent
 
     const text = parts
@@ -97,13 +100,15 @@ export namespace SessionPrompt {
       .join("\n")
       .toLowerCase()
 
+    if (isNegatedWorkflowRequest(text)) return "conversation"
+
     // 如果用户已经明确要做回归或计量分析，这是“导入 + 估计”的复合任务；
     // analysis 工具包会同时暴露 data_import 与 econometrics，避免导入后回归工具被延迟。
     if (
       /\b(regression|econometric|econometrics|panel_fe|smart_baseline|auto_recommend|did|ols|2sls|iv|psm|rdd)\b/.test(
         text,
       ) ||
-      /计量|回归|固定效应|面板|基准模型|双重差分|工具变量|倾向得分/.test(text)
+      /计量|回归|固定效应|面板|基准模型|双重差分|工具变量|倾向得分|控制变量|稳健性|再分析|重新回归|再估计/.test(text)
     )
       return "analysis"
 
@@ -1260,28 +1265,8 @@ export namespace SessionPrompt {
                   end: url.searchParams.get("end"),
                 }
                 if (range.start != null) {
-                  const filePathURI = part.url.split("?")[0]
                   let start = parseInt(range.start)
                   let end = range.end ? parseInt(range.end) : undefined
-                  // some LSP servers (eg, gopls) don't give full range in
-                  // workspace/symbol searches, so we'll try to find the
-                  // symbol in the document to get the full range
-                  if (start === end) {
-                    const symbols = await LSP.documentSymbol(filePathURI)
-                    for (const symbol of symbols) {
-                      let range: LSP.Range | undefined
-                      if ("range" in symbol) {
-                        range = symbol.range
-                      } else if ("location" in symbol) {
-                        range = symbol.location.range
-                      }
-                      if (range?.start?.line && range?.start?.line === start) {
-                        start = range.start.line
-                        end = range?.end?.line ?? start
-                        break
-                      }
-                    }
-                  }
                   offset = Math.max(start - 1, 0)
                   if (end) {
                     limit = end - offset

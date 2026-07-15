@@ -62,28 +62,6 @@ export type EventGlobalDisposed = {
   }
 }
 
-export type EventLspClientDiagnostics = {
-  type: "lsp.client.diagnostics"
-  properties: {
-    serverID: string
-    path: string
-  }
-}
-
-export type EventLspUpdated = {
-  type: "lsp.updated"
-  properties: {
-    [key: string]: unknown
-  }
-}
-
-export type EventFileEdited = {
-  type: "file.edited"
-  properties: {
-    file: string
-  }
-}
-
 export type UserMessage = {
   id: string
   sessionID: string
@@ -245,22 +223,20 @@ export type FileSource = {
   path: string
 }
 
-export type Range = {
-  start: {
-    line: number
-    character: number
-  }
-  end: {
-    line: number
-    character: number
-  }
-}
-
 export type SymbolSource = {
   text: FilePartSourceText
   type: "symbol"
   path: string
-  range: Range
+  range: {
+    start: {
+      line: number
+      character: number
+    }
+    end: {
+      line: number
+      character: number
+    }
+  }
   name: string
   kind: number
 }
@@ -505,14 +481,6 @@ export type EventPermissionReplied = {
   }
 }
 
-export type FileDiff = {
-  file: string
-  before: string
-  after: string
-  additions: number
-  deletions: number
-}
-
 export type PermissionAction = "allow" | "deny" | "ask"
 
 export type PermissionRule = {
@@ -529,12 +497,6 @@ export type Session = {
   projectID: string
   directory: string
   parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<FileDiff>
-  }
   share?: {
     url: string
   }
@@ -576,14 +538,6 @@ export type EventSessionDeleted = {
   type: "session.deleted"
   properties: {
     info: Session
-  }
-}
-
-export type EventSessionDiff = {
-  type: "session.diff"
-  properties: {
-    sessionID: string
-    diff: Array<FileDiff>
   }
 }
 
@@ -1118,6 +1072,13 @@ export type EventSessionCompacted = {
   }
 }
 
+export type EventFileEdited = {
+  type: "file.edited"
+  properties: {
+    file: string
+  }
+}
+
 export type Event =
   | EventProjectUpdated
   | EventInstallationUpdated
@@ -1125,9 +1086,6 @@ export type Event =
   | EventServerInstanceDisposed
   | EventServerConnected
   | EventGlobalDisposed
-  | EventLspClientDiagnostics
-  | EventLspUpdated
-  | EventFileEdited
   | EventMessageUpdated
   | EventMessageRemoved
   | EventMessagePartUpdated
@@ -1137,7 +1095,6 @@ export type Event =
   | EventSessionCreated
   | EventSessionUpdated
   | EventSessionDeleted
-  | EventSessionDiff
   | EventSessionError
   | EventTuiPromptAppend
   | EventTuiCommandExecute
@@ -1170,6 +1127,7 @@ export type Event =
   | EventSessionIdle
   | EventTodoUpdated
   | EventSessionCompacted
+  | EventFileEdited
 
 export type GlobalEvent = {
   directory: string
@@ -1624,7 +1582,6 @@ export type PermissionConfig =
       question?: PermissionActionConfig
       webfetch?: PermissionActionConfig
       websearch?: PermissionActionConfig
-      lsp?: PermissionRuleConfig
       doom_loop?: PermissionActionConfig
       [key: string]: PermissionRuleConfig | Array<string> | PermissionActionConfig | undefined
     }
@@ -2085,25 +2042,6 @@ export type Config = {
           extensions?: Array<string>
         }
       }
-  lsp?:
-    | false
-    | {
-        [key: string]:
-          | {
-              disabled: true
-            }
-          | {
-              command: Array<string>
-              extensions?: Array<string>
-              disabled?: boolean
-              env?: {
-                [key: string]: string
-              }
-              initialization?: {
-                [key: string]: unknown
-              }
-            }
-      }
   /**
    * Additional instruction files or patterns to include
    */
@@ -2337,15 +2275,6 @@ export type ProviderAuthAuthorization = {
   instructions: string
 }
 
-export type Symbol = {
-  name: string
-  kind: number
-  location: {
-    uri: string
-    range: Range
-  }
-}
-
 export type FileNode = {
   name: string
   path: string
@@ -2465,19 +2394,6 @@ export type Agent = {
     [key: string]: unknown
   }
   steps?: number
-}
-
-export type LspStatus = {
-  id: string
-  name: string
-  root: string
-  status: "connected" | "error"
-}
-
-export type FormatterStatus = {
-  name: string
-  extensions: Array<string>
-  enabled: boolean
 }
 
 export type OAuth = {
@@ -4081,25 +3997,6 @@ export type FindFilesResponses = {
 
 export type FindFilesResponse = FindFilesResponses[keyof FindFilesResponses]
 
-export type FindSymbolsData = {
-  body?: never
-  path?: never
-  query: {
-    directory?: string
-    query: string
-  }
-  url: "/find/symbol"
-}
-
-export type FindSymbolsResponses = {
-  /**
-   * Symbols
-   */
-  200: Array<Symbol>
-}
-
-export type FindSymbolsResponse = FindSymbolsResponses[keyof FindSymbolsResponses]
-
 export type FileListData = {
   body?: never
   path?: never
@@ -4840,42 +4737,6 @@ export type AppSkillsResponses = {
 }
 
 export type AppSkillsResponse = AppSkillsResponses[keyof AppSkillsResponses]
-
-export type LspStatusData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-  }
-  url: "/lsp"
-}
-
-export type LspStatusResponses = {
-  /**
-   * LSP server status
-   */
-  200: Array<LspStatus>
-}
-
-export type LspStatusResponse = LspStatusResponses[keyof LspStatusResponses]
-
-export type FormatterStatusData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-  }
-  url: "/formatter"
-}
-
-export type FormatterStatusResponses = {
-  /**
-   * Formatter status
-   */
-  200: Array<FormatterStatus>
-}
-
-export type FormatterStatusResponse = FormatterStatusResponses[keyof FormatterStatusResponses]
 
 export type AuthSetData = {
   body?: Auth

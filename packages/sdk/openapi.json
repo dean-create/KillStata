@@ -3564,51 +3564,6 @@
         ]
       }
     },
-    "/find/symbol": {
-      "get": {
-        "operationId": "find.symbols",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "directory",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "query",
-            "schema": {
-              "type": "string"
-            },
-            "required": true
-          }
-        ],
-        "summary": "Find symbols",
-        "description": "Search for workspace symbols like functions, classes, and variables using LSP.",
-        "responses": {
-          "200": {
-            "description": "Symbols",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Symbol"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createKillstataClient } from \"@killstata/sdk\n\nconst client = createKillstataClient()\nawait client.find.symbols({\n  ...\n})"
-          }
-        ]
-      }
-    },
     "/file": {
       "get": {
         "operationId": "file.list",
@@ -5142,80 +5097,6 @@
         ]
       }
     },
-    "/lsp": {
-      "get": {
-        "operationId": "lsp.status",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "directory",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "summary": "Get LSP status",
-        "description": "Get LSP server status",
-        "responses": {
-          "200": {
-            "description": "LSP server status",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/LSPStatus"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createKillstataClient } from \"@killstata/sdk\n\nconst client = createKillstataClient()\nawait client.lsp.status({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/formatter": {
-      "get": {
-        "operationId": "formatter.status",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "directory",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "summary": "Get formatter status",
-        "description": "Get formatter status",
-        "responses": {
-          "200": {
-            "description": "Formatter status",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/FormatterStatus"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createKillstataClient } from \"@killstata/sdk\n\nconst client = createKillstataClient()\nawait client.formatter.status({\n  ...\n})"
-          }
-        ]
-      }
-    },
     "/auth/{providerID}": {
       "put": {
         "operationId": "auth.set",
@@ -5491,75 +5372,6 @@
           "properties": {
             "type": "object",
             "properties": {}
-          }
-        },
-        "required": [
-          "type",
-          "properties"
-        ]
-      },
-      "Event.lsp.client.diagnostics": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "lsp.client.diagnostics"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "serverID": {
-                "type": "string"
-              },
-              "path": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "serverID",
-              "path"
-            ]
-          }
-        },
-        "required": [
-          "type",
-          "properties"
-        ]
-      },
-      "Event.lsp.updated": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "lsp.updated"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {}
-          }
-        },
-        "required": [
-          "type",
-          "properties"
-        ]
-      },
-      "Event.file.edited": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "file.edited"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "file": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "file"
-            ]
           }
         },
         "required": [
@@ -6136,45 +5948,6 @@
           "path"
         ]
       },
-      "Range": {
-        "type": "object",
-        "properties": {
-          "start": {
-            "type": "object",
-            "properties": {
-              "line": {
-                "type": "number"
-              },
-              "character": {
-                "type": "number"
-              }
-            },
-            "required": [
-              "line",
-              "character"
-            ]
-          },
-          "end": {
-            "type": "object",
-            "properties": {
-              "line": {
-                "type": "number"
-              },
-              "character": {
-                "type": "number"
-              }
-            },
-            "required": [
-              "line",
-              "character"
-            ]
-          }
-        },
-        "required": [
-          "start",
-          "end"
-        ]
-      },
       "SymbolSource": {
         "type": "object",
         "properties": {
@@ -6189,7 +5962,43 @@
             "type": "string"
           },
           "range": {
-            "$ref": "#/components/schemas/Range"
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "object",
+                "properties": {
+                  "line": {
+                    "type": "number"
+                  },
+                  "character": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "line",
+                  "character"
+                ]
+              },
+              "end": {
+                "type": "object",
+                "properties": {
+                  "line": {
+                    "type": "number"
+                  },
+                  "character": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "line",
+                  "character"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "end"
+            ]
           },
           "name": {
             "type": "string"
@@ -7062,33 +6871,6 @@
           "properties"
         ]
       },
-      "FileDiff": {
-        "type": "object",
-        "properties": {
-          "file": {
-            "type": "string"
-          },
-          "before": {
-            "type": "string"
-          },
-          "after": {
-            "type": "string"
-          },
-          "additions": {
-            "type": "number"
-          },
-          "deletions": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "file",
-          "before",
-          "after",
-          "additions",
-          "deletions"
-        ]
-      },
       "PermissionAction": {
         "type": "string",
         "enum": [
@@ -7141,31 +6923,6 @@
           "parentID": {
             "type": "string",
             "pattern": "^ses.*"
-          },
-          "summary": {
-            "type": "object",
-            "properties": {
-              "additions": {
-                "type": "number"
-              },
-              "deletions": {
-                "type": "number"
-              },
-              "files": {
-                "type": "number"
-              },
-              "diffs": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/FileDiff"
-                }
-              }
-            },
-            "required": [
-              "additions",
-              "deletions",
-              "files"
-            ]
           },
           "share": {
             "type": "object",
@@ -7316,37 +7073,6 @@
             },
             "required": [
               "info"
-            ]
-          }
-        },
-        "required": [
-          "type",
-          "properties"
-        ]
-      },
-      "Event.session.diff": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "session.diff"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string"
-              },
-              "diff": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/FileDiff"
-                }
-              }
-            },
-            "required": [
-              "sessionID",
-              "diff"
             ]
           }
         },
@@ -9219,6 +8945,30 @@
           "properties"
         ]
       },
+      "Event.file.edited": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "file.edited"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "properties"
+        ]
+      },
       "Event": {
         "anyOf": [
           {
@@ -9238,15 +8988,6 @@
           },
           {
             "$ref": "#/components/schemas/Event.global.disposed"
-          },
-          {
-            "$ref": "#/components/schemas/Event.lsp.client.diagnostics"
-          },
-          {
-            "$ref": "#/components/schemas/Event.lsp.updated"
-          },
-          {
-            "$ref": "#/components/schemas/Event.file.edited"
           },
           {
             "$ref": "#/components/schemas/Event.message.updated"
@@ -9274,9 +9015,6 @@
           },
           {
             "$ref": "#/components/schemas/Event.session.deleted"
-          },
-          {
-            "$ref": "#/components/schemas/Event.session.diff"
           },
           {
             "$ref": "#/components/schemas/Event.session.error"
@@ -9373,6 +9111,9 @@
           },
           {
             "$ref": "#/components/schemas/Event.session.compacted"
+          },
+          {
+            "$ref": "#/components/schemas/Event.file.edited"
           }
         ]
       },
@@ -10031,9 +9772,6 @@
               },
               "websearch": {
                 "$ref": "#/components/schemas/PermissionActionConfig"
-              },
-              "lsp": {
-                "$ref": "#/components/schemas/PermissionRuleConfig"
               },
               "doom_loop": {
                 "$ref": "#/components/schemas/PermissionActionConfig"
@@ -10985,75 +10723,6 @@
               }
             ]
           },
-          "lsp": {
-            "anyOf": [
-              {
-                "type": "boolean",
-                "const": false
-              },
-              {
-                "type": "object",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "disabled": {
-                          "type": "boolean",
-                          "const": true
-                        }
-                      },
-                      "required": [
-                        "disabled"
-                      ]
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "command": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
-                        },
-                        "extensions": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
-                        },
-                        "disabled": {
-                          "type": "boolean"
-                        },
-                        "env": {
-                          "type": "object",
-                          "propertyNames": {
-                            "type": "string"
-                          },
-                          "additionalProperties": {
-                            "type": "string"
-                          }
-                        },
-                        "initialization": {
-                          "type": "object",
-                          "propertyNames": {
-                            "type": "string"
-                          },
-                          "additionalProperties": {}
-                        }
-                      },
-                      "required": [
-                        "command"
-                      ]
-                    }
-                  ]
-                }
-              }
-            ]
-          },
           "instructions": {
             "description": "Additional instruction files or patterns to include",
             "type": "array",
@@ -11797,37 +11466,6 @@
           "instructions"
         ]
       },
-      "Symbol": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "number"
-          },
-          "location": {
-            "type": "object",
-            "properties": {
-              "uri": {
-                "type": "string"
-              },
-              "range": {
-                "$ref": "#/components/schemas/Range"
-              }
-            },
-            "required": [
-              "uri",
-              "range"
-            ]
-          }
-        },
-        "required": [
-          "name",
-          "kind",
-          "location"
-        ]
-      },
       "FileNode": {
         "type": "object",
         "properties": {
@@ -12258,60 +11896,6 @@
           "mode",
           "permission",
           "options"
-        ]
-      },
-      "LSPStatus": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "root": {
-            "type": "string"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "type": "string",
-                "const": "connected"
-              },
-              {
-                "type": "string",
-                "const": "error"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "root",
-          "status"
-        ]
-      },
-      "FormatterStatus": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "extensions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "enabled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "name",
-          "extensions",
-          "enabled"
         ]
       },
       "OAuth": {

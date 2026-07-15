@@ -2,7 +2,6 @@ import z from "zod"
 import * as fs from "fs"
 import * as path from "path"
 import { Tool } from "./tool"
-import { LSP } from "../lsp"
 import { FileTime } from "../file/time"
 import DESCRIPTION from "./read.txt"
 import { Instance } from "../project/instance"
@@ -257,8 +256,6 @@ export const ReadTool = Tool.define("read", {
       output += `\n\n<system-reminder>\n${loaded.map((item) => item.content).join("\n\n")}\n</system-reminder>`
     }
 
-    // just warms the lsp client
-    LSP.touchFile(filepath, false)
     FileTime.read(ctx.sessionID, filepath)
 
     return {

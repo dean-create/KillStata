@@ -1,3 +1,5 @@
+// 扩展名 → 语言标识的映射表，服务于 TUI 的语法高亮（do-file / py 脚本预览有价值）。
+// 原属已删除的 lsp 模块，但它与语言服务器逻辑无关，独立保留。
 export const LANGUAGE_EXTENSIONS: Record<string, string> = {
   ".abap": "abap",
   ".bat": "bat",
