@@ -9,6 +9,7 @@ import type { Provider } from "@/provider/provider"
 import { Flag } from "@/flag/flag"
 import type { Agent } from "@/agent/agent"
 import { SessionInstruction } from "./instruction"
+import { DataContext } from "./data-context"
 
 const ECONOMETRICS_CONTEXT = `
 # Econometric Analysis Context
@@ -205,7 +206,11 @@ export namespace SystemPrompt {
     return [basePrompt, ECONOMETRICS_CONTEXT]
   }
 
-  export async function environment(input?: { messages?: MessageV2.WithParts[] }) {
+  export async function environment(_input?: { messages?: MessageV2.WithParts[] }) {
+    // <data-context> 让模型每轮都知道"当前在哪个数据集、哪个活跃阶段、已试几组设定"，
+    // 而不必靠翻对话历史去回忆（压缩之后连历史都没了）。数据全部来自已落盘的 manifest，
+    // 没有已导入数据集时返回 undefined，不塞空壳。
+    const dataContext = DataContext.build()
     return [
       [
         `Here is some useful information about the environment you are running in:`,
@@ -214,6 +219,7 @@ export namespace SystemPrompt {
         `  Platform: ${process.platform}`,
         `  Today's date: ${new Date().toDateString()}`,
         `</env>`,
+        dataContext,
       ]
         .filter(Boolean)
         .join("\n"),
