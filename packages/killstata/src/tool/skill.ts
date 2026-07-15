@@ -1,7 +1,7 @@
 import path from "path"
 import z from "zod"
 import { Tool } from "./tool"
-import { formatSkillAliasText, resolveSkillAliasAvailability, Skill, writeSkillAliasReport } from "../skill"
+import { Skill } from "../skill"
 import { ConfigMarkdown } from "../config/markdown"
 import { PermissionNext } from "../permission/next"
 
@@ -16,11 +16,13 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
         return rule.action !== "deny"
       })
     : skills
-  const aliasAvailability = await resolveSkillAliasAvailability(accessibleSkills)
 
+  // 只列出真正安装了的 skill（用户从 GitHub 下载到 ~/.killstata/skills 的第三方计量 skill）。
+  // 原先这里还拼了一层"能力别名"，把 28 个已删除的内置 skill 硬编码成别名——那会让模型看到
+  // 一堆 "unavailable" 的假承诺。别名系统已随内置 skill 一起移除。
   const description =
     accessibleSkills.length === 0
-      ? "Load a skill to get detailed instructions for a specific task. No skills are currently available."
+      ? "Load a skill to get detailed instructions for a specific task. No skills are currently installed. Users can add skills to ~/.killstata/skills or install them from GitHub."
       : [
           "Load a skill to get detailed instructions for a specific task.",
           "Skills provide specialized knowledge and step-by-step guidance.",
@@ -35,7 +37,6 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
             `  </skill>`,
           ]),
           "</available_skills>",
-          formatSkillAliasText(aliasAvailability),
         ].join(" ")
 
   const examples = accessibleSkills
@@ -68,7 +69,6 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
       // Load and parse skill content
       const parsed = await ConfigMarkdown.parse(skill.location)
       const dir = path.dirname(skill.location)
-      const aliasReportPath = await writeSkillAliasReport(aliasAvailability).catch(() => undefined)
 
       // Format output similar to plugin pattern
       const output = [
@@ -76,7 +76,6 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
         "",
         `**Source**: ${skill.source}`,
         `**Base directory**: ${dir}`,
-        aliasReportPath ? `**Alias report**: ${aliasReportPath}` : "",
         "",
         parsed.content.trim(),
       ]
@@ -90,10 +89,6 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
           name: skill.name,
           dir,
           source: skill.source,
-          aliases: aliasAvailability
-            .filter((alias) => alias.matchedSkillName === skill.name)
-            .map((alias) => alias.capability),
-          aliasReportPath,
         },
       }
     },

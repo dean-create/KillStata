@@ -101,7 +101,7 @@ Mark todos as completed as you finish each step.
 
 - Use the Task tool with specialized agents for codebase exploration
 - Prefer Python with pandas, statsmodels, linearmodels for econometric analysis
-- Before spreadsheet-heavy or CSV-heavy work, prefer installed project skills such as `xlsx` and `csv-data-summarizer` when available.
+- If a relevant skill is installed (check the skill tool's available_skills), load it for step-by-step guidance before a complex task. Do not assume any particular skill exists.
 - Use matplotlib/seaborn for publication-quality figures
 - Save analysis results to files rather than just printing
 - Execute code to verify results before reporting
