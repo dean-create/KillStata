@@ -1,0 +1,20 @@
+{
+  "_source": "Card, D. (1995) 'Using Geographic Variation in College Proximity to Estimate the Return to Schooling', in Aspects of Labour Market Behaviour (NBER). 数据取自 linearmodels.datasets.card。",
+  "_why_this_dataset": "IV/2SLS 的教科书标准案例：教育内生（能力偏误），用『家附近有四年制大学』作工具变量。已发表结论是 IV 估计的教育回报显著高于 OLS。",
+  "_provenance": "期望值由 linearmodels 7.0 / statsmodels 直接计算得出（见 script 注释），并与已发表结论交叉核对：OLS≈7%、IV≈13%，方向与量级吻合。",
+  "n": 3010,
+  "dependent": "lwage",
+  "endogenous": "educ",
+  "instrument": "nearc4",
+  "controls": [
+    "exper",
+    "expersq",
+    "black",
+    "south",
+    "smsa"
+  ],
+  "ols_educ_coefficient": 0.07400898928105001,
+  "ols_educ_std_error": 0.0035054349331816973,
+  "iv_educ_coefficient": 0.1322887692695076,
+  "iv_educ_std_error": 0.049175949861614617
+}

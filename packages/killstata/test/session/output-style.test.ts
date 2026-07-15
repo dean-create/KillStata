@@ -12,9 +12,13 @@ describe("session output style", () => {
     const source = fs.readFileSync(SESSION_VIEW, "utf-8")
 
     // 每个铺开正文的 BlockTool 分支都必须挂在 showDetails 门禁后面。
+    // Bash 的正文 key 在 metadata.output，Edit 的在 metadata.diff。
     expect(source).toContain("<Match when={ctx.showDetails() && props.metadata.output !== undefined}>")
-    expect(source).toContain("<Match when={ctx.showDetails() && props.metadata.diagnostics !== undefined}>")
     expect(source).toContain("<Match when={ctx.showDetails() && props.metadata.diff !== undefined}>")
+    // Write 的详情视图挂在 showDetails 本身（LSP 删除后不再有 diagnostics 门禁，
+    // 否则 Write 详情会永不渲染），正文取自 props.input.filePath。
+    expect(source).toContain("<Match when={ctx.showDetails()}>")
+    expect(source).not.toContain("props.metadata.diagnostics")
 
     // 反向断言：不能再出现无门禁的裸展开分支（这正是改造前的写法）。
     expect(source).not.toContain("<Match when={props.metadata.diff !== undefined}>")

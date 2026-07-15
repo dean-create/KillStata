@@ -6,6 +6,7 @@ matplotlib.use("Agg")
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from linearmodels import PanelOLS
+from linearmodels.iv import IV2SLS
 import scipy.stats
 from statsmodels.stats.diagnostic import acorr_breusch_godfrey, het_breuschpagan, het_white
 from statsmodels.stats.outliers_influence import OLSInfluence, variance_inflation_factor
@@ -414,44 +415,48 @@ def IV_2SLS_regression(dependent_variable, treatment_variable, IV_variable, cova
     if covariate_variables is not None:
         covariate_variables = covariate_variables.astype(float)
 
-    # First step regression
-    if covariate_variables is None:
-        first_step_X = IV_variable
-    else:
-        first_step_X = pd.concat([IV_variable, covariate_variables], axis = 1).astype(float)
-    if type(cov_info) == str:
-        first_step_regression = sm.OLS(treatment_variable, sm.add_constant(first_step_X)).fit(cov_type = cov_info)
-    elif list(cov_info.keys())[0] == "HAC":
-        first_step_regression = sm.OLS(treatment_variable, sm.add_constant(first_step_X)).fit(cov_type = "HAC", cov_kwds = {"maxlags": cov_info["HAC"]})
-    elif list(cov_info.keys())[0] == "cluster":
-        first_step_regression = sm.OLS(treatment_variable, sm.add_constant(first_step_X)).fit(cov_type = "cluster", cov_kwds = {"groups": cov_info["cluster"]})
-    predicted_treatment_result = pd.Series(first_step_regression.predict(sm.add_constant(first_step_X)), index = treatment_variable.index)
-    predicted_treatment_result.name = treatment_variable.name
+    # 必须用一次性的 IV2SLS 估计，不能手工跑「第一阶段拟合 -> 第二阶段 OLS」。
+    #
+    # 手工两阶段算出的**系数是对的**，但**标准误是错的**：第二阶段的 OLS 把拟合值
+    # predicted_treatment 当成了一个普通的、没有误差的回归元，用它算残差；而正确的 IV
+    # 方差必须基于**原始**内生变量的残差。这会让标准误偏离真值（Card 1995 数据上偏 +2.55%），
+    # 进而算错 t 值和显著性 —— 系数看着对，结论却可能反过来。
+    # 用 Card (1995) 复现测试验证：见 test/tool/iv-golden.test.ts。
+    exog = None if covariate_variables is None else sm.add_constant(covariate_variables)
+    if exog is None:
+        exog = pd.DataFrame({"const": 1.0}, index = dependent_variable.index)
 
-    # Second step regression
-    if covariate_variables is None:
-        second_step_X = predicted_treatment_result
-    else:
-        second_step_X = pd.concat([predicted_treatment_result, covariate_variables], axis = 1).astype(float)
-    if type(cov_info) == str:
-        second_step_regression = sm.OLS(dependent_variable, sm.add_constant(second_step_X)).fit(cov_type = cov_info)
-    elif list(cov_info.keys())[0] == "HAC":
-        second_step_regression = sm.OLS(dependent_variable, sm.add_constant(second_step_X)).fit(cov_type = "HAC", cov_kwds = {"maxlags": cov_info["HAC"]})
-    elif list(cov_info.keys())[0] == "cluster":
-        second_step_regression = sm.OLS(dependent_variable, sm.add_constant(second_step_X)).fit(cov_type = "cluster", cov_kwds = {"groups": cov_info["cluster"]})        
+    endog = treatment_variable.to_frame() if isinstance(treatment_variable, pd.Series) else treatment_variable
+    instruments = IV_variable.to_frame() if isinstance(IV_variable, pd.Series) else IV_variable
 
-    # Output the table if required. ATE is the coefficient of the predicted treatment variable
-    print("Estimated ATE: ", second_step_regression.params[predicted_treatment_result.name])
+    model = IV2SLS(dependent_variable, exog, endog, instruments)
+
+    # 把本函数的 cov_info 约定映射到 linearmodels 的协方差类型。
+    if type(cov_info) == str:
+        if cov_info == "nonrobust":
+            iv_regression = model.fit(cov_type = "unadjusted")
+        else:
+            # HC0/HC1/HC2/HC3 在 IV 场景下统一为异方差稳健。
+            iv_regression = model.fit(cov_type = "robust")
+    elif list(cov_info.keys())[0] == "HAC":
+        iv_regression = model.fit(cov_type = "kernel", bandwidth = cov_info["HAC"])
+    elif list(cov_info.keys())[0] == "cluster":
+        iv_regression = model.fit(cov_type = "clustered", clusters = cov_info["cluster"])
+
+    treatment_name = endog.columns[0]
+
+    # Output the table if required. ATE is the coefficient of the endogenous treatment variable
+    print("Estimated ATE: ", iv_regression.params[treatment_name])
     if output_tables is True:
-        print(second_step_regression.summary())
+        print(iv_regression.summary)
 
     # Return evaluation metric if needed
     if target_type == "neg_pvalue":
-        return -second_step_regression.pvalues[predicted_treatment_result.name]
+        return -iv_regression.pvalues[treatment_name]
     elif target_type == "rsquared":
-        return second_step_regression.rsquared_adj
+        return iv_regression.rsquared_adj
     elif target_type == "final_model":
-        return second_step_regression
+        return iv_regression
     
 def IV_2SLS_IV_setting_test(dependent_variable, treatment_variable, IV_variable, covariate_variables, cov_type = None):
 

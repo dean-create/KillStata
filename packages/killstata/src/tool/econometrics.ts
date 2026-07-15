@@ -11,12 +11,9 @@ import { Question } from "../question"
 import {
   buildFileStamp,
   appendArtifact,
-  finalOutputsPath,
   inferRunId,
   projectErrorsRoot,
   projectTempRoot,
-  publishDatasetLevelOutput,
-  publishDeliveryOutput,
   publishVisibleOutput,
   reportOutputPath,
   resolveArtifactInput,
@@ -1700,6 +1697,8 @@ def infer_dtype_family(series):
     return "categorical"
 
 def integer_like(series):
+    if is_bool_dtype(series):
+        return True
     if not is_numeric_dtype(series):
         return False
     sample = series.dropna()
@@ -2545,6 +2544,16 @@ def scalar_coefficient_table(term, coefficient=None, std_error=None, p_value=Non
         "ci_upper": None if ci_upper is None else float(ci_upper),
     }])
 
+def model_std_errors(model):
+    # statsmodels 叫 bse，linearmodels 叫 std_errors。IV 已迁到 linearmodels 的 IV2SLS，
+    # 直接取 model.bse 会 AttributeError。
+    errors = getattr(model, "std_errors", None)
+    if errors is None:
+        errors = getattr(model, "bse", None)
+    if errors is None:
+        raise AttributeError("model exposes neither std_errors nor bse")
+    return errors
+
 def model_coefficient_table(model):
     if model is None or not hasattr(model, "params"):
         return empty_coefficient_table()
@@ -3065,7 +3074,7 @@ try:
         result = {
             "success": True,
             "coefficient": float(model.params[treatment_var.name]),
-            "std_error": float(model.bse[treatment_var.name]),
+            "std_error": float(model_std_errors(model)[treatment_var.name]),
             "p_value": float(model.pvalues[treatment_var.name]),
             "r_squared": float(model.rsquared_adj),
             "method": "OLS",
@@ -3176,7 +3185,7 @@ try:
         result = {
             "success": True,
             "coefficient": float(model.params[treatment_var.name]),
-            "std_error": float(model.bse[treatment_var.name]),
+            "std_error": float(model_std_errors(model)[treatment_var.name]),
             "p_value": float(model.pvalues[treatment_var.name]),
             "method": "IV-2SLS",
         }
@@ -3273,7 +3282,7 @@ try:
         result = {
             "success": True,
             "late": float(model.params[primary_term]),
-            "std_error": float(model.bse[primary_term]),
+            "std_error": float(model_std_errors(model)[primary_term]),
             "p_value": float(model.pvalues[primary_term]),
             "method": "Sharp RDD",
         }
@@ -3331,7 +3340,7 @@ try:
         result = {
             "success": True,
             "coefficient": float(model.params[treatment_var.name]),
-            "std_error": float(model.bse[treatment_var.name]),
+            "std_error": float(model_std_errors(model)[treatment_var.name]),
             "p_value": float(model.pvalues[treatment_var.name]),
             "method": "PS regression adjustment",
         }
@@ -3354,7 +3363,7 @@ try:
         result = {
             "success": True,
             "coefficient": float(model.params[treatment_var.name]),
-            "std_error": float(model.bse[treatment_var.name]),
+            "std_error": float(model_std_errors(model)[treatment_var.name]),
             "p_value": float(model.pvalues[treatment_var.name]),
             "method": "Double robust IPW-RA",
         }
@@ -3430,7 +3439,7 @@ try:
         result = {
             "success": True,
             "late": float(model.params[primary_term]),
-            "std_error": float(model.bse[primary_term]),
+            "std_error": float(model_std_errors(model)[primary_term]),
             "p_value": float(model.pvalues[primary_term]),
             "method": "Fuzzy RDD global polynomial",
         }
@@ -3556,6 +3565,10 @@ try:
         result["effective_covariance"] = effective_covariance
         result["degraded_from"] = degraded_from
         result["decision_trace"] = decision_trace
+        # 样本量此前只写进了 metadata，没写进 result，而 TS 侧读的是 result.rows_used ——
+        # 结果是 OLS/DID/IV/PSM/RDD 这些走本后端的方法全都不报 N。N 是论文必报的数字。
+        if result.get("rows_used") is None:
+            result["rows_used"] = int(getattr(model, "nobs", len(dependent_var)))
     metadata = {
         "method": method,
         "backend": "econometric_algorithm",
@@ -3796,7 +3809,7 @@ except Exception as e:
     }
 
     const publishedFiles: EconometricsPublishedFile[] = []
-    let deliveryBundlePath: string | undefined
+    const deliveryBundlePath: string | undefined = undefined
 
     let numericSnapshot: NumericSnapshotDocument | undefined
     if (result.output_path) {
@@ -3851,13 +3864,6 @@ except Exception as e:
       "utf-8",
     )
 
-    result.final_analysis_workbook_path = await generateFinalAnalysisWorkbook({
-      dataPath,
-      outputDir,
-      pythonCommand,
-      methodName: params.methodName,
-    })
-
     if (datasetManifest) {
       appendArtifact(datasetManifest, {
         artifactId: `${params.methodName}_${Date.now()}`,
@@ -3894,57 +3900,6 @@ except Exception as e:
       // 是因为留痕的价值恰恰在于它不依赖任何人记得——包括模型。
       const logPath = refreshExperimentLog(datasetManifest.datasetId)
       if (logPath) result.experiment_log_path = logPath
-    }
-
-    const stageKey = params.stageId ?? sourceStage?.stageId ?? result.stage_id ?? "stage"
-    const publish = (key: string, label: string, sourcePath: string | undefined, fileName: string) => {
-      if (!sourcePath) return
-      const visiblePath = publishDeliveryOutput({
-        manifest: datasetManifest,
-        contextSourcePath: dataPath,
-        datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
-        key: `${key}_${stageKey}`,
-        label,
-        sourcePath,
-        runId: effectiveRunId,
-        branch: "delivery",
-        stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
-        fileName,
-        metadata: {
-          method: params.methodName,
-          deliveryKind: label,
-        },
-      })
-      deliveryBundlePath ??= path.dirname(visiblePath)
-      publishedFiles.push({
-        label,
-        relativePath: relativeWithinProject(visiblePath),
-      })
-    }
-
-    publish(
-      `${params.methodName}_delivery_summary`,
-      `${params.methodName}_delivery_summary`,
-      conciseResultPath,
-      `回归结果_${sanitizeDeliveryFilePart(params.methodName)}.md`,
-    )
-    publish(
-      `${params.methodName}_analysis_workbook`,
-      `${params.methodName}_analysis_workbook`,
-      result.final_analysis_workbook_path,
-      `计量分析数据_${sanitizeDeliveryFilePart(params.methodName)}.xlsx`,
-    )
-    // 实验日志必须放到用户看得见的地方——一份埋在 .killstata 深处的日志对用户等于不存在。
-    // 用 publishDatasetLevelOutput 而不是上面的 publish()：日志是整个数据集的累积轨迹，
-    // 每次回归都重建成"截至目前的全部实验"，只该有最新的一份（详见该函数的注释）。
-    if (result.experiment_log_path) {
-      publishDatasetLevelOutput({
-        manifest: datasetManifest,
-        contextSourcePath: dataPath,
-        runId: effectiveRunId,
-        sourcePath: result.experiment_log_path,
-        fileName: "实验日志.md",
-      })
     }
 
     if (result.output_path) {
@@ -4017,14 +3972,6 @@ except Exception as e:
       output += `Published files:\n`
       for (const item of publishedFiles) output += `- ${item.relativePath}\n`
     }
-    if (hasSignificantRegressionResult(result)) {
-      if (result.journal_paper_docx_path) {
-        output += `\n已按用户确认生成期刊格式小论文 Word。\n`
-      } else {
-        output += `\n本次回归结果在常用统计水平上显著。是否需要我基于这次结果继续生成期刊格式小论文 Word？\n`
-      }
-    }
-
     output += `\nResults directory: ${relativeWithinProject(outputDir)}/\n`
 
     const metadata: EconometricsToolMetadata = {
@@ -4043,10 +3990,6 @@ except Exception as e:
       outputDir: relativeWithinProject(outputDir),
       deliveryBundleDir: deliveryBundlePath ? relativeWithinProject(deliveryBundlePath) : undefined,
       publishedFiles,
-      finalOutputsPath:
-        publishedFiles.length ? relativeWithinProject(finalOutputsPath(dataPath, effectiveRunId)) : undefined,
-      internalFinalOutputsPath:
-        publishedFiles.length ? relativeWithinProject(finalOutputsPath(dataPath, effectiveRunId)) : undefined,
       presentation: buildEconometricsPresentation({
         params,
         result,
@@ -4153,4 +4096,3 @@ except Exception as e:
     }
   },
 }))
-
