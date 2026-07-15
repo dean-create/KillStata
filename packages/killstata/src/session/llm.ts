@@ -61,20 +61,18 @@ export namespace LLM {
       modelID: input.model.id,
       providerID: input.model.providerID,
     })
-    const [language, cfg, provider, auth] = await Promise.all([
+    const [language, cfg, provider] = await Promise.all([
       Provider.getLanguage(input.model),
       Config.get(),
       Provider.getProvider(input.model.providerID),
-      Auth.get(input.model.providerID),
     ])
-    const isCodex = provider.id === "openai" && auth?.type === "oauth"
 
     const system = SystemPrompt.header(input.model.providerID)
     system.push(
       [
         // use agent prompt otherwise provider prompt
         // For Codex sessions, skip SystemPrompt.provider() since it's sent via options.instructions
-        ...(input.agent.prompt ? [input.agent.prompt] : isCodex ? [] : SystemPrompt.provider(input.model)),
+        ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
         ...SystemPrompt.agent(input.agent),
         // any custom prompt passed into this call
         ...input.system,
@@ -123,9 +121,6 @@ export namespace LLM {
       mergeDeep(input.agent.options),
       mergeDeep(variant),
     )
-    if (isCodex) {
-      options.instructions = SystemPrompt.instructions()
-    }
 
     const params = await Plugin.trigger(
       "chat.params",
@@ -160,14 +155,12 @@ export namespace LLM {
       },
     )
 
-    const maxOutputTokens = isCodex
-      ? undefined
-      : ProviderTransform.maxOutputTokens(
-        input.model.api.npm,
-        params.options,
-        input.model.limit.output,
-        OUTPUT_TOKEN_MAX,
-      )
+    const maxOutputTokens = ProviderTransform.maxOutputTokens(
+      input.model.api.npm,
+      params.options,
+      input.model.limit.output,
+      OUTPUT_TOKEN_MAX,
+    )
 
     const tools = await resolveTools(input)
 
@@ -251,19 +244,12 @@ export namespace LLM {
       },
       maxRetries: input.retries ?? 0,
       messages: [
-        ...(isCodex
-          ? [
-            {
-              role: "user",
-              content: system.join("\n\n"),
-            } as ModelMessage,
-          ]
-          : system.map(
-            (x): ModelMessage => ({
-              role: "system",
-              content: x,
-            }),
-          )),
+        ...system.map(
+          (x): ModelMessage => ({
+            role: "system",
+            content: x,
+          }),
+        ),
         ...input.messages,
       ],
       model: wrapLanguageModel({

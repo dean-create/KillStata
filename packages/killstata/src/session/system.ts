@@ -2,13 +2,9 @@
 import { Instance } from "../project/instance"
 import type { MessageV2 } from "./message-v2"
 
-import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
 import PROMPT_GENERIC from "./prompt/qwen.txt"
 import PROMPT_DEEPSEEK from "./prompt/deepseek.txt"
-import PROMPT_BEAST from "./prompt/beast.txt"
-import PROMPT_GEMINI from "./prompt/gemini.txt"
 
-import PROMPT_CODEX from "./prompt/codex_header.txt"
 import type { Provider } from "@/provider/provider"
 import { Flag } from "@/flag/flag"
 import type { Agent } from "@/agent/agent"
@@ -81,14 +77,11 @@ You are operating as an econometric analysis assistant. When working with data:
    - If the user explicitly asks for raw content, complete logs, full schema, or all output paths, you may switch to detailed mode for that request only.
 9. Reproducibility:
    - Save outputs under analysis/<method>/ or analysis/datasets/<datasetId>/ and report file paths clearly.
-10. Econometric delivery bundle:
-   - After one complete econometric analysis run, the user-facing killstata_output_YYYYMMDD_HHMM folder must contain exactly four default files.
-   - The required four default files are: 回归结果_<method>.md, 三线表_<method>.tex, 三线表_<method>.docx, and 计量分析数据_<method>.xlsx.
-   - Do not generate 期刊小论文_<method>.docx by default.
-   - If the regression result is significant at a conventional level, ask the user whether to generate the journal-style paper Word file.
-   - Only generate and publish 期刊小论文_<method>.docx after explicit user confirmation, for example with options.generateJournalPaper=true.
-   - Do not add diagnostics JSON, metadata JSON, numeric snapshots, coefficient CSV/XLSX, raw results JSON, or auxiliary tables to the user-facing delivery bundle; keep those in .killstata.
-   - Prefer reporting the delivery bundle path and these four default files to the user after econometric completion.
+10. Default delivery:
+   - The default product is a concise in-chat conclusion: method, key estimates, diagnostics, limitations, and the next sensible step.
+   - Keep reproducibility artifacts inside .killstata. Do not list internal paths or formats unless the user asks for them.
+   - Do not proactively advertise or generate Word, LaTeX, Excel workbooks, papers, slides, or delivery bundles.
+   - An export is an explicit user request, not a post-analysis upsell. Never offer a paper merely because a coefficient is significant.
 
 ## Method Selection Protocol
 When user describes a research question, determine the appropriate method:
@@ -115,7 +108,6 @@ When user describes a research question, determine the appropriate method:
 
 ## Tool Integration
 - Use the econometrics tool for method-specific analysis
-- Use 'research_brief' before estimation when the user is still shaping the topic, theory, design alternatives, or data plan.
 - Prefer econometrics methodName="smart_baseline" for vague baseline-regression requests that do not specify a concrete estimator.
 - Prefer econometrics methodName="auto_recommend" when the user asks for recommendation only and does not want execution yet.
 - When the user explicitly requests a named estimator, keep that estimator unless it is not executable; if you rescue to another baseline, explain the change explicitly.
@@ -126,7 +118,6 @@ When user describes a research question, determine the appropriate method:
 - For unsupported but legitimate statistical tasks such as PCA, factor analysis, custom plots, or one-off diagnostics, use bash/shell to run a small Python script after permission instead of asking the user to run it manually.
 - Do not tell the user that killstata cannot run Python merely because there is no tool literally named "python"; use the available dedicated tools or shell execution path.
 - Use 'heterogeneity_runner' only after a baseline result exists and only when subgroup or mechanism variables are explicit.
-- Use 'paper_draft' and 'slide_generator' only from saved structured artifacts; never report unsupported numbers from memory in those stages.
 - Use the data_import tool for data preprocessing and QA
 - Save every intermediate dataset and audit file when cleaning data
 - Intermediate datasets should be Parquet stages; inspection files should be CSV/XLSX
@@ -202,28 +193,15 @@ export namespace SystemPrompt {
     return []
   }
 
-  export function instructions() {
-    return PROMPT_CODEX.trim()
-  }
-
+  // provider 已锁定为 deepseek + custom 两家（见 provider/model-policy.ts），用户根本连不上
+  // gpt / gemini / claude。原先按这些模型 id 分支的 codex/beast/gemini/anthropic prompt
+  // 全是死路由，已删除。现在只有两条真实路径：
+  //   - deepseek → 针对它调优的人格 prompt（工具 JSON 纪律、数字只读不背）
+  //   - custom（qwen / kimi / glm / 本地 vLLM）→ 通用人格 prompt
+  // 计量方法学不写在这里——它统一由 ECONOMETRICS_CONTEXT 提供，避免多份决策树各自漂移。
   export function provider(model: Provider.Model) {
-    let basePrompt: string
-    // DeepSeek is the default (and only built-in) provider, so it gets a prompt tuned for its
-    // known weak spots: tool-argument JSON discipline and grounding numbers in artifacts.
-    if (model.providerID === "deepseek" || model.api.id.includes("deepseek")) {
-      basePrompt = PROMPT_DEEPSEEK
-    } else if (model.api.id.includes("gpt-5")) {
-      basePrompt = PROMPT_CODEX
-    } else if (model.api.id.includes("gpt-") || model.api.id.includes("o1") || model.api.id.includes("o3")) {
-      basePrompt = PROMPT_BEAST
-    } else if (model.api.id.includes("gemini-")) {
-      basePrompt = PROMPT_GEMINI
-    } else if (model.api.id.includes("claude")) {
-      basePrompt = PROMPT_ANTHROPIC
-    } else {
-      basePrompt = PROMPT_GENERIC
-    }
-
+    const isDeepSeek = model.providerID === "deepseek" || model.api.id.includes("deepseek")
+    const basePrompt = isDeepSeek ? PROMPT_DEEPSEEK : PROMPT_GENERIC
     return [basePrompt, ECONOMETRICS_CONTEXT]
   }
 

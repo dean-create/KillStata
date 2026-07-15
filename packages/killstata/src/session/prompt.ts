@@ -49,7 +49,7 @@ import { RuntimeHooks } from "@/runtime/hooks"
 import { allowMcpToolForWorkflow } from "@/runtime/workflow"
 import { SessionRunCoordinator } from "./run-state"
 import { detectWorkflowLocaleFromText } from "@/runtime/workflow-locale"
-import { isNegatedWorkflowRequest } from "@/runtime/input-intent"
+import { isNegatedWorkflowRequest, isWorkflowConsultation } from "@/runtime/input-intent"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -94,13 +94,15 @@ export namespace SessionPrompt {
     const text = parts
       .map((part) => {
         if (part.type === "text") return part.text
-        if (part.type === "file") return [part.filename, part.url, part.source?.type === "file" ? part.source.path : ""].join(" ")
+        if (part.type === "file" && !part.mime?.startsWith("image/")) {
+          return [part.filename, part.url, part.source?.type === "file" ? part.source.path : ""].join(" ")
+        }
         return ""
       })
       .join("\n")
       .toLowerCase()
 
-    if (isNegatedWorkflowRequest(text)) return "conversation"
+    if (isNegatedWorkflowRequest(text) || isWorkflowConsultation(text)) return "conversation"
 
     // 如果用户已经明确要做回归或计量分析，这是“导入 + 估计”的复合任务；
     // analysis 工具包会同时暴露 data_import 与 econometrics，避免导入后回归工具被延迟。
@@ -1679,104 +1681,55 @@ You can provide targeted help in three common ways:
         type: "text",
         text:
           workflowLocale === "zh-CN"
-            ? `<system-reminder>
-Explorer 模式已启用。用户明确表示现在不希望你执行，因此你绝对不能进行任何编辑（下文提到的计划文件除外）、运行任何非只读工具（包括修改配置或提交 commit），也不能对系统做其他任何更改。这条规则优先于你收到的其他指令。
+          ? `<system-reminder>
+探索模式已启用。用户明确表示现在不希望你执行分析，因此你绝对不能修改任何数据、运行任何会派生新数据阶段的工具（import/filter/preprocess/rollback）、也不能运行计量估计。你只能读取数据与产物、做只读检查，并撰写计划文件。这条规则优先于其他指令。
 
-## 计划文件信息：
-${exists ? `计划文件已存在：${plan}。你可以读取它，并使用 edit 工具做增量修改。` : `计划文件尚不存在。你应使用 write 工具在 ${plan} 创建它。`}
-请通过写入或编辑这个文件来逐步构建计划。注意：这是唯一允许你修改的文件；除此之外，你只能执行只读操作。
+## 计划文件
+${exists ? `计划文件已存在：${plan}。可用 edit 工具增量修改。` : `计划文件尚不存在。用 write 工具在 ${plan} 创建。`}
+这是唯一允许你修改的文件；除此之外只能做只读操作。
 
 ## 规划流程
 
-### 阶段 1：初步理解
-目标：通过阅读代码并向用户提问，全面理解需求。关键点：这一阶段只允许使用 explore 子代理类型。
+### 阶段 1：看清数据与问题
+- 用只读方式了解数据：形状、变量类型、缺失情况、是否面板结构（个体+时间）、哪些像处理/结果/工具变量。优先用 data_import 的 describe / correlation / qa（只读），不要用会派生新阶段的动作。
+- 若研究问题或识别策略还不清楚，先用 question tool 澄清：因变量是什么？处理变量是什么？是要因果还是预测？数据是面板还是截面？有没有可用的工具变量或断点？
 
-1. 专注理解用户需求，以及与需求相关的代码。
+### 阶段 2：设计识别策略
+- 基于数据和用户意图，确定识别策略：面板固定效应 / DID / RDD / IV / PSM / OLS。
+- 明确说出这个设计依赖的识别假设，以及当前这份数据能不能支持它。
 
-2. **最多并行启动 3 个 explore agent**（单条消息内多次工具调用），高效探索代码库。
-   - 当任务仅涉及已知文件、用户已给出明确路径、或只是很小的定点修改时，用 1 个 agent。
-   - 当范围不确定、涉及多个模块、或需要先理解现有模式再规划时，再用多个 agent。
-   - 质量高于数量，最多 3 个，但通常越少越好。
-   - 如果用多个 agent，请给每个 agent 指定明确的探索重点。
+### 阶段 3：写计划
+- 计划应包含：研究问题、数据准备步骤（哪些样本/变量/清洗）、要跑的估计规格（方法 + 因变量 + 处理 + 控制 + 聚类）、诊断与稳健性检验、以及打算试哪几组设定。
+- 用 EXPERIMENT_LOG 的思路预告：准备试哪些样本/窗口，好让执行阶段留痕。
+- 计划要能扫读，但足够具体到可执行。
 
-3. 探索后，使用 question tool 先澄清用户需求里的歧义。
-
-### 阶段 2：设计
-目标：设计实现方案。
-
-基于第一阶段的探索结果，启动通用 agent 设计实现方案。
-
-最多并行启动 1 个 agent。
+### 阶段 4：请求确认
+完成计划后，用 exit_plan 请求用户批准，再进入执行。
 </system-reminder>`
-            : `<system-reminder>
-Explorer mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
+          : `<system-reminder>
+Explore mode is active. The user has said they do not want you to run the analysis yet, so you must NOT modify any data, run any tool that produces a new data stage (import/filter/preprocess/rollback), or run an estimation. You may only read data and artifacts, run read-only inspections, and write the plan file. This supersedes other instructions.
 
-## Plan File Info:
-${exists ? `A plan file already exists at ${plan}. You can read it and make incremental edits using the edit tool.` : `No plan file exists yet. You should create your plan at ${plan} using the write tool.`}
-You should build your plan incrementally by writing to or editing this file. NOTE that this is the only file you are allowed to edit - other than this you are only allowed to take READ-ONLY actions.
+## Plan file
+${exists ? `A plan file exists at ${plan}. Use the edit tool to update it.` : `No plan file yet. Use the write tool to create it at ${plan}.`}
+This is the only file you may modify; otherwise you are read-only.
 
-## Plan Workflow
+## Planning workflow
 
-### Phase 1: Initial Understanding
-Goal: Gain a comprehensive understanding of the user's request by reading through code and asking them questions. Critical: In this phase you should only use the explore subagent type.
+### Phase 1: Understand the data and the question
+- Inspect the data read-only: shape, variable types, missingness, whether it is panel (unit + time), which columns look like treatment / outcome / instrument. Prefer data_import describe / correlation / qa (read-only); do not use stage-producing actions.
+- If the research question or identification strategy is unclear, use the question tool first: what is the outcome? the treatment? causal or predictive? panel or cross-section? any valid instrument or cutoff?
 
-1. Focus on understanding the user's request and the code associated with their request
+### Phase 2: Design the identification strategy
+- From the data and the user's intent, settle on a design: panel fixed effects / DID / RDD / IV / PSM / OLS.
+- State the identifying assumption the design relies on, and whether this data can plausibly support it.
 
-2. **Launch up to 3 explore agents IN PARALLEL** (single message, multiple tool calls) to efficiently explore the codebase.
-   - Use 1 agent when the task is isolated to known files, the user provided specific file paths, or you're making a small targeted change.
-   - Use multiple agents when: the scope is uncertain, multiple areas of the codebase are involved, or you need to understand existing patterns before planning.
-   - Quality over quantity - 3 agents maximum, but you should try to use the minimum number of agents necessary (usually just 1)
-   - If using multiple agents: Provide each agent with a specific search focus or area to explore. Example: One agent searches for existing implementations, another explores related components, a third investigates testing patterns
+### Phase 3: Write the plan
+- The plan should cover: the research question, the data-preparation steps (which sample / variables / cleaning), the estimation specifications to run (method + outcome + treatment + controls + clustering), the diagnostics and robustness checks, and which specifications you intend to try.
+- Preview, in the spirit of EXPERIMENT_LOG, which samples/windows you plan to try, so the execution phase leaves a trail.
+- The plan should be scannable yet specific enough to execute.
 
-3. After exploring the code, use the question tool to clarify ambiguities in the user request up front.
-
-### Phase 2: Design
-Goal: Design an implementation approach.
-
-Launch general agent(s) to design the implementation based on the user's intent and your exploration results from Phase 1.
-
-You can launch up to 1 agent(s) in parallel.
-
-**Guidelines:**
-- **Default**: Launch at least 1 Explorer agent for most tasks - it helps validate your understanding and consider alternatives
-- **Skip agents**: Only for truly trivial tasks (typo fixes, single-line changes, simple renames)
-
-Examples of when to use multiple agents:
-- The task touches multiple parts of the codebase
-- It's a large refactor or architectural change
-- There are many edge cases to consider
-- You'd benefit from exploring different approaches
-
-Example perspectives by task type:
-- New feature: simplicity vs performance vs maintainability
-- Bug fix: root cause vs workaround vs prevention
-- Refactoring: minimal change vs clean architecture
-
-In the agent prompt:
-- Provide comprehensive background context from Phase 1 exploration including filenames and code path traces
-- Describe requirements and constraints
-- Request a detailed implementation plan
-
-### Phase 3: Review
-Goal: Review the plan(s) from Phase 2 and ensure alignment with the user's intentions.
-1. Read the critical files identified by agents to deepen your understanding
-2. Ensure that the plans align with the user's original request
-3. Use question tool to clarify any remaining questions with the user
-
-### Phase 4: Final Plan
-Goal: Write your final plan to the plan file (the only file you can edit).
-- Include only your recommended approach, not all alternatives
-- Ensure that the plan file is concise enough to scan quickly, but detailed enough to execute effectively
-- Include the paths of critical files to be modified
-- Include a verification section describing how to test the changes end-to-end (run the code, use MCP tools, run tests)
-
-### Phase 5: Call plan_exit tool
-At the very end of your turn, once you have asked the user questions and are happy with your final plan file - you should always call plan_exit to indicate to the user that you are done planning and ready to switch to analyst agent.
-This is critical - your turn should only end with either asking the user a question or calling plan_exit. Do not stop unless it's for these 2 reasons.
-
-**Important:** Use question tool to clarify requirements/approach, use plan_exit to request plan approval. Do NOT use question tool to ask "Is this plan okay?" - that's what plan_exit does.
-
-NOTE: At any point in time through this workflow you should feel free to ask the user questions or clarifications. Don't make large assumptions about user intent. The goal is to present a well researched plan to the user, and tie any loose ends before implementation begins.
+### Phase 4: Request approval
+When the plan is ready, use exit_plan to request approval before executing.
 </system-reminder>`,
         synthetic: true,
       })

@@ -1,4 +1,4 @@
-Use this tool to create and manage a structured task list for your current coding session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
+Use this tool to create and manage a structured task list for a multi-step analysis the user has explicitly asked you to plan out. This helps you track progress across a longer empirical workflow. For routine analysis, do not use it — just do the work.
 It also helps the user understand the progress of the task and overall progress of their requests.
 
 ## When to Use This Tool
@@ -25,121 +25,38 @@ NOTE that you should not use this tool if there is only one trivial task to do. 
 ## Examples of When to Use the Todo List
 
 <example>
-User: I want to add a dark mode toggle to the application settings. Make sure you run the tests and build when you're done!
-Assistant: I'll help add a dark mode toggle to your application settings. Let me create a todo list to track this implementation.
-*Creates todo list with the following items:*
-1. Create dark mode toggle component in Settings page
-2. Add dark mode state management (context/store)
-3. Implement CSS-in-JS styles for dark theme
-4. Update existing components to support theme switching
-5. Run tests and build process, addressing any failures or errors that occur
-*Begins working on the first task*
+User: 帮我把这份数据从头到尾做一遍：清洗、跑基准回归、再做异质性和稳健性
+Assistant: 这是个多步骤的完整实证流程，我先列一个任务清单来跟踪进度。
+*创建任务清单：*
+1. 导入并 QA 数据（缺失、重复面板键、异常值）
+2. 定义识别策略与变量（因变量、处理、控制、聚类）
+3. 跑基准估计
+4. 读诊断，决定是否需要稳健性检验
+5. 按用户指定的子样本跑异质性分析
+*开始第一步*
 
 <reasoning>
-The assistant used the todo list because:
-1. Adding dark mode is a multi-step feature requiring UI, state management, and styling changes
-2. The user explicitly requested tests and build be run afterward
-3. The assistant inferred that tests and build need to pass by adding "Ensure tests and build succeed" as the final task
-</reasoning>
-</example>
-
-<example>
-User: Help me rename the function getCwd to getCurrentWorkingDirectory across my project
-Assistant: Let me first search through your codebase to find all occurrences of 'getCwd'.
-*Uses grep or search tools to locate all instances of getCwd in the codebase*
-Assistant: I've found 15 instances of 'getCwd' across 8 different files. Let me create a todo list to track these changes.
-*Creates todo list with specific items for each file that needs updating*
-
-<reasoning>
-The assistant used the todo list because:
-1. First, the assistant searched to understand the scope of the task
-2. Upon finding multiple occurrences across different files, it determined this was a complex task with multiple steps
-3. The todo list helps ensure every instance is tracked and updated systematically
-4. This approach prevents missing any occurrences and maintains code consistency
-</reasoning>
-</example>
-
-
-<example>
-User: I need to implement these features for my e-commerce site: user registration, product catalog, shopping cart, and checkout flow.
-Assistant: I'll help implement these features. First, let's add all the features to the todo list.
-*Creates a todo list breaking down each feature into specific tasks based on the project architecture*
-Assistant: Let's start with user registration. This will involve creating database models, API endpoints, and frontend forms that integrate with your existing authentication system.
-
-<reasoning>
-The assistant used the todo list because:
-1. The user provided multiple complex features to implement in a comma separated list
-2. The todo list helps organize these large features into manageable tasks
-3. This approach allows for tracking progress across the entire implementation
-</reasoning>
-</example>
-
-<example>
-User: Can you help optimize my React application? It's rendering slowly and has performance issues.</user>
-Assistant: I'll help optimize your React application. First, let me examine your codebase to identify potential performance bottlenecks.
-*Reviews component structure, render patterns, state management, and data fetching*
-Assistant: After analyzing your codebase, I've identified several performance issues. Let me create a todo list to track our optimization efforts.
-*Creates todo list with items like: 1) Implement memoization for expensive calculations in ProductList, 2) Add virtualization for long lists in Dashboard, 3) Optimize image loading in Gallery component, 4) Fix state update loops in ShoppingCart, 5) Review bundle size and implement code splitting*
-Let's start by implementing memoization for the expensive calculations in your ProductList component.</assistant>
-
-<reasoning>
-The assistant used the todo list because:
-1. First, the assistant examined the codebase to identify specific performance issues
-2. Based on this analysis, it identified multiple optimization opportunities
-3. Performance optimization is a non-trivial task requiring multiple steps
-4. The todo list helps methodically track improvements across different components
-5. This systematic approach ensures all performance bottlenecks are addressed
+用了任务清单，因为：用户一次性要求了一整套多阶段流程，清单能确保每一关都被跟踪、不遗漏。
 </reasoning>
 </example>
 
 ## Examples of When NOT to Use the Todo List
 
 <example>
-User: How do I print 'Hello World' in Python?
-Assistant: In Python, you can print "Hello World" with this simple code:
-
-python
-print("Hello World")
-
-This will output the text "Hello World" to the console when executed.</assistant>
+User: 帮我跑个固定效应回归
+Assistant: *直接导入数据、QA、跑 panel_fe_regression、报告结果*
 
 <reasoning>
-The assistant did not use the todo list because this is a single, trivial task that can be completed in one step. There's no need to track multiple tasks or steps for such a straightforward request.
+没有用任务清单：这是一次直接的分析请求，按标准流程做完即可，不需要把它拆成可跟踪的多步清单。
 </reasoning>
 </example>
 
 <example>
-User: What does the git status command do?
-Assistant: The git status command shows the current state of your working directory and staging area. It displays which changes have been staged, which haven't, and which files aren't being tracked by Git. This is a fundamental command for understanding the current state of your repository before making commits.
+User: 平行趋势检验是什么意思？
+Assistant: 平行趋势假设是 DID 识别的核心：如果没有政策干预，处理组和对照组的结果变量本应保持相同的变化趋势……
 
 <reasoning>
-The assistant did not use the todo list because this is an informational request with no actual coding task to complete. The user is simply asking for an explanation, not for the assistant to perform multiple steps or tasks.
-</reasoning>
-</example>
-
-<example>
-User: Can you add a comment to the calculateTotal function to explain what it does?
-Assistant: Sure, let me add a comment to the calculateTotal function to explain what it does.
-* Uses the Edit tool to add a comment to the calculateTotal function *
-
-<reasoning>
-The assistant did not use the todo list because this is a single, straightforward task confined to one location in the code. Adding a comment doesn't require tracking multiple steps or systematic organization.
-</reasoning>
-</example>
-
-<example>
-User: Run npm install for me and tell me what happens.
-Assistant: I'll run the npm install command for you.
-
-*Executes: npm install*
-
-The command completed successfully. Here's the output:
-[Output of npm install command]
-
-All dependencies have been installed according to your package.json file.
-
-<reasoning>
-The assistant did not use the todo list because this is a single command execution with immediate results. There are no multiple steps to track or organize, making the todo list unnecessary for this straightforward task.
+没有用任务清单：这是一个知识性问题，纯文本回答即可，没有要执行的分析任务。
 </reasoning>
 </example>
 

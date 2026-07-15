@@ -174,7 +174,7 @@ export namespace Agent {
           }),
           user,
         ),
-        description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
+        description: `Fast agent specialized for exploring a dataset and the working directory. Use it to quickly find data files by pattern (eg. "**/*.xlsx"), profile a dataset's variables and structure, or answer questions about what data is available and how it is shaped (eg. "is this panel data?", "which columns look like treatment/outcome?"). Specify the desired thoroughness: "quick" for a basic look, "medium" for moderate profiling, or "very thorough" for comprehensive inspection across multiple files and naming conventions.`,
         prompt: PROMPT_EXPLORE,
         options: {},
         mode: "subagent",
@@ -344,21 +344,8 @@ export namespace Agent {
       }),
     } satisfies Parameters<typeof generateObject>[0]
 
-    if (defaultModel.providerID === "openai" && (await Auth.get(defaultModel.providerID))?.type === "oauth") {
-      const result = streamObject({
-        ...params,
-        providerOptions: ProviderTransform.providerOptions(model, {
-          instructions: SystemPrompt.instructions(),
-          store: false,
-        }),
-        onError: () => { },
-      })
-      for await (const part of result.fullStream) {
-        if (part.type === "error") throw part.error
-      }
-      return result.object
-    }
-
+    // 过去这里对 OpenAI Codex OAuth 会话走一条特殊的 streamObject 路径。openai 已不是允许的
+    // provider（只剩 deepseek + custom），这条分支恒不命中，已移除。
     const result = await generateObject(params)
     return result.object
   }
