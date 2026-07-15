@@ -55,14 +55,6 @@ export namespace ShareNext {
         },
       ])
     })
-    Bus.subscribe(Session.Event.Diff, async (evt) => {
-      await sync(evt.properties.sessionID, [
-        {
-          type: "session_diff",
-          data: evt.properties.diff,
-        },
-      ])
-    })
   }
 
   export async function create(sessionID: string) {
@@ -102,10 +94,6 @@ export namespace ShareNext {
     | {
         type: "part"
         data: SDK.Part
-      }
-    | {
-        type: "session_diff"
-        data: SDK.FileDiff[]
       }
     | {
         type: "model"
@@ -169,7 +157,6 @@ export namespace ShareNext {
   async function fullSync(sessionID: string) {
     log.info("full sync", { sessionID })
     const session = await Session.get(sessionID)
-    const diffs = await Session.diff(sessionID)
     const messages = await Array.fromAsync(MessageV2.stream(sessionID))
     const models = await Promise.all(
       messages
@@ -187,10 +174,6 @@ export namespace ShareNext {
         data: x.info,
       })),
       ...messages.flatMap((x) => x.parts.map((y) => ({ type: "part" as const, data: y }))),
-      {
-        type: "session_diff",
-        data: diffs,
-      },
       {
         type: "model",
         data: models,

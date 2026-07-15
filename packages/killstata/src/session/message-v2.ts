@@ -5,7 +5,6 @@ import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessag
 import type { JSONValue, SharedV2ProviderMetadata } from "@ai-sdk/provider"
 import { Identifier } from "../id/id"
 import { LSP } from "../lsp"
-import { Snapshot } from "@/snapshot"
 import { fn } from "@/util/fn"
 import { Storage } from "@/storage/storage"
 import { ProviderTransform } from "@/provider/transform"
@@ -388,7 +387,6 @@ export namespace MessageV2 {
       .object({
         title: z.string().optional(),
         body: z.string().optional(),
-        diffs: Snapshot.FileDiff.array(),
       })
       .optional(),
     agent: z.string(),

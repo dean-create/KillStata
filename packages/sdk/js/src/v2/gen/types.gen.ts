@@ -84,14 +84,6 @@ export type EventFileEdited = {
   }
 }
 
-export type FileDiff = {
-  file: string
-  before: string
-  after: string
-  additions: number
-  deletions: number
-}
-
 export type UserMessage = {
   id: string
   sessionID: string
@@ -102,7 +94,6 @@ export type UserMessage = {
   summary?: {
     title?: string
     body?: string
-    diffs: Array<FileDiff>
   }
   agent: string
   model: {
@@ -514,6 +505,14 @@ export type EventPermissionReplied = {
   }
 }
 
+export type FileDiff = {
+  file: string
+  before: string
+  after: string
+  additions: number
+  deletions: number
+}
+
 export type PermissionAction = "allow" | "deny" | "ask"
 
 export type PermissionRule = {
@@ -551,8 +550,11 @@ export type Session = {
   revert?: {
     messageID: string
     partID?: string
-    snapshot?: string
-    diff?: string
+    dataset?: {
+      datasetId: string
+      stageId: string
+      undoneAction: string
+    }
   }
 }
 
@@ -684,6 +686,77 @@ export type EventCommandExecuted = {
     sessionID: string
     arguments: string
     messageID: string
+  }
+}
+
+export type QuestionOption = {
+  /**
+   * Display text (1-5 words, concise)
+   */
+  label: string
+  /**
+   * Explanation of choice
+   */
+  description: string
+}
+
+export type QuestionInfo = {
+  /**
+   * Complete question
+   */
+  question: string
+  /**
+   * Very short label (max 30 chars)
+   */
+  header: string
+  /**
+   * Available choices
+   */
+  options: Array<QuestionOption>
+  /**
+   * Allow selecting multiple choices
+   */
+  multiple?: boolean
+  /**
+   * Allow typing a custom answer (default: true)
+   */
+  custom?: boolean
+}
+
+export type QuestionRequest = {
+  id: string
+  sessionID: string
+  /**
+   * Questions to ask
+   */
+  questions: Array<QuestionInfo>
+  tool?: {
+    messageID: string
+    callID: string
+  }
+}
+
+export type EventQuestionAsked = {
+  type: "question.asked"
+  properties: QuestionRequest
+}
+
+export type QuestionAnswer = Array<string>
+
+export type EventQuestionReplied = {
+  type: "question.replied"
+  properties: {
+    sessionID: string
+    requestID: string
+    answers: Array<QuestionAnswer>
+  }
+}
+
+export type EventQuestionRejected = {
+  type: "question.rejected"
+  properties: {
+    sessionID: string
+    requestID: string
   }
 }
 
@@ -1038,77 +1111,6 @@ export type EventTodoUpdated = {
   }
 }
 
-export type QuestionOption = {
-  /**
-   * Display text (1-5 words, concise)
-   */
-  label: string
-  /**
-   * Explanation of choice
-   */
-  description: string
-}
-
-export type QuestionInfo = {
-  /**
-   * Complete question
-   */
-  question: string
-  /**
-   * Very short label (max 30 chars)
-   */
-  header: string
-  /**
-   * Available choices
-   */
-  options: Array<QuestionOption>
-  /**
-   * Allow selecting multiple choices
-   */
-  multiple?: boolean
-  /**
-   * Allow typing a custom answer (default: true)
-   */
-  custom?: boolean
-}
-
-export type QuestionRequest = {
-  id: string
-  sessionID: string
-  /**
-   * Questions to ask
-   */
-  questions: Array<QuestionInfo>
-  tool?: {
-    messageID: string
-    callID: string
-  }
-}
-
-export type EventQuestionAsked = {
-  type: "question.asked"
-  properties: QuestionRequest
-}
-
-export type QuestionAnswer = Array<string>
-
-export type EventQuestionReplied = {
-  type: "question.replied"
-  properties: {
-    sessionID: string
-    requestID: string
-    answers: Array<QuestionAnswer>
-  }
-}
-
-export type EventQuestionRejected = {
-  type: "question.rejected"
-  properties: {
-    sessionID: string
-    requestID: string
-  }
-}
-
 export type EventSessionCompacted = {
   type: "session.compacted"
   properties: {
@@ -1146,6 +1148,9 @@ export type Event =
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
   | EventCommandExecuted
+  | EventQuestionAsked
+  | EventQuestionReplied
+  | EventQuestionRejected
   | EventRuntimeQueryState
   | EventRuntimeQueueUpdated
   | EventRuntimeTaskUpdated
@@ -1164,9 +1169,6 @@ export type Event =
   | EventSessionStatus
   | EventSessionIdle
   | EventTodoUpdated
-  | EventQuestionAsked
-  | EventQuestionReplied
-  | EventQuestionRejected
   | EventSessionCompacted
 
 export type GlobalEvent = {
@@ -3163,27 +3165,6 @@ export type SessionShareResponses = {
 
 export type SessionShareResponse = SessionShareResponses[keyof SessionShareResponses]
 
-export type SessionDiffData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    messageID?: string
-  }
-  url: "/session/{sessionID}/diff"
-}
-
-export type SessionDiffResponses = {
-  /**
-   * Successfully retrieved diff
-   */
-  200: Array<FileDiff>
-}
-
-export type SessionDiffResponse = SessionDiffResponses[keyof SessionDiffResponses]
-
 export type SessionSummarizeData = {
   body?: {
     providerID: string
@@ -3286,7 +3267,7 @@ export type SessionPromptData = {
     queueMetadata?: {
       [key: string]: unknown
     }
-    intent?: "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
+    intent?: "conversation" | "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -3479,7 +3460,7 @@ export type SessionPromptAsyncData = {
     queueMetadata?: {
       [key: string]: unknown
     }
-    intent?: "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
+    intent?: "conversation" | "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {

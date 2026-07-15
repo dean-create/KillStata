@@ -2,7 +2,6 @@ import { Identifier } from "@/id/id"
 import { MessageV2 } from "@/session/message-v2"
 import { Session } from "@/session"
 import { SessionStatus } from "@/session/status"
-import { Snapshot } from "@/snapshot"
 import { SessionSummary } from "@/session/summary"
 import { Plugin } from "@/plugin"
 import type { Provider } from "@/provider/provider"
@@ -31,7 +30,6 @@ export class TurnAssembler {
   private toolcalls: Record<string, MessageV2.ToolPart> = {}
   private reasoningMap: Record<string, MessageV2.ReasoningPart> = {}
   private currentText: MessageV2.TextPart | undefined
-  private snapshot: string | undefined
 
   constructor(
     private readonly input: {
@@ -171,12 +169,10 @@ export class TurnAssembler {
       }
 
       case "step-start":
-        this.snapshot = await Snapshot.track()
         await Session.updatePart({
           id: Identifier.ascending("part"),
           messageID: this.input.assistantMessage.id,
           sessionID: this.input.sessionID,
-          snapshot: this.snapshot,
           type: "step-start",
         })
         return
@@ -193,7 +189,6 @@ export class TurnAssembler {
         await Session.updatePart({
           id: Identifier.ascending("part"),
           reason: event.finishReason,
-          snapshot: await Snapshot.track(),
           messageID: this.input.assistantMessage.id,
           sessionID: this.input.assistantMessage.sessionID,
           type: "step-finish",
@@ -201,20 +196,6 @@ export class TurnAssembler {
           cost: usage.cost,
         })
         await Session.updateMessage(this.input.assistantMessage)
-        if (this.snapshot) {
-          const patch = await Snapshot.patch(this.snapshot)
-          if (patch.files.length) {
-            await Session.updatePart({
-              id: Identifier.ascending("part"),
-              messageID: this.input.assistantMessage.id,
-              sessionID: this.input.sessionID,
-              type: "patch",
-              hash: patch.hash,
-              files: patch.files,
-            })
-          }
-          this.snapshot = undefined
-        }
         SessionSummary.summarize({
           sessionID: this.input.sessionID,
           messageID: this.input.assistantMessage.parentID,
@@ -280,21 +261,6 @@ export class TurnAssembler {
       }
       await Session.updatePart(part)
       delete this.reasoningMap[id]
-    }
-
-    if (this.snapshot) {
-      const patch = await Snapshot.patch(this.snapshot)
-      if (patch.files.length) {
-        await Session.updatePart({
-          id: Identifier.ascending("part"),
-          messageID: this.input.assistantMessage.id,
-          sessionID: this.input.sessionID,
-          type: "patch",
-          hash: patch.hash,
-          files: patch.files,
-        })
-      }
-      this.snapshot = undefined
     }
 
     const parts = await MessageV2.parts(this.input.assistantMessage.id)

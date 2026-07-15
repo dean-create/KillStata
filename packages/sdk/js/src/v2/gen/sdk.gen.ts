@@ -90,7 +90,6 @@ import type {
   SessionCreateResponses,
   SessionDeleteErrors,
   SessionDeleteResponses,
-  SessionDiffResponses,
   SessionForkResponses,
   SessionGetErrors,
   SessionGetResponses,
@@ -851,38 +850,6 @@ export class Session extends HeyApiClient {
   }
 
   /**
-   * Get message diff
-   *
-   * Get the file changes (diff) that resulted from a specific user message in the session.
-   */
-  public diff<ThrowOnError extends boolean = false>(
-    parameters: {
-      sessionID: string
-      directory?: string
-      messageID?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "sessionID" },
-            { in: "query", key: "directory" },
-            { in: "query", key: "messageID" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).get<SessionDiffResponses, unknown, ThrowOnError>({
-      url: "/session/{sessionID}/diff",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
    * Summarize session
    *
    * Generate a concise summary of the session using AI compaction to preserve key information.
@@ -981,7 +948,7 @@ export class Session extends HeyApiClient {
       queueMetadata?: {
         [key: string]: unknown
       }
-      intent?: "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
+      intent?: "conversation" | "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
@@ -1079,7 +1046,7 @@ export class Session extends HeyApiClient {
       queueMetadata?: {
         [key: string]: unknown
       }
-      intent?: "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
+      intent?: "conversation" | "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,

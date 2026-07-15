@@ -11,7 +11,6 @@ import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "../../session/todo"
 import { Agent } from "../../agent/agent"
-import { Snapshot } from "@/snapshot"
 import { Log } from "../../util/log"
 import { PermissionNext } from "@/permission/next"
 import { errors } from "../error"
@@ -379,45 +378,6 @@ export const SessionRoutes = lazy(() =>
         await Session.share(sessionID)
         const session = await Session.get(sessionID)
         return c.json(session)
-      },
-    )
-    .get(
-      "/:sessionID/diff",
-      describeRoute({
-        summary: "Get message diff",
-        description: "Get the file changes (diff) that resulted from a specific user message in the session.",
-        operationId: "session.diff",
-        responses: {
-          200: {
-            description: "Successfully retrieved diff",
-            content: {
-              "application/json": {
-                schema: resolver(Snapshot.FileDiff.array()),
-              },
-            },
-          },
-        },
-      }),
-      validator(
-        "param",
-        z.object({
-          sessionID: SessionSummary.diff.schema.shape.sessionID,
-        }),
-      ),
-      validator(
-        "query",
-        z.object({
-          messageID: SessionSummary.diff.schema.shape.messageID,
-        }),
-      ),
-      async (c) => {
-        const query = c.req.valid("query")
-        const params = c.req.valid("param")
-        const result = await SessionSummary.diff({
-          sessionID: params.sessionID,
-          messageID: query.messageID,
-        })
-        return c.json(result)
       },
     )
     .delete(

@@ -1,14 +1,13 @@
 import z from "zod"
 import { Identifier } from "../id/id"
-import { Snapshot } from "../snapshot"
 import { MessageV2 } from "./message-v2"
 import { Session } from "."
+import { RevertDataset } from "./revert-dataset"
 import { Log } from "../util/log"
 import { splitWhen } from "remeda"
 import { Storage } from "../storage/storage"
 import { Bus } from "../bus"
 import { SessionPrompt } from "./prompt"
-import { SessionSummary } from "./summary"
 
 export namespace SessionRevert {
   const log = Log.create({ service: "session.revert" })
@@ -27,17 +26,11 @@ export namespace SessionRevert {
     const session = await Session.get(input.sessionID)
 
     let revert: Session.Info["revert"]
-    const patches: Snapshot.Patch[] = []
     for (const msg of all) {
       if (msg.info.role === "user") lastUser = msg.info
       const remaining = []
       for (const part of msg.parts) {
-        if (revert) {
-          if (part.type === "patch") {
-            patches.push(part)
-          }
-          continue
-        }
+        if (revert) continue
 
         if (!revert) {
           if ((msg.info.id === input.messageID && !input.partID) || part.id === input.partID) {
@@ -54,24 +47,18 @@ export namespace SessionRevert {
     }
 
     if (revert) {
-      const session = await Session.get(input.sessionID)
-      revert.snapshot = session.revert?.snapshot ?? (await Snapshot.track())
-      await Snapshot.revert(patches)
-      if (revert.snapshot) revert.diff = await Snapshot.diff(revert.snapshot)
       const rangeMessages = all.filter((msg) => msg.info.id >= revert!.messageID)
-      const diffs = await SessionSummary.computeDiff({ messages: rangeMessages })
-      await Storage.write(["session_diff", input.sessionID], diffs)
-      Bus.publish(Session.Event.Diff, {
-        sessionID: input.sessionID,
-        diff: diffs,
-      })
+
+      // 撤销 = 把数据退回到这些操作之前的那个阶段。没有动过数据的会话（只是聊天、只跑了
+      // 回归、只看了描述统计）自然找不到目标，此时 /undo 退化为纯粹的消息撤销——这是对的。
+      const target = RevertDataset.findTarget(rangeMessages)
+      if (target) {
+        await RevertDataset.rollback(target, input.sessionID)
+        revert.dataset = target
+      }
+
       return Session.update(input.sessionID, (draft) => {
         draft.revert = revert
-        draft.summary = {
-          additions: diffs.reduce((sum, x) => sum + x.additions, 0),
-          deletions: diffs.reduce((sum, x) => sum + x.deletions, 0),
-          files: diffs.length,
-        }
       })
     }
     return session
@@ -82,7 +69,8 @@ export namespace SessionRevert {
     SessionPrompt.assertNotBusy(input.sessionID)
     const session = await Session.get(input.sessionID)
     if (!session.revert) return session
-    if (session.revert.snapshot) await Snapshot.restore(session.revert.snapshot)
+    // 不需要还原任何文件：数据的回滚本身就是一个新派生的 stage（往前长，不抹历史），
+    // 取消撤销只是把消息放回来。
     const next = await Session.update(input.sessionID, (draft) => {
       draft.revert = undefined
     })

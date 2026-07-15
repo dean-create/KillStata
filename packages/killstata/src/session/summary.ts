@@ -6,13 +6,8 @@ import { Session } from "."
 
 import { MessageV2 } from "./message-v2"
 import { Identifier } from "@/id/id"
-import { Snapshot } from "@/snapshot"
 
 import { Log } from "@/util/log"
-import path from "path"
-import { Instance } from "@/project/instance"
-import { Storage } from "@/storage/storage"
-import { Bus } from "@/bus"
 
 import { LLM } from "./llm"
 import { Agent } from "@/agent/agent"
@@ -27,39 +22,9 @@ export namespace SessionSummary {
     }),
     async (input) => {
       const all = await Session.messages({ sessionID: input.sessionID })
-      await Promise.all([
-        summarizeSession({ sessionID: input.sessionID, messages: all }),
-        summarizeMessage({ messageID: input.messageID, messages: all }),
-      ])
+      await summarizeMessage({ messageID: input.messageID, messages: all })
     },
   )
-
-  async function summarizeSession(input: { sessionID: string; messages: MessageV2.WithParts[] }) {
-    const files = new Set(
-      input.messages
-        .flatMap((x) => x.parts)
-        .filter((x) => x.type === "patch")
-        .flatMap((x) => x.files)
-        .map((x) => path.relative(Instance.worktree, x)),
-    )
-    const diffs = await computeDiff({ messages: input.messages }).then((x) =>
-      x.filter((x) => {
-        return files.has(x.file)
-      }),
-    )
-    await Session.update(input.sessionID, (draft) => {
-      draft.summary = {
-        additions: diffs.reduce((sum, x) => sum + x.additions, 0),
-        deletions: diffs.reduce((sum, x) => sum + x.deletions, 0),
-        files: diffs.length,
-      }
-    })
-    await Storage.write(["session_diff", input.sessionID], diffs)
-    Bus.publish(Session.Event.Diff, {
-      sessionID: input.sessionID,
-      diff: diffs,
-    })
-  }
 
   async function summarizeMessage(input: { messageID: string; messages: MessageV2.WithParts[] }) {
     const messages = input.messages.filter(
@@ -67,12 +32,6 @@ export namespace SessionSummary {
     )
     const msgWithParts = messages.find((m) => m.info.id === input.messageID)!
     const userMsg = msgWithParts.info as MessageV2.User
-    const diffs = await computeDiff({ messages })
-    userMsg.summary = {
-      ...userMsg.summary,
-      diffs,
-    }
-    await Session.updateMessage(userMsg)
 
     const textPart = msgWithParts.parts.find((p) => p.type === "text" && !p.synthetic) as MessageV2.TextPart
     if (textPart && !userMsg.summary?.title) {
@@ -105,46 +64,9 @@ export namespace SessionSummary {
       })
       const result = await stream.text
       log.info("title", { title: result })
-      userMsg.summary.title = result
+      userMsg.summary = { ...userMsg.summary, title: result }
       await Session.updateMessage(userMsg)
     }
   }
 
-  export const diff = fn(
-    z.object({
-      sessionID: Identifier.schema("session"),
-      messageID: Identifier.schema("message").optional(),
-    }),
-    async (input) => {
-      return Storage.read<Snapshot.FileDiff[]>(["session_diff", input.sessionID]).catch(() => [])
-    },
-  )
-
-  export async function computeDiff(input: { messages: MessageV2.WithParts[] }) {
-    let from: string | undefined
-    let to: string | undefined
-
-    // scan assistant messages to find earliest from and latest to
-    // snapshot
-    for (const item of input.messages) {
-      if (!from) {
-        for (const part of item.parts) {
-          if (part.type === "step-start" && part.snapshot) {
-            from = part.snapshot
-            break
-          }
-        }
-      }
-
-      for (const part of item.parts) {
-        if (part.type === "step-finish" && part.snapshot) {
-          to = part.snapshot
-          break
-        }
-      }
-    }
-
-    if (from && to) return Snapshot.diffFull(from, to)
-    return []
-  }
 }

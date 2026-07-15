@@ -83,7 +83,7 @@ const DATA_ACTIONS = [
   "rollback",
 ] as const
 
-type DataAction = (typeof DATA_ACTIONS)[number]
+export type DataAction = (typeof DATA_ACTIONS)[number]
 
 const ANALYST_PRE_APPROVAL_ACTIONS = new Set<DataAction>(["healthcheck", "describe", "correlation", "qa"])
 
@@ -481,7 +481,9 @@ function defaultOutputPath(
   return path.join(dirname, `${basename}_output.parquet`)
 }
 
-function isStageProducingAction(action: DataAction) {
+// 会话回滚（/undo）需要区分"这一步创建了新数据阶段"和"这一步只是读了某个阶段"——
+// qa / describe / correlation 也带 stageId，但它们不产生新数据，不该被当作回滚的锚点。
+export function isStageProducingAction(action: DataAction) {
   return action === "import" || action === "filter" || action === "preprocess" || action === "rollback"
 }
 
