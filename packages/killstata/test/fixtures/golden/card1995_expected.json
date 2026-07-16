@@ -16,5 +16,6 @@
   "ols_educ_coefficient": 0.07400898928105001,
   "ols_educ_std_error": 0.0035054349331816973,
   "iv_educ_coefficient": 0.1322887692695076,
-  "iv_educ_std_error": 0.049175949861614617
+  "iv_educ_std_error": 0.049175949861614617,
+  "iv_educ_robust_std_error": 0.04852133415319151
 }

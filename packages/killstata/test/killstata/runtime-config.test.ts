@@ -46,7 +46,44 @@ describe("killstata.runtime-config home directories", () => {
       installCommand: "python3 -m pip install ...",
     })
 
-    expect(message).toContain("data-analysis engine")
+    expect(message).toBe("KillStata 没能自动准备数据分析环境。请检查网络连接后重试当前分析。")
+    expect(message.replace("KillStata", "")).not.toMatch(/[A-Za-z]{3,}/)
     expect(message).not.toContain("killstata config")
+  })
+
+  test("pins PyFixest in both the managed runtime and the manual repair command", async () => {
+    const { REQUIRED_PYTHON_PACKAGES, pythonInstallCommand, pythonPackageInstallSpecs } = await import(
+      "../../src/killstata/runtime-config"
+    )
+
+    expect(REQUIRED_PYTHON_PACKAGES).toContain("pyfixest")
+    expect(pythonPackageInstallSpecs(["pyfixest"])).toEqual(["pyfixest==0.60.0"])
+    expect(pythonInstallCommand("python3", ["pyfixest"])).toBe(
+      "python3 -m pip install pyfixest==0.60.0",
+    )
+  })
+
+  test("treats an installed but incompatible PyFixest version as missing", async () => {
+    const { checkPythonPackages, probePythonExecutable } = await import(
+      "../../src/killstata/runtime-config"
+    )
+    const probe = probePythonExecutable(process.env.KILLSTATA_PYTHON ?? "python3")
+    expect(probe.ok).toBe(true)
+    if (!probe.ok) return
+    const python = probe.resolved
+
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "killstata-pyfixest-version-"))
+    const packageDir = path.join(root, "pyfixest")
+    fs.mkdirSync(packageDir)
+    fs.writeFileSync(path.join(packageDir, "__init__.py"), "__version__ = '0.59.0'\n", "utf-8")
+    const previous = process.env.PYTHONPATH
+    process.env.PYTHONPATH = previous ? `${root}${path.delimiter}${previous}` : root
+    try {
+      expect(checkPythonPackages(python, ["pyfixest"]).missing).toEqual(["pyfixest"])
+    } finally {
+      if (previous === undefined) delete process.env.PYTHONPATH
+      else process.env.PYTHONPATH = previous
+      fs.rmSync(root, { recursive: true, force: true })
+    }
   })
 })

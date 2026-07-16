@@ -1,7 +1,8 @@
 import z from "zod"
 import * as fs from "fs"
 import * as path from "path"
-import { spawn, exec } from "child_process"
+import crypto from "crypto"
+import { exec } from "child_process"
 import DESCRIPTION from "./econometrics.txt"
 import { PY_READ_CSV_FALLBACK } from "./python-snippets"
 import { Instance } from "../project/instance"
@@ -44,6 +45,8 @@ import { numericSnapshotPreview } from "./analysis-tool-metadata"
 import { createToolDisplay } from "./analysis-display"
 import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./analysis-user-view"
 import { ensureRuntimePythonReady, formatRuntimePythonSetupError } from "@/killstata/runtime-config"
+import { runManagedProcess } from "@/runtime/managed-process"
+import { prepareToolMetadata, prepareToolOutput, summarizeToolError } from "@/runtime/tool-result-policy"
 import { ensureAnalysisPlan, formatAnalysisChecklist, setAnalysisPlanApproval } from "@/runtime/workflow"
 import {
   workflowAnalysisPlanHeader,
@@ -94,7 +97,7 @@ type InlinePythonExecution = {
   cleanup: () => void
 }
 
-function persistPythonFailureArtifacts(input: {
+export function persistPythonFailureArtifacts(input: {
   label: string
   command: string
   cwd: string
@@ -104,86 +107,74 @@ function persistPythonFailureArtifacts(input: {
   const errorsDir = projectErrorsRoot()
   fs.mkdirSync(errorsDir, { recursive: true })
 
-  const stamp = buildFileStamp()
-  const base = path.join(errorsDir, `econometrics_${input.label}_${stamp}`)
-  const scriptCopyPath = `${base}.py`
-  const stdoutPath = `${base}.stdout.log`
-  const stderrPath = `${base}.stderr.log`
-  const contextPath = `${base}.context.json`
+  const stamp = `${buildFileStamp()}_${process.pid}_${crypto.randomUUID()}`
+  const safeLabel = input.label.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "failure"
+  const bundleDir = path.join(errorsDir, `econometrics_${safeLabel}_${stamp}`)
+  fs.mkdirSync(bundleDir, { mode: 0o700 })
+  const stdoutPath = path.join(bundleDir, "stdout.log")
+  const stderrPath = path.join(bundleDir, "stderr.log")
+  const contextPath = path.join(bundleDir, "context.json")
 
-  fs.copyFileSync(input.execution.scriptPath, scriptCopyPath)
-  fs.writeFileSync(stdoutPath, input.execution.stdout, "utf-8")
-  fs.writeFileSync(stderrPath, input.execution.stderr, "utf-8")
+  const safeContext = prepareToolMetadata(input.context ?? {})
+  const privateTextFile = { encoding: "utf-8", mode: 0o600 } as const
+
+  fs.writeFileSync(stdoutPath, summarizeToolError(input.execution.stdout, 64 * 1024), privateTextFile)
+  fs.writeFileSync(stderrPath, summarizeToolError(input.execution.stderr, 64 * 1024), privateTextFile)
   fs.writeFileSync(
     contextPath,
     JSON.stringify(
       {
         label: input.label,
-        command: input.command,
-        cwd: input.cwd,
+        command: summarizeToolError(input.command),
+        cwd: summarizeToolError(input.cwd),
         exitCode: input.execution.code,
-        originalScriptPath: input.execution.scriptPath,
-        preservedScriptPath: scriptCopyPath,
-        stdoutPath,
-        stderrPath,
-        ...input.context,
+        stdoutFile: path.basename(stdoutPath),
+        stderrFile: path.basename(stderrPath),
+        ...safeContext,
       },
       null,
       2,
     ),
-    "utf-8",
+    privateTextFile,
   )
 
   input.execution.cleanup()
 
   return {
-    scriptCopyPath,
     stdoutPath,
     stderrPath,
     contextPath,
   }
 }
 
-async function runInlinePython(input: { command: string; script: string; cwd: string }) {
+async function runInlinePython(input: { command: string; script: string; cwd: string; abort?: AbortSignal }) {
   const tempDir = projectTempRoot()
   fs.mkdirSync(tempDir, { recursive: true })
   const tempScriptPath = path.join(tempDir, `econometrics_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.py`)
-  fs.writeFileSync(tempScriptPath, input.script, "utf-8")
+  fs.writeFileSync(tempScriptPath, input.script, { encoding: "utf-8", mode: 0o600 })
 
-  return new Promise<InlinePythonExecution>((resolve, reject) => {
-    const proc = spawn(input.command, [tempScriptPath], {
+  try {
+    const execution = await runManagedProcess({
+      command: input.command,
+      allowedCommands: [input.command],
+      args: [tempScriptPath],
       cwd: input.cwd,
-      env: {
-        ...process.env,
-        PYTHONIOENCODING: "utf-8",
-      },
+      allowedCwdRoot: input.cwd,
+      env: { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+      abort: input.abort,
+      timeoutMs: 10 * 60 * 1_000,
+      maxOutputBytes: 16 * 1024 * 1024,
     })
-
-    let stdout = ""
-    let stderr = ""
-
-    proc.stdout?.on("data", (chunk) => {
-      stdout += chunk.toString()
-    })
-    proc.stderr?.on("data", (chunk) => {
-      stderr += chunk.toString()
-    })
-    proc.on("error", (error) => {
-      fs.rmSync(tempScriptPath, { force: true })
-      reject(error)
-    })
-    proc.on("close", (code) => {
-      resolve({
-        code,
-        stdout,
-        stderr,
-        scriptPath: tempScriptPath,
-        cleanup: () => {
-          fs.rmSync(tempScriptPath, { force: true })
-        },
-      })
-    })
-  })
+    return {
+      code: execution.code,
+      stdout: execution.stdout,
+      stderr: execution.stderr,
+      scriptPath: tempScriptPath,
+      cleanup: () => {},
+    }
+  } finally {
+    fs.rmSync(tempScriptPath, { force: true })
+  }
 }
 
 const SUPPORTED_METHODS = [
@@ -257,8 +248,6 @@ const METHOD_NEEDS_TREATMENT = new Set<MethodName>([
 type PythonResult = {
   success: boolean
   error?: string
-  traceback?: string
-  error_log_path?: string
   resolved_python_executable?: string
   method?: string
   coefficient?: number
@@ -285,6 +274,15 @@ type PythonResult = {
   backend?: string
   dropped_rows?: number
   rows_used?: number
+  propensity_scores_path?: string
+  score_min?: number
+  score_max?: number
+  mean_treated?: number
+  mean_control?: number
+  extreme_score_share?: number
+  support_lower?: number
+  support_upper?: number
+  share_in_support?: number
   cluster_var?: string
   test_results?: unknown
   dataset_id?: string
@@ -311,6 +309,104 @@ type PythonResult = {
     threshold?: number
   }>
   principle_checks?: PrincipleChecks
+}
+
+function isPathInside(parentDir: string, childPath: string) {
+  const relative = path.relative(path.resolve(parentDir), path.resolve(childPath))
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))
+}
+
+function cleanupFailedPropensityScoreRun(outputDir: string) {
+  fs.rmSync(outputDir, { recursive: true, force: true })
+}
+
+function validatePropensityScoreConstructionResult(result: PythonResult, outputDir: string) {
+  const requiredProbabilities = [
+    ["score_min", result.score_min],
+    ["score_max", result.score_max],
+    ["mean_treated", result.mean_treated],
+    ["mean_control", result.mean_control],
+    ["support_lower", result.support_lower],
+    ["support_upper", result.support_upper],
+  ] as const
+  for (const [name, value] of requiredProbabilities) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value >= 1) {
+      throw new Error(`倾向得分后端返回无效的 ${name}，未发布诊断结果`)
+    }
+  }
+  for (const [name, value] of [
+    ["share_in_support", result.share_in_support],
+    ["extreme_score_share", result.extreme_score_share],
+  ] as const) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+      throw new Error(`倾向得分后端返回无效的 ${name}，未发布诊断结果`)
+    }
+  }
+  if (!Number.isInteger(result.rows_used) || (result.rows_used ?? 0) <= 0) {
+    throw new Error("倾向得分后端返回无效的样本量，未发布诊断结果")
+  }
+  if (result.score_min! > result.score_max!) {
+    throw new Error("倾向得分后端返回的得分范围顺序错误，未发布诊断结果")
+  }
+
+  const scorePath = result.propensity_scores_path
+  if (
+    typeof scorePath !== "string" ||
+    path.basename(scorePath) !== "propensity_scores.csv" ||
+    !isPathInside(outputDir, scorePath) ||
+    !fs.existsSync(scorePath) ||
+    !fs.statSync(scorePath).isFile() ||
+    fs.statSync(scorePath).size <= "row_index,treatment,propensity_score\n".length
+  ) {
+    throw new Error("倾向得分逐行产物缺失或路径越界，未发布诊断结果")
+  }
+  const descriptor = fs.openSync(scorePath, "r")
+  try {
+    const headerBuffer = Buffer.alloc(128)
+    const bytesRead = fs.readSync(descriptor, headerBuffer, 0, headerBuffer.length, 0)
+    if (!headerBuffer.subarray(0, bytesRead).toString("utf-8").startsWith("row_index,treatment,propensity_score\n")) {
+      throw new Error("倾向得分逐行产物表头不合法，未发布诊断结果")
+    }
+  } finally {
+    fs.closeSync(descriptor)
+  }
+}
+
+export function buildPropensityScoreDiagnosticOutput(result: PythonResult) {
+  if (
+    result.rows_used === undefined ||
+    result.score_min === undefined ||
+    result.score_max === undefined ||
+    result.mean_treated === undefined ||
+    result.mean_control === undefined ||
+    result.share_in_support === undefined
+  ) {
+    throw new Error("倾向得分后端返回结果不完整，未发布诊断结果")
+  }
+  const supportDescription =
+    result.support_lower !== undefined && result.support_upper !== undefined
+      ? result.support_lower <= result.support_upper
+        ? `${result.support_lower.toFixed(4)} 至 ${result.support_upper.toFixed(4)}`
+        : "处理组与对照组没有经验共同支撑"
+      : undefined
+  return [
+    "## 倾向得分诊断",
+    "",
+    `- 样本量：${result.rows_used}`,
+    `- 得分范围：${result.score_min.toFixed(4)} 至 ${result.score_max.toFixed(4)}`,
+    `- 处理组平均得分：${result.mean_treated.toFixed(4)}`,
+    `- 对照组平均得分：${result.mean_control.toFixed(4)}`,
+    supportDescription ? `- 共同支撑区间：${supportDescription}` : undefined,
+    `- 共同支撑样本占比：${(result.share_in_support * 100).toFixed(1)}%`,
+    result.extreme_score_share !== undefined
+      ? `- 极端得分占比：${(result.extreme_score_share * 100).toFixed(1)}%`
+      : undefined,
+    "",
+    "这只是处理分配与重叠情况的诊断，不是因果效应估计；是否继续匹配或加权，要先根据共同支撑和平衡情况决定。",
+    result.warnings?.length ? `注意：${result.warnings.join("；")}` : undefined,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n")
 }
 
 type EconometricsPublishedFile = {
@@ -362,7 +458,7 @@ function validateMethodOptions(params: {
   entityVar?: string
   timeVar?: string
 }) {
-  if (params.methodName !== "auto_recommend" && !params.dependentVar) {
+  if (!new Set<MethodName>(["auto_recommend", "psm_construction"]).has(params.methodName) && !params.dependentVar) {
     throw new Error(`Method ${params.methodName} requires dependentVar`)
   }
 
@@ -479,7 +575,7 @@ function extractCommonSupportStatus(diagnostics: Record<string, unknown>) {
   if (!commonSupport) return undefined
   if (typeof commonSupport.passed === "boolean") return commonSupport.passed
   if (typeof commonSupport.support_ok === "boolean") return commonSupport.support_ok
-  const overlapShare = findNestedNumber(commonSupport, ["overlap_share", "matched_share", "support_share"])
+  const overlapShare = findNestedNumber(commonSupport, ["overlap_share", "matched_share", "support_share", "share_in_support"])
   if (overlapShare !== undefined) return overlapShare > 0
   return undefined
 }
@@ -523,7 +619,7 @@ export function evaluatePrincipleChecks(input: {
     else diagnosticsStatus = mergePrincipleStatus(diagnosticsStatus, status)
   }
 
-  if (!input.hasNumericSnapshot) {
+  if (!input.hasNumericSnapshot && input.methodName !== "psm_construction") {
     addFinding("block", "缺少 numeric_snapshot，当前结果不能输出系数、p 值或显著性结论。", "prereq")
   }
 
@@ -588,6 +684,10 @@ export function evaluatePrincipleChecks(input: {
     } else if (commonSupportStatus === false) {
       addFinding("block", "PSM 共同支撑诊断未通过，当前结果不能作为可靠因果证据。", "diagnostics")
     }
+  }
+
+  if (input.methodName === "psm_construction") {
+    addFinding("warn", "倾向得分构造只是处理分配与共同支撑诊断，不是因果效应估计。", "prereq")
   }
 
   return {
@@ -869,6 +969,21 @@ export function buildConciseResultMarkdown(params: {
   treatmentLabel?: string
   principleChecks?: PrincipleChecks
 }) {
+  if (params.methodName === "psm_construction") {
+    const lines = ["倾向得分诊断"]
+    if (params.result.rows_used !== undefined) lines.push(`- N：${params.result.rows_used}`)
+    if (params.result.score_min !== undefined && params.result.score_max !== undefined) {
+      lines.push(`- 得分范围：${params.result.score_min.toFixed(4)} 至 ${params.result.score_max.toFixed(4)}`)
+    }
+    if (params.result.mean_treated !== undefined) lines.push(`- 处理组平均得分：${params.result.mean_treated.toFixed(4)}`)
+    if (params.result.mean_control !== undefined) lines.push(`- 对照组平均得分：${params.result.mean_control.toFixed(4)}`)
+    if (params.result.share_in_support !== undefined) {
+      lines.push(`- 共同支撑样本占比：${(params.result.share_in_support * 100).toFixed(1)}%`)
+    }
+    lines.push("- 说明：本结果只描述处理分配与重叠情况，不是因果效应估计。")
+    return lines.join("\n") + "\n"
+  }
+
   const lines = ["回归结果"]
   if (params.principleChecks?.claim_ceiling === "blocked") {
     lines.push("- 经验结论状态：blocked")
@@ -942,8 +1057,6 @@ type BaselineReportDocxResult = {
   success: boolean
   output_path?: string
   error?: string
-  traceback?: string
-  error_log_path?: string
 }
 
 type WorkbookExportResult = {
@@ -952,8 +1065,6 @@ type WorkbookExportResult = {
   rows?: number
   columns?: number
   error?: string
-  traceback?: string
-  error_log_path?: string
 }
 
 function readClusterCountFromResult(result: PythonResult) {
@@ -1076,7 +1187,6 @@ function buildBaselineReportDocxPythonScript(payloadB64: string) {
   return `
 import base64
 import json
-import traceback
 from pathlib import Path
 
 from docx import Document
@@ -1085,7 +1195,6 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 
 RESULT_PREFIX = "${PYTHON_RESULT_PREFIX}"
-ERRORS_DIR = r"${projectErrorsRoot().replace(/\\/g, "\\\\")}"
 
 def emit(result):
     print(f"{RESULT_PREFIX}{json.dumps(result, ensure_ascii=False)}")
@@ -1094,13 +1203,6 @@ def save_json(file_path, payload):
     Path(file_path).parent.mkdir(parents=True, exist_ok=True)
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
-
-def safe_error_path():
-    error_dir = Path(ERRORS_DIR)
-    error_dir.mkdir(parents=True, exist_ok=True)
-    from datetime import datetime
-    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    return str(error_dir / f"econometrics_report_docx_{stamp}_error.json")
 
 def apply_font(run, size=12, bold=False):
     run.font.name = "Times New Roman"
@@ -1160,11 +1262,7 @@ except Exception as exc:
     result = {
         "success": False,
         "error": str(exc),
-        "traceback": traceback.format_exc(),
     }
-    error_path = safe_error_path()
-    result["error_log_path"] = error_path
-    save_json(error_path, result)
     emit(result)
 `
 }
@@ -1217,7 +1315,6 @@ async function generateBaselineReportDocx(input: {
     })
     throw new Error(
       `Failed to build report docx with Python ${input.pythonCommand} (exit code ${code})` +
-        `\nCrash script: ${relativeWithinProject(failureArtifacts.scriptCopyPath)}` +
         `\nStdout log: ${relativeWithinProject(failureArtifacts.stdoutPath)}` +
         `\nStderr log: ${relativeWithinProject(failureArtifacts.stderrPath)}` +
         `\nContext: ${relativeWithinProject(failureArtifacts.contextPath)}`,
@@ -1227,7 +1324,7 @@ async function generateBaselineReportDocx(input: {
   const result = parsePythonResult<BaselineReportDocxResult>(stdout)
   execution.cleanup()
   if (!result.success || !result.output_path) {
-    throw new Error(`Failed to build report docx: ${result.error ?? "unknown error"}\n${result.traceback ?? ""}`)
+    throw new Error(`Failed to build report docx: ${result.error ?? "unknown error"}`)
   }
   return result.output_path
 }
@@ -1354,7 +1451,6 @@ async function generateJournalPaperDocx(input: {
     })
     throw new Error(
       `Failed to build journal paper docx with Python ${input.pythonCommand} (exit code ${code})` +
-        `\nCrash script: ${relativeWithinProject(failureArtifacts.scriptCopyPath)}` +
         `\nStdout log: ${relativeWithinProject(failureArtifacts.stdoutPath)}` +
         `\nStderr log: ${relativeWithinProject(failureArtifacts.stderrPath)}` +
         `\nContext: ${relativeWithinProject(failureArtifacts.contextPath)}`,
@@ -1364,7 +1460,7 @@ async function generateJournalPaperDocx(input: {
   const result = parsePythonResult<BaselineReportDocxResult>(stdout)
   execution.cleanup()
   if (!result.success || !result.output_path) {
-    throw new Error(`Failed to build journal paper docx: ${result.error ?? "unknown error"}\n${result.traceback ?? ""}`)
+    throw new Error(`Failed to build journal paper docx: ${result.error ?? "unknown error"}`)
   }
   return result.output_path
 }
@@ -1373,13 +1469,11 @@ function buildAnalysisWorkbookPythonScript(payloadB64: string) {
   return `
 import base64
 import json
-import traceback
 from pathlib import Path
 
 import pandas as pd
 
 RESULT_PREFIX = "${PYTHON_RESULT_PREFIX}"
-ERRORS_DIR = r"${projectErrorsRoot().replace(/\\/g, "\\\\")}"
 
 def emit(result):
     print(RESULT_PREFIX + json.dumps(result, ensure_ascii=False))
@@ -1388,11 +1482,6 @@ def save_json(path, payload):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
-
-def safe_error_path():
-    error_dir = Path(ERRORS_DIR)
-    error_dir.mkdir(parents=True, exist_ok=True)
-    return str(error_dir / "econometrics_analysis_workbook_error.json")
 
 ${PY_READ_CSV_FALLBACK}
 
@@ -1427,11 +1516,7 @@ except Exception as exc:
     result = {
         "success": False,
         "error": str(exc),
-        "traceback": traceback.format_exc(),
     }
-    error_path = safe_error_path()
-    result["error_log_path"] = error_path
-    save_json(error_path, result)
     emit(result)
 `
 }
@@ -1466,7 +1551,6 @@ async function generateFinalAnalysisWorkbook(input: {
     })
     throw new Error(
       `Failed to build final analysis workbook with Python ${input.pythonCommand} (exit code ${code})` +
-        `\nCrash script: ${relativeWithinProject(failureArtifacts.scriptCopyPath)}` +
         `\nStdout log: ${relativeWithinProject(failureArtifacts.stdoutPath)}` +
         `\nStderr log: ${relativeWithinProject(failureArtifacts.stderrPath)}` +
         `\nContext: ${relativeWithinProject(failureArtifacts.contextPath)}`,
@@ -1476,7 +1560,7 @@ async function generateFinalAnalysisWorkbook(input: {
   const result = parsePythonResult<WorkbookExportResult>(stdout)
   execution.cleanup()
   if (!result.success || !result.output_path) {
-    throw new Error(`Failed to build final analysis workbook: ${result.error ?? "unknown error"}\n${result.traceback ?? ""}`)
+    throw new Error(`Failed to build final analysis workbook: ${result.error ?? "unknown error"}`)
   }
   return result.output_path
 }
@@ -1516,10 +1600,10 @@ type SmartProfilePythonResult = {
   balanced_ratio?: number
 }
 
-type ConcreteMethodName = Exclude<MethodName, "auto_recommend" | "smart_baseline">
+type SmartBaselineMethodName = SmartRecommendation["recommendedMethod"]
 
 type SmartBaselinePlan = {
-  methodName: ConcreteMethodName
+  methodName: SmartBaselineMethodName
   dependentVar: string
   treatmentVar: string
   covariates?: string[]
@@ -1534,12 +1618,6 @@ function covarianceForGeneralRegression(strategy: SmartRecommendation["covarianc
   if (strategy === "robust") return "HC1"
   if (strategy === "hac") return { HAC: 1 }
   return "nonrobust"
-}
-
-function covarianceForPanelDid(strategy: SmartRecommendation["covariance"], hasPanelKeys: boolean) {
-  if (strategy === "cluster" && hasPanelKeys) return "cluster_entity"
-  if (strategy === "robust" || strategy === "hac") return "robust"
-  return "unadjusted"
 }
 
 function buildSmartBaselinePlan(input: {
@@ -1561,79 +1639,20 @@ function buildSmartBaselinePlan(input: {
 
   const planningTrace: Array<{ kind: string; message: string }> = []
   const options = { ...(input.params.options ?? {}) }
-  let methodName: ConcreteMethodName = input.recommendation.recommendedMethod
-  let entityVar = input.params.entityVar ?? input.recommendation.preferredEntityVar
-  let timeVar = input.params.timeVar ?? input.recommendation.preferredTimeVar
+  const methodName = input.recommendation.recommendedMethod
+  const entityVar = input.params.entityVar ?? input.recommendation.preferredEntityVar
+  const timeVar = input.params.timeVar ?? input.recommendation.preferredTimeVar
   const clusterVar = input.params.clusterVar ?? input.recommendation.preferredClusterVar ?? entityVar
 
   if (methodName === "panel_fe_regression") {
     if (!entityVar || !timeVar) {
-      methodName = "ols_regression"
-      planningTrace.push({
-        kind: "fallback",
-        message: "Panel FE was recommended, but entity/time identifiers were incomplete, so smart_baseline fell back to OLS.",
-      })
-    } else {
-      options.auto_downgrade = options.auto_downgrade ?? true
+      throw new Error("panel_fe_regression requires explicit entity and time identifiers; estimator switching is disabled")
     }
-  }
-
-  if (methodName === "did_static") {
-    const treatmentEntityDummy = typeof options.treatment_entity_dummy === "string" ? options.treatment_entity_dummy : undefined
-    const treatmentFinishedDummy = typeof options.treatment_finished_dummy === "string" ? options.treatment_finished_dummy : undefined
-    if (!entityVar || !timeVar || !treatmentEntityDummy || !treatmentFinishedDummy) {
-      methodName = entityVar && timeVar ? "panel_fe_regression" : "ols_regression"
-      planningTrace.push({
-        kind: "fallback",
-        message:
-          "DID was suggested, but smart_baseline could not find the required treatment_entity_dummy/treatment_finished_dummy fields, so it fell back to an executable baseline.",
-      })
-      options.auto_downgrade = options.auto_downgrade ?? true
-    } else {
-      options.cov_type = options.cov_type ?? covarianceForPanelDid(input.recommendation.covariance, true)
-    }
-  }
-
-  if (methodName === "iv_2sls") {
-    const ivVariable =
-      typeof options.iv_variable === "string" && options.iv_variable.trim()
-        ? options.iv_variable
-        : input.profile.candidateInstrumentVars[0]
-    if (!ivVariable) {
-      methodName = entityVar && timeVar ? "panel_fe_regression" : "ols_regression"
-      planningTrace.push({
-        kind: "fallback",
-        message: "IV was suggested, but no usable instrument variable could be resolved, so smart_baseline fell back to a directly estimable baseline.",
-      })
-      options.auto_downgrade = options.auto_downgrade ?? true
-    } else {
-      options.iv_variable = ivVariable
-      options.cov_type = options.cov_type ?? covarianceForGeneralRegression(input.recommendation.covariance)
-      planningTrace.push({
-        kind: "selection",
-        message: `Smart_baseline selected ${ivVariable} as the instrument variable for IV-2SLS.`,
-      })
-    }
-  }
-
-  if (methodName === "psm_double_robust") {
-    if (!input.params.covariates?.length) {
-      methodName = "ols_regression"
-      planningTrace.push({
-        kind: "fallback",
-        message: "Double robust PSM was suggested, but no covariates were provided, so smart_baseline fell back to OLS.",
-      })
-    } else {
-      options.cov_type = options.cov_type ?? (input.recommendation.covariance === "robust" ? "HC1" : undefined)
-    }
+    options.auto_downgrade = false
   }
 
   if (methodName === "ols_regression") {
     options.cov_type = options.cov_type ?? covarianceForGeneralRegression(input.recommendation.covariance)
-  }
-
-  if (methodName === "panel_fe_regression") {
-    options.auto_downgrade = options.auto_downgrade ?? true
   }
 
   if (!planningTrace.length) {
@@ -1661,7 +1680,6 @@ function buildAutoRecommendPythonScript(payloadBase64: string) {
 import base64
 import json
 import os
-import traceback
 from pathlib import Path
 
 import pandas as pd
@@ -1762,7 +1780,6 @@ except Exception as exc:
     emit({
         "success": False,
         "error": str(exc),
-        "traceback": traceback.format_exc(),
     })
 `
 }
@@ -1771,6 +1788,7 @@ async function runAutoRecommend(input: {
   dataPath: string
   outputDir: string
   pythonCommand: string
+  abort?: AbortSignal
   params: {
     methodName: MethodName
     dependentVar?: string
@@ -1790,6 +1808,7 @@ async function runAutoRecommend(input: {
     command: input.pythonCommand,
     script: buildAutoRecommendPythonScript(payloadBase64),
     cwd: Instance.directory,
+    abort: input.abort,
   })
   const { code, stdout, stderr } = execution
 
@@ -1806,7 +1825,6 @@ async function runAutoRecommend(input: {
     })
     throw new Error(
       `Auto recommendation failed with Python ${input.pythonCommand} (exit code ${code})` +
-        `\nCrash script: ${relativeWithinProject(failureArtifacts.scriptCopyPath)}` +
         `\nStdout log: ${relativeWithinProject(failureArtifacts.stdoutPath)}` +
         `\nStderr log: ${relativeWithinProject(failureArtifacts.stderrPath)}` +
         `\nContext: ${relativeWithinProject(failureArtifacts.contextPath)}`,
@@ -1816,7 +1834,7 @@ async function runAutoRecommend(input: {
   const profileResult = parsePythonResult<SmartProfilePythonResult>(stdout)
   execution.cleanup()
   if (!profileResult.success) {
-    throw new Error(`Auto recommendation profiling failed: ${profileResult.error ?? "unknown error"}\n${profileResult.traceback ?? ""}`)
+    throw new Error(`Auto recommendation profiling failed: ${profileResult.error ?? "unknown error"}`)
   }
 
   const profile = buildSmartDatasetProfile({
@@ -1995,6 +2013,9 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
       entityVar: params.entityVar,
       timeVar: params.timeVar,
     })
+    if (params.methodName === "psm_construction" && params.outputDir !== undefined) {
+      throw new Error("psm_construction 不接受调用方指定 outputDir；输出目录由 Harness 隔离管理")
+    }
 
     // 参数校验必须先于审批弹窗：没有数据来源的调用根本跑不起来（resolveArtifactInput
     // 不会凭空找出一个数据集），不该先弹执行计划打扰用户、等用户点了同意才报错。
@@ -2120,7 +2141,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
     await ctx.ask({
       permission: "bash",
       patterns: [`${pythonCommand} *econometrics*`],
-      always: [`${pythonCommand}*`],
+      always: [`${pythonCommand} *econometrics*`],
       metadata: {
         description: `Run econometric method: ${params.methodName}`,
       },
@@ -2132,6 +2153,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
         outputDir,
         pythonCommand,
         params,
+        abort: ctx.abort,
       })
 
       const publishedFiles: EconometricsPublishedFile[] = []
@@ -2230,6 +2252,7 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
         outputDir,
         pythonCommand,
         params,
+        abort: ctx.abort,
       })
 
       const executionPlan = buildSmartBaselinePlan({
@@ -2375,7 +2398,6 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
 import base64
 import json
 import sys
-import traceback
 from pathlib import Path
 
 import warnings
@@ -2387,7 +2409,6 @@ from linearmodels.panel import PanelOLS
 from scipy import stats
 
 RESULT_PREFIX = "${PYTHON_RESULT_PREFIX}"
-ERRORS_DIR = r"${projectErrorsRoot().replace(/\\/g, "\\\\")}"
 
 def emit(result):
     print(f"{RESULT_PREFIX}{json.dumps(result, ensure_ascii=False)}")
@@ -2439,13 +2460,6 @@ def save_json(file_path, payload):
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
-def safe_error_path(method_name):
-    error_dir = Path(ERRORS_DIR)
-    error_dir.mkdir(parents=True, exist_ok=True)
-    from datetime import datetime
-    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    return str(error_dir / f"econometrics_{method_name}_{stamp}_error.json")
-
 ${PY_READ_CSV_FALLBACK}
 
 def read_table(file_path):
@@ -2496,6 +2510,43 @@ def has_severe_heteroskedasticity(core):
         if pvalue is not None and pvalue < 0.05:
             return True
     return False
+
+def assert_ols_design_full_rank(df, dependent_name, treatment_name, covariate_names):
+    required = [dependent_name, treatment_name, *covariate_names]
+    sample = df[required].dropna()
+    if sample.empty:
+        raise ValueError("OLS has no complete observations after applying the final estimation sample")
+    try:
+        regressors = sample[[treatment_name, *covariate_names]].astype(float)
+    except Exception as exc:
+        raise ValueError(f"OLS regressors must be numeric: {exc}")
+    design = sm.add_constant(regressors, has_constant="add").to_numpy(dtype=float)
+    rank = int(np.linalg.matrix_rank(design))
+    columns = int(design.shape[1])
+    if rank < columns:
+        raise ValueError(
+            f"OLS design matrix is rank deficient (rank={rank}, columns={columns}); "
+            "存在完全共线性，请删除重复、常数或线性组合变量后重试"
+        )
+
+def multicollinearity_warnings(core):
+    if not isinstance(core, dict):
+        return []
+    warnings = []
+    condition = core.get("condition_number", {})
+    condition_value = condition.get("condition_number") if isinstance(condition, dict) else None
+    if isinstance(condition_value, (int, float)) and np.isfinite(condition_value) and condition_value >= 30:
+        warnings.append(f"Potential multicollinearity: condition number is {condition_value:.2f}")
+    vif = core.get("vif", {})
+    rows = vif.get("rows", []) if isinstance(vif, dict) else []
+    high_vif = [
+        row for row in rows
+        if isinstance(row, dict) and isinstance(row.get("vif"), (int, float)) and row["vif"] >= 10
+    ]
+    if high_vif:
+        details = ", ".join(f"{row.get('variable')}={row.get('vif'):.2f}" for row in high_vif)
+        warnings.append(f"Potential multicollinearity: high VIF ({details})")
+    return warnings
 
 def build_model_qa(df, entity_var=None, time_var=None, cluster_var=None):
     warnings = []
@@ -2646,27 +2697,14 @@ def run_panel_fe(df, payload):
     entity_var = payload["entity_var"]
     time_var = payload["time_var"]
     cluster_var = payload.get("cluster_var") or entity_var
-    options = payload.get("options", {})
-    auto_policy = options.get("auto_downgrade", True)
     decision_trace = []
 
-    required_columns = [dependent_var, treatment_var, entity_var, time_var] + covariates
+    required_columns = list(dict.fromkeys([dependent_var, treatment_var, entity_var, time_var, *covariates, cluster_var]))
     missing_columns = sorted(set([col for col in required_columns if col not in df.columns]))
     if missing_columns:
         raise ValueError(f"Missing columns in dataset: {missing_columns}")
 
-    qa = build_model_qa(df, entity_var, time_var, cluster_var)
-    if qa["blocking_errors"]:
-        return {
-            "success": False,
-            "error": "; ".join(qa["blocking_errors"]),
-            "warnings": qa["warnings"],
-            "blocking_errors": qa["blocking_errors"],
-            "suggested_repairs": qa["suggested_repairs"],
-        }
-
-    model_columns = required_columns + ([cluster_var] if cluster_var not in required_columns else [])
-    model_df = df[model_columns].copy()
+    model_df = df[required_columns].copy()
     non_numeric_columns = []
     for column in [dependent_var, treatment_var, *covariates]:
         original = model_df[column]
@@ -2684,65 +2722,62 @@ def run_panel_fe(df, payload):
         )
 
     rows_before = len(model_df)
-    model_df = model_df.dropna(subset=[dependent_var, treatment_var, entity_var, time_var, *covariates])
+    model_df = model_df.dropna(subset=required_columns)
     dropped_rows = int(rows_before - len(model_df))
-    if dropped_rows > 0:
-        qa["warnings"].append(f"Dropped {dropped_rows} rows with missing model variables")
 
     if model_df.empty:
         raise ValueError("No usable rows remain after dropping missing model variables")
 
+    # 面板键与聚类数必须基于最终估计样本检查，不能拿原始表的 QA 结果替代。
+    qa = build_model_qa(model_df, entity_var, time_var, cluster_var)
+    if dropped_rows > 0:
+        qa["warnings"].append(f"Dropped {dropped_rows} rows with missing model variables")
+    if qa["duplicate_entity_time_rows"] > 0:
+        qa["blocking_errors"].append(
+            f"Duplicate entity-time rows remain in the estimation sample: {qa['duplicate_entity_time_rows']}"
+        )
+    if qa["cluster_count"] is not None and qa["cluster_count"] < 2:
+        qa["blocking_errors"].append("Clustered panel inference requires at least two non-empty clusters")
+    if qa["blocking_errors"]:
+        return {
+            "success": False,
+            "error": "; ".join(qa["blocking_errors"]),
+            "warnings": qa["warnings"],
+            "blocking_errors": qa["blocking_errors"],
+            "suggested_repairs": qa["suggested_repairs"],
+        }
+
     effective_method = "panel_fe"
     degraded_from = None
     effective_covariance = "cluster"
-    if auto_policy and qa["duplicate_entity_time_rows"] > 0:
-        effective_method = "pooled_ols"
-        degraded_from = "panel_fe_regression"
-        effective_covariance = "HC1"
+    if qa["cluster_count"] is not None and qa["cluster_count"] < 10:
         decision_trace.append({
-            "kind": "downgrade",
-            "message": f"Detected duplicate entity-time rows ({qa['duplicate_entity_time_rows']}), so downgraded from panel FE to pooled OLS with HC1 robust SE.",
-        })
-    elif qa["cluster_count"] is not None and qa["cluster_count"] < 10:
-        effective_covariance = "HC1"
-        decision_trace.append({
-            "kind": "covariance_switch",
-            "message": f"Cluster count is low ({qa['cluster_count']}), so switched clustered SE to HC1 robust SE.",
+            "kind": "warning",
+            "message": f"Cluster count is low ({qa['cluster_count']}); kept clustered standard errors and reported the limitation.",
         })
 
     absorbed_terms = []
     r_squared_overall = None
     r_squared_between = None
-    if effective_method == "panel_fe":
-        panel_df = model_df.set_index([entity_var, time_var])
-        exog = panel_df[[treatment_var, *covariates]]
-        mod = PanelOLS(panel_df[dependent_var], exog, entity_effects=True, time_effects=True, drop_absorbed=True, check_rank=True)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            if effective_covariance == "cluster":
-                if cluster_var in panel_df.index.names:
-                    cluster_series = panel_df.index.get_level_values(cluster_var).to_series(index=panel_df.index)
-                else:
-                    cluster_series = panel_df[cluster_var]
-                fit_result = mod.fit(cov_type="clustered", clusters=cluster_series)
-            else:
-                fit_result = mod.fit(cov_type="robust")
-        absorbed_terms = sorted(set(exog.columns) - set(fit_result.params.index))
-        if absorbed_terms:
-            qa["warnings"].append(f"These variables were fully absorbed by fixed effects and dropped from the model: {absorbed_terms}")
-        coefficients = model_coefficient_table(fit_result)
-        residual_values = fit_result.resids.to_numpy(dtype=float)
-        r_squared = float(fit_result.rsquared_within)
-        r_squared_overall = float(fit_result.rsquared_overall)
-        r_squared_between = float(fit_result.rsquared_between)
-        backend = "linearmodels_panelols"
-    else:
-        design = sm.add_constant(model_df[[treatment_var, *covariates]].astype(float))
-        fit_result = sm.OLS(model_df[dependent_var].astype(float), design).fit(cov_type="HC1")
-        coefficients = model_coefficient_table(fit_result)
-        residual_values = fit_result.resid.to_numpy(dtype=float)
-        r_squared = float(fit_result.rsquared)
-        backend = "statsmodels_ols_hc1"
+    panel_df = model_df.set_index([entity_var, time_var])
+    exog = panel_df[[treatment_var, *covariates]]
+    mod = PanelOLS(panel_df[dependent_var], exog, entity_effects=True, time_effects=True, drop_absorbed=True, check_rank=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        if cluster_var in panel_df.index.names:
+            cluster_series = panel_df.index.get_level_values(cluster_var).to_series(index=panel_df.index)
+        else:
+            cluster_series = panel_df[cluster_var]
+        fit_result = mod.fit(cov_type="clustered", clusters=cluster_series)
+    absorbed_terms = sorted(set(exog.columns) - set(fit_result.params.index))
+    if absorbed_terms:
+        qa["warnings"].append(f"These variables were fully absorbed by fixed effects and dropped from the model: {absorbed_terms}")
+    coefficients = model_coefficient_table(fit_result)
+    residual_values = fit_result.resids.to_numpy(dtype=float)
+    r_squared = float(fit_result.rsquared_within)
+    r_squared_overall = float(fit_result.rsquared_overall)
+    r_squared_between = float(fit_result.rsquared_between)
+    backend = "linearmodels_panelols"
 
     term_names = coefficients["term"].tolist()
     if treatment_var not in term_names:
@@ -2782,7 +2817,7 @@ def run_panel_fe(df, payload):
             "min": float(residual_values.min()),
             "max": float(residual_values.max()),
         },
-        "r_squared_within": r_squared if effective_method == "panel_fe" else None,
+        "r_squared_within": r_squared,
         "r_squared_overall": r_squared_overall,
         "r_squared_between": r_squared_between,
         "absorbed_terms": absorbed_terms,
@@ -2813,7 +2848,7 @@ def run_panel_fe(df, payload):
     treatment_row = coefficients.loc[coefficients["term"] == treatment_var].iloc[0]
     result = {
         "success": True,
-        "method": "Panel FE" if effective_method == "panel_fe" else "Pooled OLS (auto downgrade from Panel FE)",
+        "method": "Panel FE",
         "coefficient": float(treatment_row["coefficient"]),
         "std_error": float(treatment_row["std_error"]),
         "p_value": float(treatment_row["p_value"]),
@@ -2851,10 +2886,7 @@ def run_panel_fe(df, payload):
         f.write(f"- Dependent variable: {dependent_var}\\n")
         f.write(f"- Key regressor: {treatment_var}\\n")
         f.write(f"- Controls: {covariates}\\n")
-        if effective_method == "panel_fe":
-            f.write(f"- Fixed effects: {entity_var}, {time_var}\\n")
-        else:
-            f.write("- Fixed effects: downgraded to pooled OLS\\n")
+        f.write(f"- Fixed effects: {entity_var}, {time_var}\\n")
         f.write(f"- Covariance: {effective_covariance}\\n")
         f.write(f"- Coefficient: {result['coefficient']:.6f}\\n")
         f.write(f"- Std. error: {result['std_error']:.6f}\\n")
@@ -2990,10 +3022,6 @@ try:
 
     if method in ["panel_fe_regression", "baseline_regression"]:
         result = run_panel_fe(df, payload)
-        if not result.get("success"):
-            error_path = safe_error_path(method)
-            result["error_log_path"] = error_path
-            save_json(error_path, result)
         emit(result)
         raise SystemExit(0)
 
@@ -3004,13 +3032,12 @@ try:
             "success": False,
             "error": f"Failed to import econometric_algorithm: {str(e)}",
         }
-        error_path = safe_error_path(method)
-        result["error_log_path"] = error_path
-        save_json(error_path, result)
         emit(result)
         raise SystemExit(0)
 
-    required_columns = [payload["dependent_var"]]
+    required_columns = []
+    if payload.get("dependent_var"):
+        required_columns.append(payload["dependent_var"])
     if payload.get("treatment_var"):
         required_columns.append(payload["treatment_var"])
     required_columns.extend(payload.get("covariates", []))
@@ -3030,18 +3057,16 @@ try:
             "success": False,
             "error": f"Missing columns in dataset: {missing_columns}",
         }
-        error_path = safe_error_path(method)
-        result["error_log_path"] = error_path
-        save_json(error_path, result)
         emit(result)
         raise SystemExit(0)
 
-    dependent_var = df[payload["dependent_var"]]
+    dependent_var = df[payload["dependent_var"]] if payload.get("dependent_var") else None
     treatment_name = payload.get("treatment_var")
     treatment_var = df[treatment_name] if treatment_name else None
 
     covariate_names = payload.get("covariates", [])
     covariates = df[covariate_names] if covariate_names else None
+    analysis_row_count = len(dependent_var) if dependent_var is not None else len(treatment_var) if treatment_var is not None else len(df)
     panel_df = None
     if method in ["did_static", "did_staggered", "did_event_study", "did_event_study_viz"]:
         panel_df, dependent_var, treatment_var, covariates = prepare_panel_inputs(df, payload, covariate_names)
@@ -3062,6 +3087,7 @@ try:
     parallel_trends_report = None
 
     if method == "ols_regression":
+        assert_ols_design_full_rank(df, payload["dependent_var"], treatment_name, covariate_names)
         effective_covariance = options.get("cov_type", "nonrobust")
         model = ordinary_least_square_regression(
             dependent_var,
@@ -3315,15 +3341,45 @@ try:
     elif method == "psm_construction":
         ps = propensity_score_construction(treatment_var, covariates)
         propensity_score_series = ps
+        support = common_support_report(treatment_var, ps)
+        scores_path = Path(payload["output_dir"]) / "propensity_scores.csv"
+        scores_temp_path = Path(payload["output_dir"]) / "propensity_scores.csv.tmp"
+        scores_frame = pd.DataFrame({
+            "row_index": ps.index.to_numpy(),
+            "treatment": treatment_var.loc[ps.index].astype(int).to_numpy(),
+            "propensity_score": ps.to_numpy(dtype=float),
+        })
+        try:
+            scores_frame.to_csv(scores_temp_path, index=False)
+            scores_temp_path.replace(scores_path)
+        finally:
+            scores_temp_path.unlink(missing_ok=True)
+        extreme_score_share = float(((ps <= 0.01) | (ps >= 0.99)).mean())
+        share_in_support = support.get("share_in_support") if isinstance(support, dict) else None
+        if extreme_score_share > 0:
+            qa["warnings"].append(
+                f"{extreme_score_share:.1%} 的倾向得分落在 [0.01, 0.99] 之外，后续不得直接使用不稳定的逆概率权重"
+            )
+        if isinstance(share_in_support, (int, float)) and share_in_support < 1:
+            qa["warnings"].append(
+                f"只有 {share_in_support:.1%} 的样本位于经验共同支撑区间，估计效应前必须先处理重叠问题"
+            )
         result = {
             "success": True,
-            "propensity_scores": ps.to_dict(),
+            "propensity_scores_path": str(scores_path),
+            "score_min": float(ps.min()),
+            "score_max": float(ps.max()),
             "mean_treated": float(ps[treatment_var == 1].mean()),
             "mean_control": float(ps[treatment_var == 0].mean()),
+            "extreme_score_share": extreme_score_share,
+            "support_lower": support.get("lower_bound") if isinstance(support, dict) else None,
+            "support_upper": support.get("upper_bound") if isinstance(support, dict) else None,
+            "share_in_support": share_in_support,
+            "logit_iterations": int(ps.attrs.get("iterations", 0)),
             "method": "Propensity score construction",
         }
         coefficients = empty_coefficient_table()
-        output_kind = "analysis"
+        output_kind = "diagnostic"
 
     elif method == "psm_regression":
         effective_covariance = options.get("cov_type", None)
@@ -3465,6 +3521,12 @@ try:
 
     if result.get("success") and model is not None:
         regressors_for_diagnostics = covariates
+        multicollinearity_regressors = None
+        if treatment_var is not None:
+            multicollinearity_regressors = pd.concat(
+                [treatment_var.rename(treatment_var.name), covariates] if covariates is not None else [treatment_var.rename(treatment_var.name)],
+                axis=1,
+            )
         if regressors_for_diagnostics is None and treatment_var is not None:
             regressors_for_diagnostics = pd.DataFrame({treatment_var.name: treatment_var})
         panel_info = None
@@ -3485,6 +3547,12 @@ try:
                 propensity_score=propensity_score_series,
                 panel_info=panel_info,
             )
+            if isinstance(diagnostics["core"], dict) and multicollinearity_regressors is not None:
+                diagnostics["core"]["vif"] = vif_report(multicollinearity_regressors)
+                qa["warnings"] = list(dict.fromkeys([
+                    *qa["warnings"],
+                    *multicollinearity_warnings(diagnostics["core"]),
+                ]))
         except Exception as exc:
             diagnostic_errors.append(f"core diagnostics failed: {exc}")
             diagnostics["core"] = {"status": "skipped", "reason": str(exc)}
@@ -3568,7 +3636,7 @@ try:
         # 样本量此前只写进了 metadata，没写进 result，而 TS 侧读的是 result.rows_used ——
         # 结果是 OLS/DID/IV/PSM/RDD 这些走本后端的方法全都不报 N。N 是论文必报的数字。
         if result.get("rows_used") is None:
-            result["rows_used"] = int(getattr(model, "nobs", len(dependent_var)))
+            result["rows_used"] = int(getattr(model, "nobs", analysis_row_count))
     metadata = {
         "method": method,
         "backend": "econometric_algorithm",
@@ -3579,7 +3647,7 @@ try:
         "time_var": payload.get("time_var"),
         "cluster_var": payload.get("cluster_var"),
         "options": options,
-        "rows_used": int(getattr(model, "nobs", len(dependent_var))) if result.get("success") else 0,
+        "rows_used": int(getattr(model, "nobs", analysis_row_count)) if result.get("success") else 0,
         "input_encoding": df.attrs.get("_source_encoding", "default"),
         "output_kind": output_kind,
         "table_variables": result.get("table_variables"),
@@ -3590,12 +3658,13 @@ try:
     }
     summary_text = coefficients.to_string(index=False) if not coefficients.empty else json.dumps(result, ensure_ascii=False, indent=2)
     narrative_lines = [
-        "# Econometric Analysis Summary",
+        "# Propensity Score Diagnostic" if method == "psm_construction" else "# Econometric Analysis Summary",
         "",
         f"- Method: {result.get('method', method)}",
         f"- Output kind: {output_kind}",
-        f"- Dependent variable: {payload.get('dependent_var')}",
     ]
+    if payload.get("dependent_var"):
+        narrative_lines.append(f"- Dependent variable: {payload.get('dependent_var')}")
     if treatment_name:
         narrative_lines.append(f"- Treatment variable: {treatment_name}")
     if covariate_names:
@@ -3616,6 +3685,8 @@ try:
         narrative_lines.append(f"- Degraded from: {degraded_from}")
     if decision_trace:
         narrative_lines.append(f"- Decision trace: {decision_trace}")
+    if method == "psm_construction":
+        narrative_lines.append("- Interpretation boundary: treatment-assignment and overlap diagnostic only; this is not a causal effect estimate.")
     narrative_lines.append(f"- QA status: {'fail' if qa['blocking_errors'] else 'warn' if qa['warnings'] else 'pass'}")
     if qa["warnings"]:
         narrative_lines.append(f"- QA warnings: {qa['warnings']}")
@@ -3637,11 +3708,7 @@ except Exception as e:
     result = {
         "success": False,
         "error": str(e),
-        "traceback": traceback.format_exc(),
     }
-    error_path = safe_error_path(method)
-    result["error_log_path"] = error_path
-    save_json(error_path, result)
     emit(result)
 `
 
@@ -3655,11 +3722,13 @@ except Exception as e:
       command: pythonCommand,
       script: pythonScript,
       cwd: Instance.directory,
+      abort: ctx.abort,
     })
     const { code, stdout, stderr } = execution
 
     if (code !== 0) {
-      log.error("python failed", { code, stderr })
+      if (params.methodName === "psm_construction") cleanupFailedPropensityScoreRun(outputDir)
+      log.error("python failed", { code, stderr: summarizeToolError(stderr) })
       const failureArtifacts = persistPythonFailureArtifacts({
         label: `${params.methodName}_nonzero_exit`,
         command: pythonCommand,
@@ -3677,7 +3746,6 @@ except Exception as e:
       })
       throw new Error(
         `Econometrics failed with Python ${pythonCommand} (exit code ${code})` +
-          `\nCrash script: ${relativeWithinProject(failureArtifacts.scriptCopyPath)}` +
           `\nStdout log: ${relativeWithinProject(failureArtifacts.stdoutPath)}` +
           `\nStderr log: ${relativeWithinProject(failureArtifacts.stderrPath)}` +
           `\nContext: ${relativeWithinProject(failureArtifacts.contextPath)}`,
@@ -3688,6 +3756,7 @@ except Exception as e:
     try {
       result = parsePythonResult<PythonResult>(stdout)
     } catch (error) {
+      if (params.methodName === "psm_construction") cleanupFailedPropensityScoreRun(outputDir)
       const failureArtifacts = persistPythonFailureArtifacts({
         label: `${params.methodName}_parse_failure`,
         command: pythonCommand,
@@ -3706,7 +3775,6 @@ except Exception as e:
       })
       throw new Error(
         `Failed to parse python result from ${pythonCommand}: ${error}` +
-          `\nCrash script: ${relativeWithinProject(failureArtifacts.scriptCopyPath)}` +
           `\nStdout log: ${relativeWithinProject(failureArtifacts.stdoutPath)}` +
           `\nStderr log: ${relativeWithinProject(failureArtifacts.stderrPath)}` +
           `\nContext: ${relativeWithinProject(failureArtifacts.contextPath)}`,
@@ -3721,6 +3789,7 @@ except Exception as e:
     result.run_id = effectiveRunId
 
     if (!result.success) {
+      if (params.methodName === "psm_construction") cleanupFailedPropensityScoreRun(outputDir)
       const reflection = classifyToolFailure({
         toolName: "econometrics",
         error: result.error ?? "unknown error",
@@ -3745,10 +3814,17 @@ except Exception as e:
       })
       let message = `Econometrics analysis failed: ${result.error ?? "unknown error"}`
       message += `\nPython interpreter: ${pythonCommand}`
-      if (result.error_log_path) message += `\nError log: ${relativeWithinProject(result.error_log_path)}`
       message += `\nReflection log: ${relativeWithinProject(reflectionPath)}`
-      if (result.traceback) message += `\n${result.traceback}`
       throw new Error(message)
+    }
+
+    if (params.methodName === "psm_construction") {
+      try {
+        validatePropensityScoreConstructionResult(result, outputDir)
+      } catch (error) {
+        cleanupFailedPropensityScoreRun(outputDir)
+        throw error
+      }
     }
 
     const diagnosticsPayload = loadJsonFile<Record<string, unknown>>(result.diagnostics_path) ?? {}
@@ -3812,7 +3888,7 @@ except Exception as e:
     const deliveryBundlePath: string | undefined = undefined
 
     let numericSnapshot: NumericSnapshotDocument | undefined
-    if (result.output_path) {
+    if (result.output_path && params.methodName !== "psm_construction") {
       numericSnapshot = createEconometricsNumericSnapshot({
         outputDir,
         methodName: params.methodName,
@@ -3906,6 +3982,7 @@ except Exception as e:
       fs.writeFileSync(result.output_path, JSON.stringify(result, null, 2), "utf-8")
     }
 
+    const isPropensityScoreDiagnostic = params.methodName === "psm_construction"
     let output = `## Econometrics result - ${params.methodName}\n\n`
     if (datasetManifest?.datasetId ?? result.dataset_id) output += `Dataset: ${datasetManifest?.datasetId ?? result.dataset_id}\n`
     output += `Run ID: ${effectiveRunId}\n`
@@ -3973,6 +4050,7 @@ except Exception as e:
       for (const item of publishedFiles) output += `- ${item.relativePath}\n`
     }
     output += `\nResults directory: ${relativeWithinProject(outputDir)}/\n`
+    if (isPropensityScoreDiagnostic) output = buildPropensityScoreDiagnosticOutput(result)
 
     const metadata: EconometricsToolMetadata = {
       method: params.methodName,
@@ -3983,110 +4061,150 @@ except Exception as e:
       runId: effectiveRunId,
       numericSnapshotPath: result.numeric_snapshot_path ? relativeWithinProject(result.numeric_snapshot_path) : undefined,
       numericSnapshotPreview: numericSnapshotPreview(numericSnapshot),
-      groundingScope: "regression",
+      groundingScope: isPropensityScoreDiagnostic ? "diagnostic" : "regression",
       qaGateStatus: qaGate.qaGateStatus,
       qaGateReason: qaGate.qaGateReason,
       qaSource: qaGate.qaSource,
       outputDir: relativeWithinProject(outputDir),
       deliveryBundleDir: deliveryBundlePath ? relativeWithinProject(deliveryBundlePath) : undefined,
       publishedFiles,
-      presentation: buildEconometricsPresentation({
-        params,
-        result,
-        qaGate,
-        principleChecks,
-        conciseResultPath,
-        deliveryBundlePath,
-        publishedFiles,
-      }),
-      analysisView: createToolAnalysisView({
-        kind: "econometrics",
-        step: `econometrics(${params.methodName})`,
-        datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
-        stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
-        results: [
-          analysisMetric(
-            params.treatmentVar ? `${params.treatmentVar} 系数` : "系数",
-            result.numeric_snapshot_path && result.coefficient !== undefined ? result.coefficient.toFixed(4) : undefined,
-          ),
-          analysisMetric("标准误", result.std_error !== undefined ? result.std_error.toFixed(4) : undefined),
-          analysisMetric("p 值", result.p_value !== undefined ? result.p_value.toFixed(4) : undefined),
-          analysisMetric("N", result.rows_used),
-          analysisMetric("组数", groupCount(result)),
-          analysisMetric(
-            params.methodName === "panel_fe_regression" ? "within R²" : "R²",
-            result.numeric_snapshot_path && result.r_squared !== undefined ? result.r_squared.toFixed(4) : undefined,
-          ),
-        ],
-        artifacts: [
-          analysisArtifact(result.output_path ? relativeWithinProject(result.output_path) : undefined, {
-            visibility: "user_default",
+      presentation: isPropensityScoreDiagnostic
+        ? undefined
+        : buildEconometricsPresentation({
+            params,
+            result,
+            qaGate,
+            principleChecks,
+            conciseResultPath,
+            deliveryBundlePath,
+            publishedFiles,
           }),
-          analysisArtifact(result.diagnostics_path ? relativeWithinProject(result.diagnostics_path) : undefined, {
-            visibility: "user_default",
-          }),
-          analysisArtifact(result.numeric_snapshot_path ? relativeWithinProject(result.numeric_snapshot_path) : undefined, {
-            visibility: "user_default",
-          }),
-          analysisArtifact(result.metadata_path ? relativeWithinProject(result.metadata_path) : undefined, {
-            visibility: "user_collapsed",
-          }),
-          ...publishedFiles.map((item) =>
-            analysisArtifact(item.relativePath, {
-              label: item.label,
-              visibility: "user_collapsed",
+      analysisView: isPropensityScoreDiagnostic
+        ? createToolAnalysisView({
+            kind: "econometrics",
+            step: "psm_construction",
+            datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
+            stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
+            results: [
+              analysisMetric("N", result.rows_used),
+              analysisMetric("得分范围", `${result.score_min!.toFixed(4)}–${result.score_max!.toFixed(4)}`),
+              analysisMetric("共同支撑占比", `${(result.share_in_support! * 100).toFixed(1)}%`),
+            ],
+            artifacts: [
+              analysisArtifact(
+                result.propensity_scores_path ? relativeWithinProject(result.propensity_scores_path) : undefined,
+                { label: "逐行倾向得分", visibility: "user_collapsed" },
+              ),
+            ],
+            warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
+            conclusion: "已完成处理分配与共同支撑诊断；本步骤不是因果效应估计。",
+          })
+        : createToolAnalysisView({
+            kind: "econometrics",
+            step: `econometrics(${params.methodName})`,
+            datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
+            stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
+            results: [
+              analysisMetric(
+                params.treatmentVar ? `${params.treatmentVar} 系数` : "系数",
+                result.numeric_snapshot_path && result.coefficient !== undefined ? result.coefficient.toFixed(4) : undefined,
+              ),
+              analysisMetric("标准误", result.std_error !== undefined ? result.std_error.toFixed(4) : undefined),
+              analysisMetric("p 值", result.p_value !== undefined ? result.p_value.toFixed(4) : undefined),
+              analysisMetric("N", result.rows_used),
+              analysisMetric("组数", groupCount(result)),
+              analysisMetric(
+                params.methodName === "panel_fe_regression" ? "within R²" : "R²",
+                result.numeric_snapshot_path && result.r_squared !== undefined ? result.r_squared.toFixed(4) : undefined,
+              ),
+            ],
+            artifacts: [
+              analysisArtifact(result.output_path ? relativeWithinProject(result.output_path) : undefined, {
+                visibility: "user_default",
+              }),
+              analysisArtifact(result.diagnostics_path ? relativeWithinProject(result.diagnostics_path) : undefined, {
+                visibility: "user_default",
+              }),
+              analysisArtifact(result.numeric_snapshot_path ? relativeWithinProject(result.numeric_snapshot_path) : undefined, {
+                visibility: "user_default",
+              }),
+              analysisArtifact(result.metadata_path ? relativeWithinProject(result.metadata_path) : undefined, {
+                visibility: "user_collapsed",
+              }),
+              ...publishedFiles.map((item) =>
+                analysisArtifact(item.relativePath, {
+                  label: item.label,
+                  visibility: "user_collapsed",
+                }),
+              ),
+            ],
+            warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
+            conclusion: buildEconometricsConclusion({
+              treatmentVar: params.treatmentVar,
+              coefficient: result.coefficient,
+              pValue: result.p_value,
+              principleChecks,
             }),
-          ),
-        ],
-        warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
-        conclusion: buildEconometricsConclusion({
-          treatmentVar: params.treatmentVar,
-          coefficient: result.coefficient,
-          pValue: result.p_value,
-          principleChecks,
-        }),
-      }),
-      display: createToolDisplay({
-        summary:
-          result.numeric_snapshot_path && result.coefficient !== undefined && result.p_value !== undefined
-            ? `econometrics(${params.methodName}) completed: ${params.treatmentVar ?? "treatment"} coefficient ${result.coefficient.toFixed(4)}, p-value ${result.p_value.toFixed(4)}`
-            : `econometrics(${params.methodName}) completed`,
-        details: [
-          `Dependent variable: ${params.dependentVar}`,
-          params.treatmentVar ? `Treatment variable: ${params.treatmentVar}` : undefined,
-          params.entityVar ? `Entity FE: ${params.entityVar}` : undefined,
-          params.timeVar ? `Time FE: ${params.timeVar}` : undefined,
-          params.clusterVar ?? result.cluster_var ? `Clustered SE: ${params.clusterVar ?? result.cluster_var}` : undefined,
-          result.numeric_snapshot_path && result.coefficient !== undefined ? `Coefficient: ${result.coefficient.toFixed(4)}` : undefined,
-          result.numeric_snapshot_path && result.std_error !== undefined ? `Std. error: ${result.std_error.toFixed(4)}` : undefined,
-          result.numeric_snapshot_path && result.p_value !== undefined ? `P-value: ${result.p_value.toFixed(4)}` : undefined,
-          result.rows_used !== undefined ? `N: ${result.rows_used}` : undefined,
-          result.post_estimation_gates?.find((gate) => gate.gate === "cluster_count" && gate.diagnosticValue !== undefined)
-            ?.diagnosticValue !== undefined
-            ? `Groups: ${result.post_estimation_gates.find((gate) => gate.gate === "cluster_count" && gate.diagnosticValue !== undefined)?.diagnosticValue}`
-            : undefined,
-          result.numeric_snapshot_path && result.r_squared !== undefined ? `R-squared: ${result.r_squared.toFixed(4)}` : undefined,
-          qaGate.qaGateStatus ? `QA gate: ${qaGate.qaGateStatus}` : undefined,
-          result.warnings?.length ? `Warnings: ${result.warnings.join(" | ")}` : undefined,
-          principleChecks.findings.length ? `Principle checks: ${principleChecks.findings.join(" | ")}` : undefined,
-        ],
-        artifacts: [
-          ...publishedFiles.map((item) => ({
-            label: item.label,
-            path: item.relativePath,
-            visibility: "user_collapsed" as const,
-          })),
-          ...(result.numeric_snapshot_path
-            ? [
-                {
-                  label: "numeric_snapshot",
-                  path: relativeWithinProject(result.numeric_snapshot_path),
-                  visibility: "user_collapsed" as const,
-                },
-              ]
-            : []),
-        ],
-      }),
+          }),
+      display: isPropensityScoreDiagnostic
+        ? createToolDisplay({
+            summary: `倾向得分诊断完成：共同支撑样本占比 ${(result.share_in_support! * 100).toFixed(1)}%`,
+            details: [
+              `样本量：${result.rows_used}`,
+              `得分范围：${result.score_min!.toFixed(4)} 至 ${result.score_max!.toFixed(4)}`,
+              "本步骤不是因果效应估计。",
+            ],
+            artifacts: result.propensity_scores_path
+              ? [
+                  {
+                    label: "逐行倾向得分",
+                    path: relativeWithinProject(result.propensity_scores_path),
+                    visibility: "user_collapsed" as const,
+                  },
+                ]
+              : [],
+          })
+        : createToolDisplay({
+            summary:
+              result.numeric_snapshot_path && result.coefficient !== undefined && result.p_value !== undefined
+                ? `econometrics(${params.methodName}) completed: ${params.treatmentVar ?? "treatment"} coefficient ${result.coefficient.toFixed(4)}, p-value ${result.p_value.toFixed(4)}`
+                : `econometrics(${params.methodName}) completed`,
+            details: [
+              `Dependent variable: ${params.dependentVar}`,
+              params.treatmentVar ? `Treatment variable: ${params.treatmentVar}` : undefined,
+              params.entityVar ? `Entity FE: ${params.entityVar}` : undefined,
+              params.timeVar ? `Time FE: ${params.timeVar}` : undefined,
+              params.clusterVar ?? result.cluster_var ? `Clustered SE: ${params.clusterVar ?? result.cluster_var}` : undefined,
+              result.numeric_snapshot_path && result.coefficient !== undefined ? `Coefficient: ${result.coefficient.toFixed(4)}` : undefined,
+              result.numeric_snapshot_path && result.std_error !== undefined ? `Std. error: ${result.std_error.toFixed(4)}` : undefined,
+              result.numeric_snapshot_path && result.p_value !== undefined ? `P-value: ${result.p_value.toFixed(4)}` : undefined,
+              result.rows_used !== undefined ? `N: ${result.rows_used}` : undefined,
+              result.post_estimation_gates?.find((gate) => gate.gate === "cluster_count" && gate.diagnosticValue !== undefined)
+                ?.diagnosticValue !== undefined
+                ? `Groups: ${result.post_estimation_gates.find((gate) => gate.gate === "cluster_count" && gate.diagnosticValue !== undefined)?.diagnosticValue}`
+                : undefined,
+              result.numeric_snapshot_path && result.r_squared !== undefined ? `R-squared: ${result.r_squared.toFixed(4)}` : undefined,
+              qaGate.qaGateStatus ? `QA gate: ${qaGate.qaGateStatus}` : undefined,
+              result.warnings?.length ? `Warnings: ${result.warnings.join(" | ")}` : undefined,
+              principleChecks.findings.length ? `Principle checks: ${principleChecks.findings.join(" | ")}` : undefined,
+            ],
+            artifacts: [
+              ...publishedFiles.map((item) => ({
+                label: item.label,
+                path: item.relativePath,
+                visibility: "user_collapsed" as const,
+              })),
+              ...(result.numeric_snapshot_path
+                ? [
+                    {
+                      label: "numeric_snapshot",
+                      path: relativeWithinProject(result.numeric_snapshot_path),
+                      visibility: "user_collapsed" as const,
+                    },
+                  ]
+                : []),
+            ],
+          }),
     }
 
     return {

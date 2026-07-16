@@ -2,7 +2,6 @@ import fs from "fs/promises"
 import path from "path"
 import { Global } from "../global"
 import { Identifier } from "../id/id"
-import { PermissionNext } from "../permission/next"
 import type { Agent } from "../agent/agent"
 import { Scheduler } from "../scheduler"
 
@@ -15,6 +14,7 @@ export namespace Truncate {
   const HOUR_MS = 60 * 60 * 1000
 
   export type Result = { content: string; truncated: false } | { content: string; truncated: true; outputPath: string }
+  const REFERENCE_PREFIX = "tool-output:"
 
   export interface Options {
     maxLines?: number
@@ -41,13 +41,16 @@ export namespace Truncate {
     }
   }
 
-  function hasTaskTool(agent?: Agent.Info): boolean {
-    if (!agent?.permission) return false
-    const rule = PermissionNext.evaluate("task", "*", agent.permission)
-    return rule.action !== "deny"
+  export function resolveOutputReference(reference: string) {
+    if (!reference.startsWith(REFERENCE_PREFIX)) return undefined
+    const id = reference.slice(REFERENCE_PREFIX.length)
+    if (!/^tool_[0-9A-Za-z]+$/.test(id)) {
+      throw new Error("TOOL_OUTPUT_REFERENCE_DENIED：分页输出标识不合法。")
+    }
+    return path.join(DIR, id)
   }
 
-  export async function output(text: string, options: Options = {}, agent?: Agent.Info): Promise<Result> {
+  export async function output(text: string, options: Options = {}, _agent?: Agent.Info): Promise<Result> {
     const maxLines = options.maxLines ?? MAX_LINES
     const maxBytes = options.maxBytes ?? MAX_BYTES
     const direction = options.direction ?? "head"
@@ -91,16 +94,16 @@ export namespace Truncate {
 
     const id = Identifier.ascending("tool")
     const filepath = path.join(DIR, id)
-    await Bun.write(Bun.file(filepath), text)
+    await fs.mkdir(DIR, { recursive: true })
+    await fs.writeFile(filepath, text, { mode: 0o600 })
+    const outputReference = `${REFERENCE_PREFIX}${id}`
 
-    const hint = hasTaskTool(agent)
-      ? `The tool call succeeded but the output was truncated. Full output saved to: ${filepath}\nUse the Task tool to have explore agent process this file with Grep and Read (with offset/limit). Do NOT read the full file yourself - delegate to save context.`
-      : `The tool call succeeded but the output was truncated. Full output saved to: ${filepath}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
+    const hint = `工具执行成功，但输出过长。完整脱敏输出标识：${outputReference}\n如需查看，请使用 Read 的 offset/limit 分页读取相关片段，不要一次读取整个文件。`
     const message =
       direction === "head"
         ? `${preview}\n\n...${removed} ${unit} truncated...\n\n${hint}`
         : `...${removed} ${unit} truncated...\n\n${hint}\n\n${preview}`
 
-    return { content: message, truncated: true, outputPath: filepath }
+    return { content: message, truncated: true, outputPath: outputReference }
   }
 }

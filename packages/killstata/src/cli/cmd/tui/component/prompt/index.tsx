@@ -1,7 +1,6 @@
 import path from "path"
 import { BoxRenderable, TextareaRenderable, MouseEvent, PasteEvent, t, dim, fg } from "@opentui/core"
 import { createEffect, createMemo, type JSX, onMount, createSignal, onCleanup, Show, on } from "solid-js"
-import "opentui-spinner/solid"
 import { useLocal } from "@tui/context/local"
 import { useTheme } from "@tui/context/theme"
 import { EmptyBorder } from "@tui/component/border"
@@ -26,15 +25,14 @@ import { TuiEvent } from "../../event"
 import { iife } from "@/util/iife"
 import { Locale } from "@/util/locale"
 import { formatDuration } from "@/util/format"
-import { createColors, createFrames } from "../../ui/spinner.ts"
 import { useDialog } from "@tui/ui/dialog"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
 import { DialogAlert } from "../../ui/dialog-alert"
 import { useToast } from "../../ui/toast"
-import { useKV } from "../../context/kv"
 import { useTextareaKeybindings } from "../textarea-keybindings"
 import {
   attachmentLabel,
+  dataFileLabel,
   normalizePastedText,
   pastedTextLabel,
   resolvePastedFilePath,
@@ -66,11 +64,7 @@ export type PromptRef = {
   submit(): void
 }
 
-const PLACEHOLDERS = [
-  "例如：帮我看看固定效应模型适不适合我的研究",
-  "例如：导入一个 CSV 文件并检查数据质量",
-  "例如：我想做双重差分，需要准备什么数据？",
-]
+const PLACEHOLDERS = ["输入你的问题..."]
 const SHELL_PLACEHOLDERS = ["此模式仅供内部诊断使用"]
 
 let stashed: { prompt: PromptInfo; cursor: number } | undefined
@@ -104,7 +98,6 @@ export function Prompt(props: PromptProps) {
   const command = useCommandDialog()
   const renderer = useRenderer()
   const { theme, syntax } = useTheme()
-  const kv = useKV()
   const list = createMemo(() => props.placeholders?.normal ?? PLACEHOLDERS)
   const shell = createMemo(() => props.placeholders?.shell ?? SHELL_PLACEHOLDERS)
   const hasRightContent = createMemo(() => Boolean(props.right))
@@ -746,7 +739,7 @@ export function Prompt(props: PromptProps) {
   }
   const exit = useExit()
 
-  // 选中数据文件后，输入框里显示一枚紧凑的附件标记（[数据文件 panel.xlsx]），
+  // 选中数据文件后，输入框里显示一枚完整底色的附件标签，
   // 真正发给模型的是完整路径 —— 由 pasteText 的 virtual/real 映射负责。
   //
   // 关键：这里传的是**路径**而不是文件内容。图片走的 pasteAttachment 会把 base64 正文
@@ -755,7 +748,7 @@ export function Prompt(props: PromptProps) {
   function insertDataFilePath(filePath: string) {
     const needsSpace = input.plainText.length > 0 && !input.plainText.endsWith(" ")
     if (needsSpace) input.insertText(" ")
-    pasteText(filePath, `[数据文件 ${path.basename(filePath)}]`)
+    pasteText(filePath, dataFileLabel(path.basename(filePath)))
     input.focus()
   }
 
@@ -840,27 +833,6 @@ export function Prompt(props: PromptProps) {
     return
   }
 
-  const spinnerDef = createMemo(() => {
-    const agent = local.agent.current()
-    const color = agent ? local.agent.color(agent.name) : theme.border
-    return {
-      frames: createFrames({
-        color,
-        style: "pulse",
-        inactiveFactor: 0.3,
-        // enableFading: false,
-        minAlpha: 0.1,
-      }),
-      color: createColors({
-        color,
-        style: "pulse",
-        inactiveFactor: 0.3,
-        // enableFading: false,
-        minAlpha: 0.1,
-      }),
-    }
-  })
-
   return (
     <>
       <Autocomplete
@@ -883,7 +855,7 @@ export function Prompt(props: PromptProps) {
         agentStyleId={agentStyleId}
         promptPartTypeId={() => promptPartTypeId}
       />
-      <box ref={(r) => (anchor = r)} visible={props.visible !== false}>
+      <box ref={(r) => (anchor = r)} visible={props.visible !== false} width="100%">
         <box
           border={["left"]}
           borderColor={theme.borderSubtle}
@@ -900,8 +872,9 @@ export function Prompt(props: PromptProps) {
             flexShrink={0}
             backgroundColor={theme.background}
             flexGrow={1}
+            minWidth={0}
           >
-            <box flexDirection="row" gap={1} alignItems="flex-start">
+            <box flexDirection="row" gap={1} alignItems="flex-start" width="100%" minWidth={0}>
               {/* 数据文件入口。终端没有真正的文件选择器，所以这个标志是「按 Ctrl+O 打开
                   数据文件浏览器」的可见提示 —— 否则用户根本不知道有这个功能。 */}
               <text
@@ -916,10 +889,10 @@ export function Prompt(props: PromptProps) {
                   props.showPlaceholder === false
                     ? undefined
                     : store.mode === "shell"
-                      ? `输入要运行的命令... "${shell()[store.placeholder % shell().length]}"`
+                      ? shell()[store.placeholder % shell().length]
                       : props.sessionID
                         ? undefined
-                        : `输入你的问题... "${list()[store.placeholder % list().length]}"`
+                        : list()[store.placeholder % list().length]
                 }
                 textColor={keybind.leader ? theme.textMuted : theme.text}
                 focusedTextColor={keybind.leader ? theme.textMuted : theme.text}
@@ -1097,8 +1070,11 @@ export function Prompt(props: PromptProps) {
                 onMouseDown={(r: MouseEvent) => r.target?.focus()}
                 focusedBackgroundColor={theme.background}
                 cursorColor={theme.text}
+                cursorStyle={{ style: "line", blinking: true }}
                 syntaxStyle={syntax()}
                 flexGrow={1}
+                flexShrink={1}
+                minWidth={0}
               />
               <Show when={hasRightContent()}>
                 <box flexDirection="row" flexShrink={0} gap={1}>
@@ -1113,23 +1089,18 @@ export function Prompt(props: PromptProps) {
             </box>
           </box>
         </box>
-        <Show when={status().type !== "idle" || props.hint}>
+        <Show when={status().type === "retry" || props.hint}>
           <box flexDirection="row">
-            <Show when={status().type !== "idle"} fallback={props.hint ?? <text />}>
+            <Show when={status().type === "retry"} fallback={props.hint ?? <text />}>
               <box
                 flexDirection="row"
                 gap={1}
                 flexGrow={1}
                 justifyContent={status().type === "retry" ? "space-between" : "flex-start"}
               >
-                <box flexShrink={0} flexDirection="row" gap={1}>
-                  <box marginLeft={1}>
-                    <Show when={kv.get("animations_enabled", true)} fallback={<text fg={theme.textMuted}>[⋯]</text>}>
-                      <spinner color={spinnerDef().color} frames={spinnerDef().frames} interval={40} />
-                    </Show>
-                  </box>
-                  <box flexDirection="row" gap={1} flexShrink={0}>
-                    {(() => {
+              <box flexShrink={0} flexDirection="row" gap={1}>
+                <box flexDirection="row" gap={1} flexShrink={0}>
+                  {(() => {
                       const retry = createMemo(() => {
                         const s = status()
                         if (s.type !== "retry") return

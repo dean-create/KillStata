@@ -1,5 +1,7 @@
 import { displayPath } from "@/tool/analysis-display"
 import { readToolAnalysisView } from "@/tool/analysis-user-view"
+import { isNegatedWorkflowRequest, isWorkflowConsultation } from "@/runtime/input-intent"
+import { WORKFLOW_ANALYSIS_TOOL_IDS, isWorkflowEstimateTool } from "@/runtime/tool-catalog"
 
 type ToolStateLike = {
   status?: string
@@ -26,6 +28,7 @@ export type AnalysisUserView = {
 const CORE_ANALYSIS_TOOLS = new Set([
   "data_import",
   "econometrics",
+  ...WORKFLOW_ANALYSIS_TOOL_IDS,
   "regression_table",
   "research_brief",
   "heterogeneity_runner",
@@ -33,17 +36,14 @@ const CORE_ANALYSIS_TOOLS = new Set([
   "slide_generator",
 ])
 
-const FINAL_PRESENTATION_TOOLS = [
-  "paper_draft",
-  "slide_generator",
-  "research_brief",
-  "heterogeneity_runner",
-  "regression_table",
-  "econometrics",
-] as const
-
-const ANALYSIS_REQUEST_PATTERN =
-  /\b(csv|xlsx|xls|dta|sav|parquet|regression|econometric|econometrics|diagnostics?)\b|数据|导入|描述统计|回归|计量|变量|检查表|输出路径/i
+const FINAL_PRESENTATION_TOOL_GROUPS: ReadonlyArray<ReadonlySet<string>> = [
+  new Set(["paper_draft"]),
+  new Set(["slide_generator"]),
+  new Set(["research_brief"]),
+  new Set(["heterogeneity_runner"]),
+  new Set(["regression_table"]),
+  new Set<string>([...WORKFLOW_ANALYSIS_TOOL_IDS, "econometrics"]),
+]
 
 const RAW_DETAIL_REQUEST_PATTERN =
   /原始数据|原始内容|文件全文|完整日志|完整\s*json|原始\s*json|调试模式|完整过程|不要摘要|show raw|raw data|full log|full text|raw json/i
@@ -80,6 +80,30 @@ function uniqueStrings(items: Array<string | undefined>, limit?: number) {
   return result
 }
 
+export function localizeAnalysisWarning(warning: string) {
+  const text = warning.trim()
+  if (!text) return undefined
+  if (!/[A-Za-z]/.test(text)) return text
+
+  if (/breusch-pagan.*significant|heteroskedasticity.*breusch-pagan/i.test(text)) {
+    return "异方差检验显著，建议使用稳健或聚类标准误进行推断。"
+  }
+
+  const duplicateRows = text.match(/found\s+(\d+)\s+duplicate entity-time rows/i)
+  if (duplicateRows) return `发现 ${duplicateRows[1]} 条个体—时间重复记录，需要处理后再估计。`
+
+  const clusterCount = text.match(/cluster count is low\s*\((\d+)\)/i)
+  if (clusterCount) return `聚类数量较少（${clusterCount[1]}），聚类标准误可能不稳定。`
+
+  const droppedRows = text.match(/dropped\s+(\d+)\s+rows with missing model variables/i)
+  if (droppedRows) return `因模型变量缺失，已剔除 ${droppedRows[1]} 条样本。`
+
+  const absorbed = text.match(/fully absorbed by fixed effects.*?:\s*(.+)$/i)
+  if (absorbed) return `以下变量被固定效应完全吸收，已从模型中移除：${absorbed[1]}。`
+
+  return "检测到需要关注的诊断问题，请查看结果文件中的诊断说明。"
+}
+
 function isCompletedTool(part: AnalysisToolPartLike) {
   return part.state.status === "completed"
 }
@@ -107,8 +131,8 @@ function uniquePartsByReference(parts: Array<AnalysisToolPartLike | undefined>) 
 }
 
 function selectPrimaryResultPart(parts: AnalysisToolPartLike[]) {
-  for (const tool of FINAL_PRESENTATION_TOOLS) {
-    const match = findStep(parts, (part) => part.tool === tool)
+  for (const toolGroup of FINAL_PRESENTATION_TOOL_GROUPS) {
+    const match = findStep(parts, (part) => toolGroup.has(part.tool))
     if (match) return match
   }
   return parts[parts.length - 1]
@@ -204,6 +228,15 @@ function displayStepLabel(step?: string) {
   if (step === "data_import(correlation)") return "相关性分析"
   if (step === "econometrics(panel_fe_regression)") return "固定效应回归"
   if (step.startsWith("econometrics(")) return "计量回归"
+  if (step === "econometrics_recommend") return "计量方法推荐"
+  if (step === "psm_construction") return "倾向得分与共同支撑诊断"
+  if (step === "ols_regression") return "OLS 回归"
+  if (step === "panel_fe_regression") return "面板固定效应回归"
+  if (step === "iv_2sls") return "工具变量回归"
+  if (step === "hdfe_regression") return "高维固定效应回归"
+  if (step === "did_static") return "传统双重差分"
+  if (step === "did2s") return "两阶段双重差分"
+  if (step === "did_event_study_saturated") return "现代交错处理事件研究"
   if (step === "regression_table") return "三线表与回归表格"
   if (step === "heterogeneity_runner") return "异质性与机制分析"
   if (step === "research_brief") return "研究摘要"
@@ -220,7 +253,7 @@ function summarizeCurrent(parts: AnalysisToolPartLike[]) {
   const step = view.step ?? latest.tool
   const label = displayStepLabel(step) ?? step
 
-  if (latest.tool === "econometrics") {
+  if (isWorkflowEstimateTool(latest.tool)) {
     return `已完成${label}，正在整理回归结果`
   }
 
@@ -244,7 +277,8 @@ function inferNextStep(parts: AnalysisToolPartLike[]) {
   const view = getAnalysisView(latest)
   const step = view?.step ?? latest.tool
 
-  if (latest.tool === "econometrics") return "汇总结论、诊断信息和关键产物文件"
+  if (isWorkflowEstimateTool(latest.tool)) return "汇总结论、诊断信息和关键产物文件"
+  if (latest.tool === "psm_construction") return "先检查共同支撑与协变量平衡，再决定是否进入匹配或加权"
   if (latest.tool === "regression_table") return "检查表格标题、列名、注释和导出格式是否可直接引用"
   if (latest.tool === "heterogeneity_runner") return "整理异质性、机制和稳健性扩展产物"
   if (latest.tool === "research_brief") return "整理研究摘要并输出关键信息"
@@ -279,17 +313,68 @@ function collectWarnings(parts: AnalysisToolPartLike[]) {
     parts.flatMap((part) => getAnalysisView(part)?.warnings ?? []),
     4,
   )
-  return raw.filter((warning) => !INTERNAL_WARNING_PATTERNS.some((pattern) => pattern.test(warning)))
+  return uniqueStrings(
+    raw
+      .filter((warning) => !INTERNAL_WARNING_PATTERNS.some((pattern) => pattern.test(warning)))
+      .map(localizeAnalysisWarning),
+    4,
+  )
 }
 
 export function wantsRawAnalysisDetail(latestUserText?: string) {
   return Boolean(latestUserText && RAW_DETAIL_REQUEST_PATTERN.test(latestUserText))
 }
 
-export function isAnalysisTurn(tools: AnalysisToolPartLike[], latestUserText?: string) {
+export function isAnalysisTurn(tools: AnalysisToolPartLike[], _latestUserText?: string) {
   if (tools.some((part) => getAnalysisView(part))) return true
   if (tools.some((part) => CORE_ANALYSIS_TOOLS.has(part.tool))) return true
-  return Boolean(latestUserText && ANALYSIS_REQUEST_PATTERN.test(latestUserText))
+  // 不从用户的字面措辞推断模式。像“除了数据分析还能做什么”是闲聊，
+  // 只有实际调用了分析工具才进入分析结果的净化与摘要视图。
+  return false
+}
+
+type PendingTaskFile = {
+  filename?: string
+  url: string
+  mime?: string
+}
+
+export function pendingTaskLabel(input: { text?: string; files: PendingTaskFile[] }) {
+  const dataFiles = input.files.filter((file) => !file.mime?.startsWith("image/"))
+  const source = [input.text ?? "", ...dataFiles.map((file) => `${file.filename} ${file.url}`)]
+    .join(" ")
+    .toLowerCase()
+
+  if (isNegatedWorkflowRequest(source) || isWorkflowConsultation(source)) return
+
+  if (
+    /\b(regression|econometric|econometrics|panel_fe|smart_baseline|auto_recommend|did|ols|2sls|iv|psm|rdd)\b/.test(
+      source,
+    ) ||
+    /计量|回归|固定效应|面板|基准模型|双重差分|工具变量|倾向得分|控制变量|稳健性|再分析|重新回归|再估计/.test(source)
+  ) {
+    return "正在进行计量分析"
+  }
+
+  if (
+    dataFiles.length > 0 ||
+    /\.(xlsx|xls|csv|dta|sav)\b/.test(source) ||
+    /\b(excel|spreadsheet|workbook|import)\b/.test(source) ||
+    /导入|读取数据|上传数据|数据文件|清洗数据|处理数据/.test(source)
+  ) {
+    return "正在处理数据"
+  }
+}
+
+export function shouldShowReasoning(input: {
+  hasContent: boolean
+  showThinking: boolean
+  isAnalysis: boolean
+  waitingForAccess: boolean
+}) {
+  if (!input.hasContent || !input.showThinking) return false
+  if (input.isAnalysis || input.waitingForAccess) return false
+  return true
 }
 
 export function buildAnalysisUserView(input: { tools: AnalysisToolPartLike[]; latestUserText?: string }) {

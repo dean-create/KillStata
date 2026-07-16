@@ -4,7 +4,7 @@ import os from "os"
 import path from "path"
 import { Instance } from "../../src/project/instance"
 import { Identifier } from "../../src/id/id"
-import { ReadTool } from "../../src/tool/read"
+import { buildParquetReadGuidance, ReadTool } from "../../src/tool/read"
 
 const ctx = {
   // 必须是合法的 session id（ses_ 前缀）：read 成功路径上会拿它去查会话消息，
@@ -63,6 +63,14 @@ describe("tool.read data guard", () => {
     const error = await read(target).catch((e: Error) => e.message)
     expect(error).toContain("data_import")
     expect(error).toContain("numeric_snapshot.json")
+  })
+
+  test("parquet guidance points to dedicated estimators instead of the legacy dispatcher", () => {
+    const guidance = buildParquetReadGuidance(path.join(root, ".killstata", "datasets", "d1", "stages", "stage.parquet"))
+
+    expect(guidance).toContain("dedicated estimator tool")
+    expect(guidance).not.toContain("data_import or econometrics")
+    expect(guidance).not.toContain("data_import/econometrics")
   })
 
   test("still reads our own result tables — those ARE the grounded artifacts", async () => {

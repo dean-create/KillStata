@@ -32,9 +32,9 @@ const ctx = {
   ask: async () => {},
 } as never
 
-function toolMessage(action: string, datasetId: string, stageId: string) {
+function toolMessage(action: string, datasetId: string, stageId: string, messageID = "msg_1") {
   return {
-    info: { id: "msg_1", role: "assistant" },
+    info: { id: messageID, role: "assistant" },
     parts: [
       {
         type: "tool",
@@ -55,6 +55,35 @@ async function withDataDir<T>(fn: (dir: string) => Promise<T>) {
 }
 
 describe("session revert = dataset rollback", () => {
+  test("an intermediate redo restores data even when the next hidden turn is only chat", () => {
+    const findRedoAdvanceTarget = (RevertDataset as Record<string, any>).findRedoAdvanceTarget
+    const messages = [
+      toolMessage("filter", "ds_1", "stage_001", "msg_110"),
+      { info: { id: "msg_200", role: "user" }, parts: [{ type: "text", text: "谢谢" }] },
+    ] as never
+
+    expect(findRedoAdvanceTarget?.(messages, "msg_100", "msg_200", "ds_1")).toEqual({
+      datasetId: "ds_1",
+      stageId: "stage_001",
+      undoneAction: "filter",
+    })
+  })
+
+  test("final redo restores the latest data-producing stage from the hidden messages", () => {
+    const findRestoreTarget = (RevertDataset as Record<string, any>).findRestoreTarget
+    const messages = [
+      toolMessage("filter", "ds_1", "stage_001"),
+      toolMessage("qa", "ds_1", "stage_001"),
+      toolMessage("preprocess", "ds_1", "stage_002"),
+    ]
+
+    expect(findRestoreTarget?.(messages, "ds_1")).toEqual({
+      datasetId: "ds_1",
+      stageId: "stage_002",
+      undoneAction: "preprocess",
+    })
+  })
+
   test("a chat-only turn has nothing to roll back (undo degrades to message removal)", () => {
     const messages = [
       { info: { id: "m1", role: "assistant" }, parts: [{ type: "text", text: "hello" }] },

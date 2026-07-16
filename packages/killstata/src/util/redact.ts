@@ -1,5 +1,5 @@
 const ASSIGNMENT_SECRET_PATTERN =
-  /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|authorization)\b\s*[:=]\s*["']?[^"',\s}]+/gi
+  /["']?\b([A-Za-z0-9_-]*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|credentials?|cookie|secret|password|passwd|authorization))\b["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\r\n,}]+)/gi
 const BEARER_SECRET_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi
 const LONG_TOKEN_PATTERN = /\b[A-Za-z0-9_\-]{40,}\b/g
 

@@ -134,6 +134,68 @@ describe("experiment log", () => {
     })
   })
 
+  test("records PyFixest traditional DID numbers and the group-post interaction", () => {
+    withTemp((root) => {
+      const resultPath = writeResults(path.join(root, "did-static"), {
+        success: true,
+        method: "did_static",
+        rowsUsed: 801,
+        rSquared: 0.187844,
+        warnings: ["数据只有两个时期"],
+        primary: {
+          term: "treated:t",
+          estimate: 2.9350196887,
+          stdError: 1.5434221385,
+          pValue: 0.057581101,
+        },
+      })
+      const manifest = {
+        version: 1,
+        datasetId: "did_static_test",
+        sourcePath: "/tmp/did.xlsx",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        updatedAt: "2026-07-16T00:01:00.000Z",
+        stages: [{
+          stageId: "stage_000",
+          branch: "main",
+          action: "import",
+          workingPath: path.join(root, "stage.parquet"),
+          workingFormat: "parquet",
+          rowCount: 820,
+          columnCount: 8,
+          createdAt: "2026-07-16T00:00:00.000Z",
+        }],
+        artifacts: [{
+          artifactId: "did_static_1",
+          stageId: "stage_000",
+          branch: "main",
+          action: "did_static",
+          outputPath: resultPath,
+          createdAt: "2026-07-16T00:01:00.000Z",
+          metadata: {
+            spec: {
+              dependentVar: "fte",
+              groupVar: "treated",
+              postVar: "t",
+              covariates: ["bk", "kfc", "roys"],
+            },
+          },
+        }],
+        finalOutputs: [],
+      } as unknown as DatasetManifest
+
+      const [entry] = buildExperimentEntries(manifest)
+      const rendered = renderExperimentLog({ datasetId: manifest.datasetId, entries: [entry] })
+
+      expect(entry.coefficient).toBeCloseTo(2.9350196887, 8)
+      expect(entry.stdError).toBeCloseTo(1.5434221385, 8)
+      expect(entry.pValue).toBeCloseTo(0.057581101, 8)
+      expect(entry.rowsUsed).toBe(801)
+      expect(rendered).toContain("`fte ~ treated + t + treated:t + bk + kfc + roys`")
+      expect(rendered).toContain("系数 **2.9350**")
+    })
+  })
+
   test("links each experiment to the data stage it ran on, including the sample change", () => {
     withTemp((root) => {
       const [, second] = buildExperimentEntries(makeManifest(root))

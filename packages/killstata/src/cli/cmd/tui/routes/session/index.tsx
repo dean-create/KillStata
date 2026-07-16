@@ -82,6 +82,7 @@ import {
   type AnalysisToolPartLike,
 } from "@/runtime/analysis-text-sanitizer"
 import { isAnalysisTurn, pendingTaskLabel, shouldShowReasoning } from "@/runtime/analysis-user-view"
+import { WORKFLOW_ANALYSIS_TOOL_IDS, isWorkflowAnalysisTool, isWorkflowEstimateTool } from "@/runtime/tool-catalog"
 import { isReasoningExpanded, toggleReasoningExpandedState } from "./reasoning-state"
 
 addDefaultParsers(parsers.parsers)
@@ -1269,6 +1270,7 @@ const PART_MAPPING = {
 const INTERNAL_ANALYSIS_MESSAGE_TOOLS = new Set([
   "data_import",
   "econometrics",
+  ...WORKFLOW_ANALYSIS_TOOL_IDS,
   "heterogeneity_runner",
   "research_brief",
   "paper_draft",
@@ -1511,15 +1513,14 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
     () =>
       !ctx.showDetails() &&
       props.part.state.status !== "error" &&
-      [
+      ([
         "data_import",
-        "econometrics",
         "regression_table",
         "heterogeneity_runner",
         "research_brief",
         "paper_draft",
         "slide_generator",
-      ].includes(props.part.tool),
+      ].includes(props.part.tool) || isWorkflowAnalysisTool(props.part.tool)),
   )
   const analysisToolErrorText = createMemo(() => {
     if (props.part.state.status !== "error" || !isAnalysisAssistantMessage(props.message, sync)) return undefined
@@ -1636,7 +1637,11 @@ function analysisProgressLabel(part: ToolPart) {
   if (step === "data_import(describe)" || action === "describe") return "生成描述统计"
   if (step === "data_import(correlation)" || action === "correlation") return "计算相关性"
   if (part.tool === "data_import") return "处理数据"
-  if (part.tool === "econometrics") return "进行计量分析"
+  if (part.tool === "econometrics_recommend") return "推荐计量方法"
+  if (part.tool === "hdfe_regression") return "进行高维固定效应回归"
+  if (part.tool === "did2s") return "进行两阶段双重差分"
+  if (part.tool === "did_event_study_saturated") return "进行现代事件研究"
+  if (isWorkflowEstimateTool(part.tool)) return "进行计量分析"
   if (part.tool === "regression_table") return "整理回归结果表"
   if (part.tool === "heterogeneity_runner") return "进行异质性分析"
   if (part.tool === "research_brief") return "整理研究摘要"

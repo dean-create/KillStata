@@ -10,8 +10,6 @@ import {
   type Tool,
   type ToolSet,
   extractReasoningMiddleware,
-  tool,
-  jsonSchema,
 } from "ai"
 import { clone, mergeDeep, pipe } from "remeda"
 import { ProviderTransform } from "@/provider/transform"
@@ -26,6 +24,7 @@ import { PermissionNext } from "@/permission/next"
 import { Auth } from "@/auth"
 import { RuntimeHooks } from "@/runtime/hooks"
 import type { WorkflowInputIntent } from "@/runtime/types"
+import { summarizeToolError } from "@/runtime/tool-result-policy"
 
 export namespace LLM {
   const log = Log.create({ service: "llm" })
@@ -164,26 +163,6 @@ export namespace LLM {
 
     const tools = await resolveTools(input)
 
-    // LiteLLM and some Anthropic proxies require the tools parameter to be present
-    // when message history contains tool calls, even if no tools are being used.
-    // Add a dummy tool that is never called to satisfy this validation.
-    // This is enabled for:
-    // 1. Providers with "litellm" in their ID or API ID (auto-detected)
-    // 2. Providers with explicit "litellmProxy: true" option (opt-in for custom gateways)
-    const isLiteLLMProxy =
-      provider.options?.["litellmProxy"] === true ||
-      input.model.providerID.toLowerCase().includes("litellm") ||
-      input.model.api.id.toLowerCase().includes("litellm")
-
-    if (isLiteLLMProxy && Object.keys(tools).length === 0 && hasToolCalls(input.messages)) {
-      tools["_noop"] = tool({
-        description:
-          "Placeholder for LiteLLM/Anthropic proxy compatibility - required when message history contains tool calls but no active tools are needed",
-        inputSchema: jsonSchema({ type: "object", properties: {} }),
-        execute: async () => ({ output: "", title: "", metadata: {} }),
-      })
-    }
-
     l.info("stream params ready", {
       messageCount: input.messages.length,
       toolCount: Object.keys(tools).length,
@@ -192,9 +171,9 @@ export namespace LLM {
     })
 
     const result = streamText({
-      onError(error) {
+      onError({ error }) {
         l.error("stream error", {
-          error,
+          error: summarizeToolError(error),
         })
       },
       async experimental_repairToolCall(failed) {
@@ -209,14 +188,7 @@ export namespace LLM {
             toolName: lower,
           }
         }
-        return {
-          ...failed.toolCall,
-          input: JSON.stringify({
-            tool: failed.toolCall.toolName,
-            error: failed.error.message,
-          }),
-          toolName: "invalid",
-        }
+        return null
       },
       temperature: params.temperature,
       topP: params.topP,
@@ -234,11 +206,9 @@ export namespace LLM {
             "x-killstata-request": input.user.id,
             "x-killstata-client": Flag.KILLSTATA_CLIENT,
           }
-          : input.model.providerID !== "anthropic"
-            ? {
-              "User-Agent": `killstata/${Installation.VERSION}`,
-            }
-            : undefined),
+          : {
+            "User-Agent": `killstata/${Installation.VERSION}`,
+          }),
         ...input.model.headers,
         ...headers,
       },
@@ -290,15 +260,4 @@ export namespace LLM {
     return input.tools
   }
 
-  // Check if messages contain any tool-call content
-  // Used to determine if a dummy tool should be added for LiteLLM proxy compatibility
-  export function hasToolCalls(messages: ModelMessage[]): boolean {
-    for (const msg of messages) {
-      if (!Array.isArray(msg.content)) continue
-      for (const part of msg.content) {
-        if (part.type === "tool-call" || part.type === "tool-result") return true
-      }
-    }
-    return false
-  }
 }

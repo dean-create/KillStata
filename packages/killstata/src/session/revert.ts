@@ -48,12 +48,23 @@ export namespace SessionRevert {
 
     if (revert) {
       const rangeMessages = all.filter((msg) => msg.info.id >= revert!.messageID)
+      const advancingRedo = Boolean(session.revert && revert.messageID > session.revert.messageID)
+
+      if (advancingRedo && session.revert?.dataset) {
+        const restoreTarget = RevertDataset.findRedoAdvanceTarget(
+          all,
+          session.revert.messageID,
+          revert.messageID,
+          session.revert.dataset.datasetId,
+        )
+        if (restoreTarget) await RevertDataset.rollback(restoreTarget, input.sessionID)
+      }
 
       // 撤销 = 把数据退回到这些操作之前的那个阶段。没有动过数据的会话（只是聊天、只跑了
       // 回归、只看了描述统计）自然找不到目标，此时 /undo 退化为纯粹的消息撤销——这是对的。
       const target = RevertDataset.findTarget(rangeMessages)
       if (target) {
-        await RevertDataset.rollback(target, input.sessionID)
+        if (!advancingRedo) await RevertDataset.rollback(target, input.sessionID)
         revert.dataset = target
       }
 
@@ -69,8 +80,16 @@ export namespace SessionRevert {
     SessionPrompt.assertNotBusy(input.sessionID)
     const session = await Session.get(input.sessionID)
     if (!session.revert) return session
-    // 不需要还原任何文件：数据的回滚本身就是一个新派生的 stage（往前长，不抹历史），
-    // 取消撤销只是把消息放回来。
+
+    // 最后一轮重做会恢复边界后的全部消息，因此数据也要恢复到这些消息最后生成的阶段。
+    // 仍然通过 rollback 派生新 stage，不修改或抹掉既有血缘。
+    if (session.revert.dataset) {
+      const all = await Session.messages({ sessionID: input.sessionID })
+      const hidden = all.filter((message) => message.info.id >= session.revert!.messageID)
+      const target = RevertDataset.findRestoreTarget(hidden, session.revert.dataset.datasetId)
+      if (target) await RevertDataset.rollback(target, input.sessionID)
+    }
+
     const next = await Session.update(input.sessionID, (draft) => {
       draft.revert = undefined
     })

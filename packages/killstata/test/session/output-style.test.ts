@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import fs from "fs"
 import path from "path"
+import { WORKFLOW_ANALYSIS_TOOL_IDS } from "@/runtime/tool-catalog"
 
 // 这些断言锁住的是「用户看到什么」的产品决策，不是实现细节：
 // 工具调用默认只报告做了什么，代码正文 / diff / 命令输出 / 数据表格都藏在 /details 后面。
@@ -57,7 +58,13 @@ describe("session output style", () => {
     for (const named of prompt.match(/`([a-z_]+_[a-z_0-9]+)`/g) ?? []) {
       const id = named.replace(/`/g, "")
       // 只校验看起来像估计方法的（含下划线且不是工具名/文件名）
-      const toolsAndFiles = ["data_import", "experiment_log", "numeric_snapshot", "results_json"]
+      const toolsAndFiles = [
+        "data_import",
+        "experiment_log",
+        "numeric_snapshot",
+        "results_json",
+        ...WORKFLOW_ANALYSIS_TOOL_IDS,
+      ]
       if (toolsAndFiles.includes(id) || id.includes(".")) continue
       if (!supported.has(id)) {
         throw new Error(`prompt 点名了一个不存在的方法: ${id}（不在 SUPPORTED_METHODS 里）`)

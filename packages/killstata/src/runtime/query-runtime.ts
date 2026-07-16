@@ -3,7 +3,6 @@ import { SessionRetry } from "@/session/retry"
 import { SessionCompaction } from "@/session/compaction"
 import { Session } from "@/session"
 import { Config } from "@/config/config"
-import { Agent } from "@/agent/agent"
 import { LLM } from "@/session/llm"
 import type { Provider } from "@/provider/provider"
 import { ModelStreamAdapter } from "./model-stream-adapter"
@@ -11,8 +10,73 @@ import { RuntimeHooks } from "./hooks"
 import type { QueryEvent, QueryRuntimeResult } from "./types"
 import { classifyToolFailure, persistToolReflection } from "@/tool/analysis-reflection"
 import { Instance } from "@/project/instance"
+import { prepareToolMetadata, summarizeToolError } from "./tool-result-policy"
+import { isWorkflowAnalysisTool } from "./tool-catalog"
 
-const DOOM_LOOP_THRESHOLD = 3
+export const REPEATED_TOOL_CALL_THRESHOLD = 3
+
+function normalizeToolInput(input: unknown): Record<string, unknown> {
+  if (typeof input === "object" && input !== null && !Array.isArray(input)) {
+    return input as Record<string, unknown>
+  }
+  if (typeof input === "string") {
+    try {
+      const parsed = JSON.parse(input)
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+    } catch {}
+    return { _raw: input, _parseError: "Invalid JSON" }
+  }
+  return { _raw: String(input), _parseError: "Unexpected input type" }
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+    return `{${entries.join(",")}}`
+  }
+  return JSON.stringify(value)
+}
+
+export function toolCallSignature(toolName: string, input: unknown) {
+  return `${toolName}\u0000${canonicalJson(normalizeToolInput(input))}`
+}
+
+function canonicalRepairToolName(toolName: string) {
+  const lower = toolName.toLowerCase()
+  return isWorkflowAnalysisTool(lower) || lower === "data_import" ? lower : toolName
+}
+
+export function isRepeatedToolCall(
+  parts: MessageV2.Part[],
+  event: Pick<Extract<QueryEvent, { type: "tool-call" }>, "toolCallId" | "toolName" | "input">,
+) {
+  return repeatedToolCallCount(parts, event) >= REPEATED_TOOL_CALL_THRESHOLD
+}
+
+export function repeatedToolCallCount(
+  parts: MessageV2.Part[],
+  event: Pick<Extract<QueryEvent, { type: "tool-call" }>, "toolCallId" | "toolName" | "input">,
+) {
+  const previous = parts
+    .filter(
+      (part): part is MessageV2.ToolPart =>
+        part.type === "tool" && (part.state.status === "completed" || part.state.status === "error"),
+    )
+  const expected = toolCallSignature(event.toolName, event.input)
+  let count = 0
+  for (let index = previous.length - 1; index >= 0; index -= 1) {
+    const part = previous[index]
+    if (toolCallSignature(part.tool, part.state.input) !== expected) break
+    count += 1
+    if (count === REPEATED_TOOL_CALL_THRESHOLD) break
+  }
+  return count
+}
 
 export class QueryRuntime {
   private blocked = false
@@ -41,99 +105,8 @@ export class QueryRuntime {
         for await (const event of ModelStreamAdapter.normalize(stream.fullStream)) {
           this.input.abort.throwIfAborted()
 
-          if (event.type === "tool-call") {
-            const parts = await MessageV2.parts(this.input.assistantMessage.id)
-            const lastThree = parts.slice(-DOOM_LOOP_THRESHOLD)
-            if (
-              lastThree.length === DOOM_LOOP_THRESHOLD &&
-              lastThree.every(
-                (part) =>
-                  part.type === "tool" &&
-                  part.tool === event.toolName &&
-                  part.state.status !== "pending" &&
-                  JSON.stringify(part.state.input) === JSON.stringify(this.normalizeToolInput(event.input)),
-              )
-            ) {
-              const agent = await Agent.get(this.input.assistantMessage.agent)
-              await RuntimeHooks.preTool({
-                sessionID: this.input.sessionID,
-                toolName: event.toolName,
-                args: event.input,
-              })
-              if (agent) {
-                await import("@/permission/next").then(({ PermissionNext }) =>
-                  PermissionNext.ask({
-                    permission: "doom_loop",
-                    patterns: [event.toolName],
-                    sessionID: this.input.assistantMessage.sessionID,
-                    metadata: {
-                      tool: event.toolName,
-                      input: event.input,
-                    },
-                    always: [event.toolName],
-                    ruleset: agent.permission,
-                  }),
-                )
-              }
-            }
-          }
-
           if (event.type === "tool-error") {
-            const match = this.input.partFromToolCall(event.toolCallId)
-            const existingReflection =
-              match?.state.status === "running" && match.state.metadata && typeof match.state.metadata === "object"
-                ? (match.state.metadata["reflection"] as Record<string, unknown> | undefined)
-                : undefined
-
-            const hookResult = await RuntimeHooks.postToolFailure({
-              sessionID: this.input.sessionID,
-              messageID: this.input.assistantMessage.id,
-              agent: this.input.assistantMessage.agent,
-              model: {
-                providerID: this.input.model.providerID,
-                modelID: this.input.model.id,
-              },
-              toolName: event.toolName,
-              args: event.input,
-              error: event.error,
-            })
-
-            let reflectionMetadata = existingReflection
-            if (!reflectionMetadata) {
-              const reflection = classifyToolFailure({
-                toolName: event.toolName,
-                error: String(event.error),
-                input: event.input ? this.normalizeToolInput(event.input) : match?.state.input,
-              })
-              const reflectionPath = persistToolReflection(reflection)
-              reflectionMetadata = {
-                ...reflection,
-                reflectionPath: reflectionPath.startsWith(Instance.directory)
-                  ? reflectionPath.slice(Instance.directory.length + 1)
-                  : reflectionPath,
-              }
-            }
-
-            event.metadata = {
-              ...(event.metadata ?? {}),
-              ...(hookResult.metadata ?? {}),
-              ...(reflectionMetadata ? { reflection: reflectionMetadata } : {}),
-            }
-
-            if (!this.repair && hookResult.repair) {
-              this.repair = {
-                type: "repair",
-                ...hookResult.repair,
-              }
-              event.repair = this.repair
-            }
-
-            const { PermissionNext } = await import("@/permission/next")
-            const { Question } = await import("@/question")
-            if (event.error instanceof PermissionNext.RejectedError || event.error instanceof Question.RejectedError) {
-              this.blocked = shouldBreak
-              event.blocked = shouldBreak
-            }
+            await this.handleToolFailure(event, shouldBreak)
           }
 
           if (event.type === "step-finish") {
@@ -148,6 +121,7 @@ export class QueryRuntime {
           }
 
           yield event
+
           if (this.needsCompaction) break
         }
       } catch (error) {
@@ -190,19 +164,103 @@ export class QueryRuntime {
     }
   }
 
+  private async handleToolFailure(event: Extract<QueryEvent, { type: "tool-error" }>, shouldBreak: boolean) {
+    const rawError = event.error
+    const { PermissionNext } = await import("@/permission/next")
+    const { Question } = await import("@/question")
+    if (
+      rawError instanceof PermissionNext.RejectedError ||
+      rawError instanceof PermissionNext.DeniedError ||
+      rawError instanceof Question.RejectedError
+    ) {
+      event.error = rawError instanceof PermissionNext.DeniedError
+        ? "当前权限规则不允许执行本次工具。"
+        : "用户已取消本次工具执行。"
+      this.blocked = shouldBreak
+      event.blocked = shouldBreak
+      return
+    }
+    if (rawError instanceof PermissionNext.CorrectedError) {
+      event.error = summarizeToolError(rawError)
+      return
+    }
+
+    event.toolName = canonicalRepairToolName(event.toolName)
+    const safeError = summarizeToolError(rawError)
+    event.error = safeError
+    const match = this.input.partFromToolCall(event.toolCallId)
+    const existingReflection =
+      match?.state.status === "running" && match.state.metadata && typeof match.state.metadata === "object"
+        ? (match.state.metadata["reflection"] as Record<string, unknown> | undefined)
+        : undefined
+
+    const hookResult = await RuntimeHooks.postToolFailure({
+      sessionID: this.input.sessionID,
+      messageID: this.input.assistantMessage.id,
+      agent: this.input.assistantMessage.agent,
+      model: {
+        providerID: this.input.model.providerID,
+        modelID: this.input.model.id,
+      },
+      toolName: event.toolName,
+      args: event.input,
+      error: safeError,
+    })
+
+    const hookReflection = hookResult.metadata?.reflection
+    let reflectionMetadata = existingReflection ?? (
+      hookReflection && typeof hookReflection === "object" ? hookReflection as Record<string, unknown> : undefined
+    )
+    if (!reflectionMetadata) {
+      const reflection = classifyToolFailure({
+        toolName: event.toolName,
+        error: safeError,
+        input: event.input ? normalizeToolInput(event.input) : match?.state.input,
+      })
+      const reflectionPath = persistToolReflection(reflection)
+      reflectionMetadata = {
+        ...reflection,
+        reflectionPath: reflectionPath.startsWith(Instance.directory)
+          ? reflectionPath.slice(Instance.directory.length + 1)
+          : reflectionPath,
+      }
+    }
+
+    event.metadata = prepareToolMetadata({
+      ...(event.metadata ?? {}),
+      ...(hookResult.metadata ?? {}),
+      ...(reflectionMetadata ? { reflection: reflectionMetadata } : {}),
+    })
+
+    const repairCandidate = hookResult.repair ?? {
+      toolName: event.toolName,
+      retryStage: typeof reflectionMetadata?.retryStage === "string" ? reflectionMetadata.retryStage : "estimate",
+      repairAction:
+        typeof reflectionMetadata?.repairAction === "string"
+          ? reflectionMetadata.repairAction
+          : "根据工具描述修正失败调用后重试。",
+      reflectionPath:
+        typeof reflectionMetadata?.reflectionPath === "string" ? reflectionMetadata.reflectionPath : undefined,
+    }
+    const repair = {
+      ...repairCandidate,
+      toolName: canonicalRepairToolName(repairCandidate.toolName),
+    }
+    if (!this.repair) {
+      this.repair = {
+        type: "repair",
+        ...repair,
+        lockTool:
+          repair.lockTool ?? (isWorkflowAnalysisTool(event.toolName) || event.toolName === "data_import"),
+        failedInputSignature:
+          repair.failedInputSignature ?? toolCallSignature(repair.toolName, event.input),
+      }
+      event.repair = this.repair
+    }
+
+  }
+
   private normalizeToolInput(input: unknown): Record<string, unknown> {
-    if (typeof input === "object" && input !== null && !Array.isArray(input)) {
-      return input as Record<string, unknown>
-    }
-    if (typeof input === "string") {
-      try {
-        const parsed = JSON.parse(input)
-        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-          return parsed as Record<string, unknown>
-        }
-      } catch {}
-      return { _raw: input, _parseError: "Invalid JSON" }
-    }
-    return { _raw: String(input), _parseError: "Unexpected input type" }
+    return normalizeToolInput(input)
   }
 }

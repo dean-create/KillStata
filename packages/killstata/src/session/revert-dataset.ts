@@ -62,6 +62,44 @@ export namespace RevertDataset {
   }
 
   /**
+   * 最后一次 /redo 会把剩余的隐藏消息全部恢复，因此数据也必须回到这些消息执行完后的状态。
+   * 取最后一个真正派生了数据阶段的操作；qa/describe 等只读步骤不能覆盖恢复目标。
+   */
+  export function findRestoreTarget(messages: MessageV2.WithParts[], datasetId: string): Target | undefined {
+    let target: Target | undefined
+
+    for (const msg of messages) {
+      for (const part of msg.parts) {
+        if (part.type !== "tool" || part.state.status !== "completed" || part.tool !== "data_import") continue
+
+        const meta = part.state.metadata as { action?: string; datasetId?: string; stageId?: string } | undefined
+        if (meta?.datasetId !== datasetId || !meta.action || !meta.stageId) continue
+        if (!isStageProducingAction(meta.action as DataAction)) continue
+
+        target = {
+          datasetId,
+          stageId: meta.stageId,
+          undoneAction: meta.action,
+        }
+      }
+    }
+
+    return target
+  }
+
+  export function findRedoAdvanceTarget(
+    messages: MessageV2.WithParts[],
+    fromMessageID: string,
+    toMessageID: string,
+    datasetId: string,
+  ) {
+    const revealed = messages.filter(
+      (message) => message.info.id >= fromMessageID && message.info.id < toMessageID,
+    )
+    return findRestoreTarget(revealed, datasetId)
+  }
+
+  /**
    * 真正执行回滚：复用 data_import(action="rollback")，它会以目标阶段为父派生出一个新阶段。
    *
    * 注意这是「往前长」而不是「抹掉历史」——和 git revert 同理。被撤销的那个阶段仍然留在

@@ -11,8 +11,29 @@ import { STATUS_CODES } from "http"
 import { iife } from "@/util/iife"
 import { type SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
+import { summarizeToolError } from "@/runtime/tool-result-policy"
 
 export namespace MessageV2 {
+  const SAFE_ERROR_RESPONSE_HEADERS = new Set([
+    "retry-after",
+    "retry-after-ms",
+    "x-request-id",
+    "x-ratelimit-limit",
+    "x-ratelimit-remaining",
+    "x-ratelimit-reset",
+  ])
+
+  function sanitizeErrorResponseHeaders(headers: Record<string, string> | undefined) {
+    if (!headers) return undefined
+    const safe = Object.fromEntries(
+      Object.entries(headers)
+        .map(([key, value]) => [key.toLowerCase(), value] as const)
+        .filter(([key]) => SAFE_ERROR_RESPONSE_HEADERS.has(key))
+        .map(([key, value]) => [key, summarizeToolError(value, 512)]),
+    )
+    return Object.keys(safe).length > 0 ? safe : undefined
+  }
+
   const PROVIDER_METADATA_KEYS = new Set([
     "amazon-bedrock",
     "anthropic",
@@ -737,7 +758,7 @@ export namespace MessageV2 {
     switch (true) {
       case e instanceof DOMException && e.name === "AbortError":
         return new MessageV2.AbortedError(
-          { message: e.message },
+          { message: summarizeToolError(e) },
           {
             cause: e,
           },
@@ -748,7 +769,7 @@ export namespace MessageV2 {
         return new MessageV2.AuthError(
           {
             providerID: ctx.providerID,
-            message: e.message,
+            message: summarizeToolError(e),
           },
           { cause: e },
         ).toObject()
@@ -760,13 +781,13 @@ export namespace MessageV2 {
             metadata: {
               code: (e as SystemError).code ?? "",
               syscall: (e as SystemError).syscall ?? "",
-              message: (e as SystemError).message ?? "",
+              message: summarizeToolError((e as SystemError).message ?? ""),
             },
           },
           { cause: e },
         ).toObject()
       case APICallError.isInstance(e):
-        const message = iife(() => {
+        const message = summarizeToolError(iife(() => {
           let msg = e.message
           if (msg === "") {
             if (e.responseBody) return e.responseBody
@@ -794,24 +815,24 @@ export namespace MessageV2 {
           } catch { }
 
           return `${msg}: ${e.responseBody}`
-        }).trim()
+        }).trim())
 
-        const metadata = e.url ? { url: e.url } : undefined
+        const metadata = e.url ? { url: summarizeToolError(e.url, 2 * 1024) } : undefined
         return new MessageV2.APIError(
           {
             message,
             statusCode: e.statusCode,
             isRetryable: e.isRetryable,
-            responseHeaders: e.responseHeaders,
-            responseBody: e.responseBody,
+            responseHeaders: sanitizeErrorResponseHeaders(e.responseHeaders),
+            responseBody: e.responseBody ? summarizeToolError(e.responseBody) : undefined,
             metadata,
           },
           { cause: e },
         ).toObject()
       case e instanceof Error:
-        return new NamedError.Unknown({ message: e.toString() }, { cause: e }).toObject()
+        return new NamedError.Unknown({ message: summarizeToolError(e) }, { cause: e }).toObject()
       default:
-        return new NamedError.Unknown({ message: JSON.stringify(e) }, { cause: e })
+        return new NamedError.Unknown({ message: summarizeToolError(e) }, { cause: e }).toObject()
     }
   }
 }

@@ -2,16 +2,20 @@ import { Instance } from "@/project/instance"
 import { classifyToolFailure, persistToolReflection } from "@/tool/analysis-reflection"
 import { RuntimeHooks } from "./hooks"
 import { recordWorkflowStageFailure, recordWorkflowStageSuccess, runAutomaticVerifier, workflowPromptSummary } from "./workflow"
+import { isWorkflowAnalysisTool } from "./tool-catalog"
 
 let registered = false
 const WORKFLOW_TRACKED_TOOLS = new Set([
   "data_import",
-  "econometrics",
   "regression_table",
   "research_brief",
   "paper_draft",
   "slide_generator",
 ])
+
+function isWorkflowTrackedTool(toolName: string) {
+  return WORKFLOW_TRACKED_TOOLS.has(toolName) || isWorkflowAnalysisTool(toolName)
+}
 
 export function registerDefaultRuntimeHooks() {
   if (registered) return
@@ -27,7 +31,7 @@ export function registerDefaultRuntimeHooks() {
   })
 
   RuntimeHooks.registerPostTool(async ({ sessionID, messageID, agent, model, toolName, args, result }) => {
-    if (!WORKFLOW_TRACKED_TOOLS.has(toolName)) return
+    if (!isWorkflowTrackedTool(toolName)) return
     const normalizedArgs =
       typeof args === "object" && args && !Array.isArray(args) ? (args as Record<string, unknown>) : {}
     const { workflowRun, stage } = recordWorkflowStageSuccess({
@@ -57,7 +61,7 @@ export function registerDefaultRuntimeHooks() {
   })
 
   RuntimeHooks.registerPostToolFailure(({ sessionID, toolName, args, error }) => {
-    if (!WORKFLOW_TRACKED_TOOLS.has(toolName)) return
+    if (!isWorkflowTrackedTool(toolName)) return
     const reflection = classifyToolFailure({
       toolName,
       error: String(error),

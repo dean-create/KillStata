@@ -118,7 +118,7 @@ describe("tool.econometrics", () => {
     expect(source).toContain("def Staggered_Diff_in_Diff_Event_Study_visualization")
   })
 
-  test("auto downgrades panel FE to pooled OLS when duplicate panel keys remain", async () => {
+  test("blocks panel FE when duplicate panel keys remain instead of changing estimators", async () => {
     if (!(await supportsEconometricsRuntime())) return
     await withInstance(async (root) => {
       const csvPath = path.join(root, "panel_duplicates.csv")
@@ -135,24 +135,20 @@ describe("tool.econometrics", () => {
       fs.writeFileSync(csvPath, rows.join("\n"), "utf-8")
 
       const tool = await EconometricsTool.init()
-      const result = await tool.execute(
-        {
-          methodName: "panel_fe_regression",
-          dataPath: "panel_duplicates.csv",
-          dependentVar: "y",
-          treatmentVar: "did",
-          entityVar: "firm_id",
-          timeVar: "year",
-          outputDir: "outputs/panel_duplicate_case",
-        },
-        ctx as any,
-      )
-
-      expect(result.metadata.result).toBeDefined()
-      expect(result.metadata.result!.degraded_from).toBe("panel_fe_regression")
-      expect(result.metadata.result!.effective_method).toBe("pooled_ols")
-      expect(result.metadata.result!.effective_covariance).toBe("HC1")
-      expect(result.metadata.result!.decision_trace?.some((item: any) => String(item.message).includes("duplicate entity-time rows"))).toBe(true)
+      await expect(
+        tool.execute(
+          {
+            methodName: "panel_fe_regression",
+            dataPath: "panel_duplicates.csv",
+            dependentVar: "y",
+            treatmentVar: "did",
+            entityVar: "firm_id",
+            timeVar: "year",
+            outputDir: "outputs/panel_duplicate_case",
+          },
+          ctx as any,
+        ),
+      ).rejects.toThrow(/duplicate entity-time|重复的个体-时间/is)
     })
   })
 

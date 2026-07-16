@@ -43,16 +43,21 @@ import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
-import { Truncate } from "@/tool/truncation"
+import { prepareToolMetadata } from "@/runtime/tool-result-policy"
 import type { InputGraphNode, QueuedSessionAction, ToolAvailabilityPolicy, WorkflowInputIntent } from "@/runtime/types"
 import { RuntimeHooks } from "@/runtime/hooks"
-import { allowMcpToolForWorkflow } from "@/runtime/workflow"
 import { SessionRunCoordinator } from "./run-state"
 import { detectWorkflowLocaleFromText } from "@/runtime/workflow-locale"
 import { isNegatedWorkflowRequest, isWorkflowConsultation } from "@/runtime/input-intent"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
+
+export const AUTOMATIC_TOOL_REPAIR_LIMIT = 2
+
+export function shouldAutomaticallyRepairTool(attempts: number) {
+  return attempts < AUTOMATIC_TOOL_REPAIR_LIMIT
+}
 
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
@@ -420,6 +425,9 @@ export namespace SessionPrompt {
     })
 
     let step = 0
+    let automaticToolRepairs = 0
+    let activeRepairToolName: string | undefined
+    let activeRepairInputSignature: string | undefined
     const session = await Session.get(sessionID)
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
@@ -711,6 +719,12 @@ export namespace SessionPrompt {
         sessionID: sessionID,
         model,
         abort,
+        repairToolName: activeRepairToolName,
+        repairInputSignature: activeRepairInputSignature,
+        onRepairToolSucceeded: () => {
+          activeRepairToolName = undefined
+          activeRepairInputSignature = undefined
+        },
       })
 
       // Check if user explicitly invoked an agent via @ in this turn
@@ -726,6 +740,7 @@ export namespace SessionPrompt {
         bypassAgentCheck,
         intent: activeAction?.metadata?.["intent"] as WorkflowInputIntent | undefined,
         hasImageInput: Boolean(activeAction?.metadata?.["hasImageInput"]),
+        repairToolName: activeRepairToolName,
       })
 
       if (step === 1) {
@@ -791,15 +806,57 @@ export namespace SessionPrompt {
       })
       if (result === "stop") break
       if (typeof result === "object" && result.type === "repair") {
+        if (shouldAutomaticallyRepairTool(automaticToolRepairs)) {
+          automaticToolRepairs += 1
+          if (result.lockTool !== false) {
+            activeRepairToolName ??= result.toolName
+            if (activeRepairToolName === result.toolName) {
+              activeRepairInputSignature = result.failedInputSignature
+            }
+          }
+          const repairToolName = activeRepairToolName ?? result.toolName
+          SessionStatus.set(sessionID, {
+            type: "repair",
+            tool: repairToolName,
+            retryStage: result.retryStage,
+            message: result.repairAction,
+          })
+          const repairMessage: MessageV2.User = {
+            id: Identifier.ascending("message"),
+            sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: lastUser.agent,
+            model: lastUser.model,
+          }
+          await Session.updateMessage(repairMessage)
+          await Session.updatePart({
+            id: Identifier.ascending("part"),
+            messageID: repairMessage.id,
+            sessionID,
+            type: "text",
+            synthetic: true,
+            text: [
+              "<system-reminder>",
+              `上一步 ${repairToolName} 执行失败。`,
+              `只修复阶段 ${result.retryStage}：${result.repairAction}`,
+              result.lockTool === false
+                ? "根据上一条脱敏错误选择已注册工具并生成合法参数。"
+                : "根据工具参数描述和上一条脱敏错误重写参数；不得更换计量方法，不得原样重复失败参数。",
+              `这是自动修复 ${automaticToolRepairs}/${AUTOMATIC_TOOL_REPAIR_LIMIT}。`,
+              "</system-reminder>",
+            ].join("\n"),
+          } satisfies MessageV2.TextPart)
+          continue
+        }
+
         SessionStatus.set(sessionID, { type: "idle" })
-        // A failed operation stops here. Do not manufacture a user message and
-        // silently retry: the user decides whether to resume the analysis later.
         await Session.updatePart({
           id: Identifier.ascending("part"),
           messageID: processor.message.id,
           sessionID,
           type: "text",
-          text: "这一步没有完成，已停止执行，不会自动重试。若你希望继续，请明确告诉我“重试刚才的数据处理”或说明新的任务。",
+          text: `这一步连续修复 ${AUTOMATIC_TOOL_REPAIR_LIMIT} 次仍未完成，已停止执行，避免重复消耗。你可以调整数据或模型设定后再继续。`,
         } satisfies MessageV2.TextPart)
         break
       }
@@ -838,6 +895,7 @@ export namespace SessionPrompt {
     bypassAgentCheck: boolean
     intent?: WorkflowInputIntent
     hasImageInput?: boolean
+    repairToolName?: string
   }) {
     using _ = log.time("resolveTools")
     const tools: Record<string, AITool> = {}
@@ -916,7 +974,7 @@ export namespace SessionPrompt {
             ...match,
             state: {
               title: val.title,
-              metadata: val.metadata,
+              metadata: prepareToolMetadata(val.metadata ?? {}),
               status: "running",
               input: args,
               time: {
@@ -940,8 +998,9 @@ export namespace SessionPrompt {
       sessionID: input.session.id,
       agent: input.agent.name,
       inputIntent: resolvedIntent,
+      repairToolName: input.repairToolName,
       platformCapabilities: {
-        mcp: true,
+        mcp: false,
         images: input.hasImageInput ?? false,
         remote: Flag.KILLSTATA_CLIENT !== "cli",
       },
@@ -1018,105 +1077,6 @@ export namespace SessionPrompt {
           })
         },
       })
-    }
-
-    for (const [key, item] of Object.entries(await MCP.tools())) {
-      if (!allowMcpToolForWorkflow({ toolName: key, policy: toolAvailability })) continue
-      const execute = item.execute
-      if (!execute) continue
-
-      // Wrap execute to add plugin hooks and format output
-      item.execute = async (args, opts) => {
-        // 规范化工具参数：兼容 JSON 字符串或纯字符串输入
-        const normalizedArgs = normalizeToolArgs(key, args)
-
-        return input.processor.executeTool(key, normalizedArgs, {
-          callID: opts.toolCallId,
-          run: async (finalArgs) => {
-            const ctx = context(finalArgs, opts)
-            await Plugin.trigger(
-              "tool.execute.before",
-              {
-                tool: key,
-                sessionID: ctx.sessionID,
-                callID: opts.toolCallId,
-              },
-              {
-                args: finalArgs,
-              },
-            )
-
-            await ctx.ask({
-              permission: key,
-              metadata: {},
-              patterns: ["*"],
-              always: ["*"],
-            })
-
-            const result = await execute(finalArgs, opts)
-
-            await Plugin.trigger(
-              "tool.execute.after",
-              {
-                tool: key,
-                sessionID: ctx.sessionID,
-                callID: opts.toolCallId,
-              },
-              result,
-            )
-
-            const textParts: string[] = []
-            const attachments: MessageV2.FilePart[] = []
-
-            for (const contentItem of result.content) {
-              if (contentItem.type === "text") {
-                textParts.push(contentItem.text)
-              } else if (contentItem.type === "image") {
-                attachments.push({
-                  id: Identifier.ascending("part"),
-                  sessionID: input.session.id,
-                  messageID: input.processor.message.id,
-                  type: "file",
-                  mime: contentItem.mimeType,
-                  url: `data:${contentItem.mimeType};base64,${contentItem.data}`,
-                })
-              } else if (contentItem.type === "resource") {
-                const { resource } = contentItem
-                if (resource.text) {
-                  textParts.push(resource.text)
-                }
-                if (resource.blob) {
-                  attachments.push({
-                    id: Identifier.ascending("part"),
-                    sessionID: input.session.id,
-                    messageID: input.processor.message.id,
-                    type: "file",
-                    mime: resource.mimeType ?? "application/octet-stream",
-                    url: `data:${resource.mimeType ?? "application/octet-stream"};base64,${resource.blob}`,
-                    filename: resource.uri,
-                  })
-                }
-              }
-            }
-
-            const truncated = await Truncate.output(textParts.join("\n\n"), {}, input.agent)
-            const metadata = {
-              ...(result.metadata ?? {}),
-              truncated: truncated.truncated,
-              ...(truncated.truncated && { outputPath: truncated.outputPath }),
-            }
-
-            return {
-              title: "",
-              metadata,
-              output: truncated.content,
-              attachments,
-              content: result.content,
-            }
-          },
-        })
-      }
-      tools[key] = item
     }
 
     return tools

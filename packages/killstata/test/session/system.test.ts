@@ -3,14 +3,28 @@ import fs from "fs"
 import path from "path"
 
 describe("session.system prompt contracts", () => {
-  test("econometrics prompt defaults vague baselines to smart_baseline and keeps explicit estimators", () => {
+  test("econometrics prompt uses dedicated tools and never changes the requested estimator silently", () => {
     const sourcePath = path.join(process.cwd(), "src", "session", "system.ts")
     const source = fs.readFileSync(sourcePath, "utf-8")
 
-    expect(source).toContain("prefer econometrics with methodName=\"smart_baseline\"")
-    expect(source).toContain("prefer econometrics with methodName=\"auto_recommend\"")
-    expect(source).toContain("respect that method unless it is not executable")
-    expect(source).toContain("original request, the failure reason, and the executed method")
+    expect(source).toContain("Call the dedicated tool whose ID matches the estimator")
+    expect(source).toContain("Never switch to another estimator automatically")
+    expect(source).toContain("econometrics_recommend")
+    expect(source).not.toContain("methodName=\"smart_baseline\"")
+    expect(source).not.toContain("rescue to smart_baseline")
+  })
+
+  test("routes a traditional two-by-two DID to the static DID tool without requiring panel keys", () => {
+    const systemSource = fs.readFileSync(path.join(process.cwd(), "src", "session", "system.ts"), "utf-8")
+    const deepseekSource = fs.readFileSync(path.join(process.cwd(), "src", "session", "prompt", "deepseek.txt"), "utf-8")
+
+    for (const source of [systemSource, deepseekSource]) {
+      expect(source).toContain("did_static")
+      expect(source).toContain("groupVar")
+      expect(source).toContain("postVar")
+    }
+    expect(deepseekSource).toContain("Do not pass entityVar or timeVar")
+    expect(deepseekSource).toContain("call econometrics_recommend before QA")
   })
 
   test("spreadsheet intake does not inject bundled skill context", () => {
@@ -23,14 +37,13 @@ describe("session.system prompt contracts", () => {
     expect(systemSource).not.toContain("workflow-orchestrator")
   })
 
-  test("econometrics tool contract documents rescue behavior for explicit method failures", () => {
+  test("legacy econometrics contract is marked internal and does not advertise unsafe rescue behavior", () => {
     const sourcePath = path.join(process.cwd(), "src", "tool", "econometrics.txt")
     const source = fs.readFileSync(sourcePath, "utf-8")
 
-    expect(source).toContain("use `smart_baseline`")
-    expect(source).toContain("use `auto_recommend`")
-    expect(source).toContain("keep that estimator unless it is not executable")
-    expect(source).toContain("rescue to `smart_baseline`")
+    expect(source).toContain("internal compatibility dispatcher")
+    expect(source).not.toContain("rescue to `smart_baseline`")
+    expect(source).not.toContain("`psm_double_robust`")
   })
 
   test("environment prompt no longer injects an always-empty <files> block", () => {
@@ -39,6 +52,14 @@ describe("session.system prompt contracts", () => {
 
     expect(source).not.toContain("<files>")
     expect(source).not.toContain("Ripgrep.tree")
+  })
+
+  test("default delivery stays in chat and does not market document bundles", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "session", "system.ts"), "utf-8")
+
+    expect(source).toContain("The default product is a concise in-chat conclusion")
+    expect(source).not.toContain("required four default files")
+    expect(source).not.toContain("journal-style paper Word")
   })
 
   test("DeepSeek models route to the dedicated deepseek prompt, not the generic fallback", async () => {

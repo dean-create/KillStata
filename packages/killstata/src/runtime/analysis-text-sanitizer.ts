@@ -80,6 +80,9 @@ const NOISE_LINE_PATTERNS = [
   /^- diagnostics\.json for/i,
   /^- model_metadata\.json for/i,
   /^- numeric_snapshot\.json for/i,
+  /^<\/?[|｜]+\s*DSML\s*[|｜]+/i,
+  /^<\/?tool_calls>/i,
+  /^<\/?verifier_result>/i,
 ]
 
 const ENGINE_INTERNAL_MARKERS = [
@@ -111,6 +114,12 @@ const ENGINE_INTERNAL_MARKERS = [
   "Cannot read binary file",
   "Stata dataset is a structured binary format",
   "Use datasetId/stageId with data_import or econometrics instead.",
+  "<| DSML |",
+  "<tool_calls>",
+  "<verifier_result>",
+  '"trustedArtifacts"',
+  '"blockingFindings"',
+  '"repairHints"',
 ]
 
 function stripVerifierBlocks(text: string) {
@@ -120,6 +129,18 @@ function stripVerifierBlocks(text: string) {
   let braceDepth = 0
 
   for (const line of lines) {
+    if (!inVerifier && /<verifier_result>/i.test(line)) {
+      inVerifier = !/<\/verifier_result>/i.test(line)
+      braceDepth = 0
+      continue
+    }
+
+    if (inVerifier && /<\/verifier_result>/i.test(line)) {
+      inVerifier = false
+      braceDepth = 0
+      continue
+    }
+
     if (!inVerifier && line.includes("You are a fresh-run verifier for killstata.")) {
       inVerifier = true
       braceDepth = 0
@@ -143,6 +164,13 @@ function stripVerifierBlocks(text: string) {
 
 function stripFileBodies(text: string) {
   return text.replace(/<file>[\s\S]*?<\/file>/g, "")
+}
+
+function stripRawToolCallLines(text: string) {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => !/^<\/?[|｜]+\s*DSML\s*[|｜]+/i.test(line.trim()) && !/^<\/?tool_calls>/i.test(line.trim()))
+    .join("\n")
 }
 
 function stripRawJsonBlocks(text: string) {
@@ -231,6 +259,16 @@ function collapseWhitespace(text: string) {
 function fallbackMessagesForInternalErrors(text: string) {
   const messages: string[] = []
 
+  if (/Auto recommendation profiling failed/i.test(text)) {
+    messages.push("自动推荐未完成，未生成计量方案。请重试当前任务。")
+  } else if (/Traceback \(most recent call last\)|\bFile "[^"]+\.py", line \d+/i.test(text)) {
+    messages.push("分析未完成，未生成可用结果。请重试当前任务。")
+  } else if (/Tool execution aborted/i.test(text)) {
+    messages.push("分析已停止，未生成新的结果。")
+  } else if (/无法执行未注册的工具/.test(text)) {
+    messages.push("当前分析功能未正确加载，请重新提交该任务。")
+  }
+
   if (/Cannot read canonical parquet stage as text/i.test(text)) {
     messages.push(PARQUET_STAGE_FALLBACK_TEXT)
   } else if (/Cannot read binary file/i.test(text)) {
@@ -253,7 +291,11 @@ export function userFacingAnalysisErrorText(text?: string) {
 }
 
 export function containsEngineInternalData(text: string) {
-  return ENGINE_INTERNAL_MARKERS.some((marker) => text.includes(marker))
+  return (
+    ENGINE_INTERNAL_MARKERS.some((marker) => text.includes(marker)) ||
+    /<[|｜]+\s*DSML\s*[|｜]+/i.test(text) ||
+    /<\/?verifier_result>/i.test(text)
+  )
 }
 
 export { type AnalysisToolPartLike } from "./analysis-user-view"
@@ -263,14 +305,25 @@ export function sanitizeAnalysisAssistantText(input: {
   tools: AnalysisToolPartLike[]
   latestUserText?: string
 }) {
-  if (wantsRawAnalysisDetail(input.latestUserText)) {
+  const normalized = input.text.trim()
+  const hasInternalData = containsEngineInternalData(normalized)
+  const fallbackText = userFacingAnalysisErrorText(normalized)
+
+  if (fallbackText) {
+    return {
+      text: fallbackText,
+      sanitized: true,
+    }
+  }
+
+  // “展开分析过程”只展示可读的分析说明，绝不暴露内部协议、JSON 或文件路径。
+  if (wantsRawAnalysisDetail(input.latestUserText) && !hasInternalData) {
     return {
       text: input.text,
       sanitized: false,
     }
   }
 
-  const normalized = input.text.trim()
   if (normalized === LEGACY_ANALYSIS_FALLBACK_TEXT) {
     return {
       text: "",
@@ -278,7 +331,6 @@ export function sanitizeAnalysisAssistantText(input: {
     }
   }
 
-  const hasInternalData = containsEngineInternalData(normalized)
   const analysisTurn = isAnalysisTurn(input.tools, input.latestUserText)
   const hasNoise =
     hasInternalData ||
@@ -297,9 +349,9 @@ export function sanitizeAnalysisAssistantText(input: {
   }
 
   const stripped = collapseWhitespace(
-    stripNoiseLines(stripRawJsonBlocks(stripFileBodies(stripVerifierBlocks(normalized)))),
+    stripNoiseLines(stripRawToolCallLines(stripRawJsonBlocks(stripFileBodies(stripVerifierBlocks(normalized))))),
   )
-  const fallbackMessages = userFacingAnalysisErrorText(normalized)?.split("\n") ?? []
+  const fallbackMessages = fallbackText?.split("\n") ?? []
 
   if (!analysisTurn) {
     if (stripped && !containsEngineInternalData(stripped)) {

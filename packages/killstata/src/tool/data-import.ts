@@ -1,7 +1,7 @@
 import z from "zod"
 import * as fs from "fs"
 import * as path from "path"
-import { spawn, exec } from "child_process"
+import { exec } from "child_process"
 import DESCRIPTION from "./data-import.txt"
 import { PY_READ_CSV_FALLBACK } from "./python-snippets"
 import { Instance } from "../project/instance"
@@ -21,7 +21,6 @@ import {
   latestImportStageForFingerprint,
   nextStageId,
   getStage,
-  projectErrorsRoot,
   projectHealthRoot,
   projectTempRoot,
   readDatasetManifest,
@@ -57,6 +56,8 @@ import {
   createToolAnalysisView,
 } from "./analysis-user-view"
 import { ensureRuntimePythonReady, formatRuntimePythonSetupError } from "@/killstata/runtime-config"
+import { runManagedProcess } from "@/runtime/managed-process"
+import { summarizeToolError } from "@/runtime/tool-result-policy"
 import { ensureAnalysisPlan, formatAnalysisChecklist, setAnalysisPlanApproval } from "@/runtime/workflow"
 import {
   workflowAnalysisPlanHeader,
@@ -137,8 +138,6 @@ type PythonResult = {
   success: boolean
   action?: DataAction
   error?: string
-  traceback?: string
-  error_log_path?: string
   resolved_python_executable?: string
   status?: string
   input_path?: string
@@ -390,39 +389,27 @@ function parsePythonResult<T>(stdout: string, prefix = PYTHON_RESULT_PREFIX): T 
   throw new Error("Python produced no parseable output")
 }
 
-async function runInlinePython(input: { command: string; script: string; cwd: string }) {
+async function runInlinePython(input: { command: string; script: string; cwd: string; abort?: AbortSignal }) {
   const tempDir = projectTempRoot()
   fs.mkdirSync(tempDir, { recursive: true })
   const tempScriptPath = path.join(tempDir, `data_import_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.py`)
-  fs.writeFileSync(tempScriptPath, input.script, "utf-8")
+  fs.writeFileSync(tempScriptPath, input.script, { encoding: "utf-8", mode: 0o600 })
 
-  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const proc = spawn(input.command, [tempScriptPath], {
+  try {
+    return await runManagedProcess({
+      command: input.command,
+      allowedCommands: [input.command],
+      args: [tempScriptPath],
       cwd: input.cwd,
-      env: {
-        ...process.env,
-        PYTHONIOENCODING: "utf-8",
-      },
+      allowedCwdRoot: input.cwd,
+      env: { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+      abort: input.abort,
+      timeoutMs: 5 * 60 * 1_000,
+      maxOutputBytes: 16 * 1024 * 1024,
     })
-
-    let stdout = ""
-    let stderr = ""
-
-    proc.stdout?.on("data", (chunk) => {
-      stdout += chunk.toString()
-    })
-    proc.stderr?.on("data", (chunk) => {
-      stderr += chunk.toString()
-    })
-    proc.on("error", (error) => {
-      fs.rmSync(tempScriptPath, { force: true })
-      reject(error)
-    })
-    proc.on("close", (code) => {
-      fs.rmSync(tempScriptPath, { force: true })
-      resolve({ code, stdout, stderr })
-    })
-  })
+  } finally {
+    fs.rmSync(tempScriptPath, { force: true })
+  }
 }
 
 function requireResolvableInput(action: DataAction, input: { inputPath?: string; datasetId?: string; stageId?: string }) {
@@ -631,7 +618,7 @@ with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
     cwd: Instance.directory,
   })
   if (code !== 0) {
-    throw new Error(`Failed to generate delivery workbook: ${stderr || stdout}`)
+    throw new Error(`无法生成交付工作簿：${summarizeToolError(stderr || stdout)}`)
   }
 }
 
@@ -995,7 +982,7 @@ export const DataImportTool = Tool.define("data_import", {
       await ctx.ask({
         permission: "bash",
         patterns: [`${pythonCommand} *data*`],
-        always: [`${pythonCommand}*`],
+        always: [`${pythonCommand} *data*`],
         metadata: {
           description: `Data pipeline action: ${params.action}`,
         },
@@ -1037,13 +1024,11 @@ import base64
 import importlib.util
 import json
 import sys
-import traceback
 from pathlib import Path
 
 RESULT_PREFIX = "${PYTHON_RESULT_PREFIX}"
 PROJECT_DIR = r"${Instance.directory.replace(/\\/g, "\\\\")}"
 ECONOMETRICS_DIR = r"${ECONOMETRICS_DIR.replace(/\\/g, "\\\\")}"
-ERRORS_DIR = r"${projectErrorsRoot().replace(/\\/g, "\\\\")}"
 
 sys.path.insert(0, ECONOMETRICS_DIR)
 
@@ -1058,13 +1043,6 @@ def save_json(file_path, payload):
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
-def safe_error_path(action):
-    error_dir = Path(ERRORS_DIR)
-    error_dir.mkdir(parents=True, exist_ok=True)
-    from datetime import datetime
-    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    return str(error_dir / f"data_import_{action}_{stamp}_error.json")
-
 try:
     import numpy as np
     import pandas as pd
@@ -1074,9 +1052,6 @@ except Exception as exc:
         "error": f"Failed to import pandas/numpy: {exc}",
         "install_command": payload.get("install_command") if "payload" in globals() else "${installCommand}",
     }
-    error_path = safe_error_path("bootstrap")
-    result["error_log_path"] = error_path
-    save_json(error_path, result)
     emit(result)
     raise SystemExit(0)
 
@@ -1101,9 +1076,6 @@ try:
     )
 except Exception as exc:
     result = {"success": False, "error": f"Failed to import data_preprocess: {exc}"}
-    error_path = safe_error_path("bootstrap")
-    result["error_log_path"] = error_path
-    save_json(error_path, result)
     emit(result)
     raise SystemExit(0)
 
@@ -1716,16 +1688,12 @@ try:
     raise ValueError(f"Unsupported action: {action}")
 
 except Exception as exc:
-    error_path = safe_error_path(action)
     result = {
         "success": False,
         "action": action,
         "error": str(exc),
-        "traceback": traceback.format_exc(),
-        "error_log_path": error_path,
         "install_command": payload.get("install_command"),
     }
-    save_json(error_path, result)
     emit(result)
 `
 
@@ -1737,24 +1705,26 @@ except Exception as exc:
           command: pythonCommand,
           script: pythonScript,
           cwd: Instance.directory,
+          abort: ctx.abort,
         })
       } catch (error) {
-        throw new Error(
-          `Failed to launch python command "${pythonCommand}". Run \`killstata config\` to set Python if needed.\n${error instanceof Error ? error.message : String(error)}`,
-        )
+        throw new Error(`无法启动数据处理后端：${summarizeToolError(error)}`)
       }
 
       const { code, stdout, stderr } = execution
 
       if (code !== 0) {
-        log.error("python failed", { code, stderr })
-        throw new Error(`Data import failed with Python ${pythonCommand} (exit code ${code})\n${stderr}\n${stdout}`)
+        const errorSummary = summarizeToolError(`${stderr}\n${stdout}`)
+        log.error("python failed", { code, error: errorSummary })
+        throw new Error(`数据处理后端异常退出（代码 ${code ?? "未知"}）：${errorSummary}`)
       }
 
       try {
         result = parsePythonResult<PythonResult>(stdout)
       } catch (error) {
-        throw new Error(`Failed to parse python result from ${pythonCommand}: ${error}\nRaw output:\n${stdout}\nStderr:\n${stderr}`)
+        throw new Error(
+          `无法解析数据处理结果：${summarizeToolError(error)}；后端摘要：${summarizeToolError(`${stdout}\n${stderr}`)}`,
+        )
       }
       result.resolved_python_executable = pythonCommand
     }
@@ -1798,10 +1768,8 @@ except Exception as exc:
       })
       let message = `Data operation failed: ${result.error ?? "unknown error"}`
       if (result.resolved_python_executable) message += `\nPython interpreter: ${result.resolved_python_executable}`
-      if (result.error_log_path) message += `\nError log: ${relativeWithinProject(result.error_log_path)}`
       message += `\nReflection log: ${relativeWithinProject(reflectionPath)}`
       if (result.install_command) message += `\nInstall command: ${result.install_command}`
-      if (result.traceback) message += `\n${result.traceback}`
       throw new Error(message)
     }
 

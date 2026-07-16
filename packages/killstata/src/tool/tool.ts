@@ -3,6 +3,7 @@ import type { MessageV2 } from "../session/message-v2"
 import type { Agent } from "../agent/agent"
 import type { PermissionNext } from "../permission/next"
 import { Truncate } from "./truncation"
+import { prepareToolMetadata, prepareToolOutput } from "@/runtime/tool-result-policy"
 
 export namespace Tool {
   interface Metadata {
@@ -81,19 +82,32 @@ export namespace Tool {
             )
           }
           const result = await execute(parsedArgs, ctx)
+          const prepared = prepareToolOutput(result.output)
+          const sanitizedResult = {
+            ...result,
+            output: prepared.text,
+            metadata: prepareToolMetadata({
+              ...result.metadata,
+              outputPolicy: {
+                redactions: prepared.redactions,
+                collapsedLines: prepared.collapsedLines,
+                shortenedLines: prepared.shortenedLines,
+              },
+            }) as Result,
+          }
           // skip truncation for tools that handle it themselves
           if (result.metadata.truncated !== undefined) {
-            return result
+            return sanitizedResult
           }
-          const truncated = await Truncate.output(result.output, {}, initCtx?.agent)
+          const truncated = await Truncate.output(prepared.text, {}, initCtx?.agent)
           return {
-            ...result,
+            ...sanitizedResult,
             output: truncated.content,
-            metadata: {
-              ...result.metadata,
+            metadata: prepareToolMetadata({
+              ...sanitizedResult.metadata,
               truncated: truncated.truncated,
               ...(truncated.truncated && { outputPath: truncated.outputPath }),
-            },
+            }) as Result,
           }
         }
         return toolInfo

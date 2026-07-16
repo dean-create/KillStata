@@ -49,7 +49,20 @@ export const REQUIRED_PYTHON_PACKAGES = [
   "openpyxl",
   "pyarrow",
   "python-docx",
+  "pyfixest",
 ] as const
+
+export const PYFIXEST_VERSION = "0.60.0"
+
+const PYTHON_PACKAGE_INSTALL_SPECS: Readonly<Record<string, string>> = {
+  docx: "python-docx",
+  "python-docx": "python-docx",
+  pyfixest: `pyfixest==${PYFIXEST_VERSION}`,
+}
+
+export function pythonPackageInstallSpecs(packages: readonly string[]) {
+  return packages.map((pkg) => PYTHON_PACKAGE_INSTALL_SPECS[pkg] ?? pkg)
+}
 
 const MANAGED_PYTHON_VERSION = "3.12"
 const UV_VERSION = "0.11.16"
@@ -298,7 +311,7 @@ export function pythonInstallCommand(
   pythonExecutable: string,
   packages: readonly string[] = [...REQUIRED_PYTHON_PACKAGES],
 ) {
-  const pipPackages = packages.map((pkg) => (pkg === "docx" ? "python-docx" : pkg))
+  const pipPackages = pythonPackageInstallSpecs(packages)
   return `${shellQuote(pythonExecutable)} -m pip install ${pipPackages.join(" ")}`
 }
 
@@ -318,6 +331,7 @@ export function checkPythonPackages(
       package: pkg,
       module: pkg,
       documentClass: false,
+      expectedVersion: pkg === "pyfixest" ? PYFIXEST_VERSION : undefined,
     }
   })
   const script = [
@@ -332,6 +346,10 @@ export function checkPythonPackages(
     "            module = importlib.import_module(item['module'])",
     "            if not hasattr(module, 'Document'):",
     "                raise ImportError('python-docx Document class is unavailable')",
+    "        if item.get('expectedVersion'):",
+    "            module = importlib.import_module(item['module'])",
+    "            if getattr(module, '__version__', None) != item['expectedVersion']:",
+    "                raise ImportError('package version is incompatible')",
     "    except Exception:",
     "        missing.append(item['package'])",
     "print(json.dumps({'missing': missing}))",
@@ -499,7 +517,7 @@ async function provisionManagedRuntime(packages: readonly string[]): Promise<Run
 
   const report = checkPythonPackages(executable, packages)
   if (report.missing.length > 0) {
-    runUv(uv, ["pip", "install", "--python", executable, "--upgrade", ...report.missing])
+    runUv(uv, ["pip", "install", "--python", executable, "--upgrade", ...pythonPackageInstallSpecs(report.missing)])
   }
 
   return getRuntimePythonStatus([...packages])
@@ -567,16 +585,8 @@ export async function getRuntimePythonStatus(
   }
 }
 
-export function formatRuntimePythonSetupError(toolName: string, status: RuntimePythonStatus) {
-  const lines = [
-    "KillStata could not prepare its data-analysis engine automatically.",
-    "Please check your network connection and try the analysis again.",
-  ]
-
-  if (!status.ok && status.error) lines.push(`Technical detail: ${status.error}`)
-  else if (status.missing.length) lines.push(`Technical detail: required analysis components are unavailable.`)
-
-  return lines.join("\n")
+export function formatRuntimePythonSetupError(_toolName: string, _status: RuntimePythonStatus) {
+  return "KillStata 没能自动准备数据分析环境。请检查网络连接后重试当前分析。"
 }
 
 export function ensureManagedPythonVenv(pythonExecutable: string) {
@@ -596,7 +606,7 @@ export function installPythonPackages(pythonExecutable: string, packages = [...R
     throw new Error((`${upgradePip.stdout}\n${upgradePip.stderr}`).trim() || "Failed to upgrade pip")
   }
 
-  const install = runProcess(pythonExecutable, ["-m", "pip", "install", ...packages])
+  const install = runProcess(pythonExecutable, ["-m", "pip", "install", ...pythonPackageInstallSpecs(packages)])
   if (install.status !== 0) {
     throw new Error((`${install.stdout}\n${install.stderr}`).trim() || "Failed to install Python packages")
   }

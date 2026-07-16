@@ -8,7 +8,6 @@ import { TaskTool } from "./task"
 import { TodoWriteTool, TodoReadTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
-import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import type { Agent } from "../agent/agent"
 import { Tool } from "./tool"
@@ -23,6 +22,8 @@ import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { Truncate } from "./truncation"
 import { EconometricsTool } from "./econometrics"
+import { ProductionEconometricsTools } from "./econometrics-method-tools"
+import { PyfixestEconometricsTools } from "./pyfixest"
 import { DataImportTool } from "./data-import"
 import { HeterogeneityRunnerTool } from "./heterogeneity-runner"
 import { ExperimentLogTool } from "./experiment-log"
@@ -96,7 +97,6 @@ export namespace ToolRegistry {
     const config = await Config.get()
 
     return [
-      InvalidTool,
       ...(["app", "cli", "desktop"].includes(Flag.KILLSTATA_CLIENT) ? [QuestionTool] : []),
       BashTool,
       ShellTool,
@@ -113,6 +113,8 @@ export namespace ToolRegistry {
       SkillTool,
       WorkflowTool,
       EconometricsTool,
+      ...ProductionEconometricsTools,
+      ...PyfixestEconometricsTools,
       DataImportTool,
       HeterogeneityRunnerTool,
       ExperimentLogTool,

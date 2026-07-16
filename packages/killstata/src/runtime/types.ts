@@ -420,6 +420,7 @@ export interface ToolAvailabilityPolicy {
   }
   inputIntent?: WorkflowInputIntent
   repairOnly?: boolean
+  repairToolName?: string
 }
 
 export interface WorkflowCommandContext {
@@ -515,6 +516,8 @@ export interface LifecycleHookResult {
     retryStage: string
     repairAction: string
     reflectionPath?: string
+    lockTool?: boolean
+    failedInputSignature?: string
   }
 }
 
@@ -528,6 +531,8 @@ export type QueryRuntimeResult =
       retryStage: string
       repairAction: string
       reflectionPath?: string
+      lockTool?: boolean
+      failedInputSignature?: string
     }
 
 export type QueryEvent =

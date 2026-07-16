@@ -28,13 +28,17 @@ import { RuntimeTaskLedger } from "./task-ledger"
 import { RuntimeProtocol } from "./protocol"
 import { AgentControl } from "./agent-control"
 import {
-  WORKFLOW_ANALYSIS_SHELL_TOOL_IDS,
+  WORKFLOW_ANALYSIS_TOOL_IDS,
   WORKFLOW_ESTIMATE_TOOL_IDS,
   WORKFLOW_IMPORT_TOOL_IDS,
   WORKFLOW_INPUT_INTENT_TOOL_BUNDLES,
   WORKFLOW_READ_CORE_TOOL_IDS,
+  WORKFLOW_RECOMMEND_TOOL_IDS,
   WORKFLOW_REPAIR_ONLY_BUNDLES,
   WORKFLOW_REPORT_TOOL_IDS,
+  isWorkflowEstimateTool,
+  isWorkflowDiagnosticTool,
+  isWorkflowRecommendTool,
   uniqueToolIDs,
 } from "./tool-catalog"
 import {
@@ -538,6 +542,8 @@ function currentChecklistItem(run?: WorkflowRun) {
 }
 
 function refreshWorkflowRunDerivedState(run: WorkflowRun) {
+  // 历史运行记录可能保存了英文 locale；刷新时统一迁移为中文界面。
+  run.workflowLocale = "zh-CN"
   refreshWorkflowRunGraph(run)
   refreshAnalysisChecklist(run)
   return run
@@ -594,7 +600,7 @@ function emptyRun(input: { sessionID: string; datasetId?: string; runId?: string
     workflowRunId: createWorkflowRunId(input),
     sessionID: input.sessionID,
     workflowMode: "econometrics",
-    workflowLocale: "en",
+    workflowLocale: "zh-CN",
     datasetId: input.datasetId,
     runId: input.runId,
     branch: input.branch,
@@ -605,7 +611,7 @@ function emptyRun(input: { sessionID: string; datasetId?: string; runId?: string
     trustedArtifacts: [],
     analysisChecklist: ANALYSIS_CHECKLIST_TEMPLATE.map((item) => ({
       id: item.id,
-      label: workflowChecklistLabel("en", item.id),
+      label: workflowChecklistLabel("zh-CN", item.id),
       status: item.id === "data_readiness" ? "in_progress" : "pending",
     })),
     createdAt,
@@ -618,14 +624,16 @@ function ensureRun(
   input: { datasetId?: string; runId?: string; branch?: string },
 ): WorkflowRun {
   const branch = input.branch ?? "main"
+  const scopedRun = sessionState.runs.find(
+    (run) =>
+      run.branch === branch &&
+      (input.datasetId ? run.datasetId === input.datasetId : true) &&
+      (input.runId ? run.runId === input.runId : true),
+  )
+  // 显式传入新 dataset/run 时必须新建隔离的 workflow run，不能把 active run 改名后继承旧 stages。
   const existing =
-    sessionState.runs.find(
-      (run) =>
-        run.branch === branch &&
-        (input.datasetId ? run.datasetId === input.datasetId : true) &&
-        (input.runId ? run.runId === input.runId : true),
-    ) ??
-    (sessionState.activeRunId
+    scopedRun ??
+    (!input.datasetId && !input.runId && sessionState.activeRunId
       ? sessionState.runs.find((run) => run.workflowRunId === sessionState.activeRunId)
       : undefined)
 
@@ -633,7 +641,7 @@ function ensureRun(
     existing.datasetId = input.datasetId ?? existing.datasetId
     existing.runId = input.runId ?? existing.runId
     existing.branch = branch
-    existing.workflowLocale = existing.workflowLocale ?? "en"
+    existing.workflowLocale = "zh-CN"
     existing.updatedAt = nowIso()
     sessionState.activeRunId = existing.workflowRunId
     return existing
@@ -1190,7 +1198,9 @@ function stageKindFromTool(
     return "profile_or_schema_check"
   }
 
-  if (toolName === "econometrics") return "baseline_estimate"
+  if (isWorkflowRecommendTool(toolName)) return "profile_or_schema_check"
+  if (isWorkflowDiagnosticTool(toolName)) return "describe_or_diagnostics"
+  if (isWorkflowEstimateTool(toolName)) return "baseline_estimate"
   return "report"
 }
 
@@ -1219,6 +1229,7 @@ function failureCodeFromType(failureType: FailureType): StageFailureCode {
     case "planning_failure":
       return "MODEL_SPEC_INVALID"
     case "estimation_failure":
+    case "process_timeout":
       return "ESTIMATION_FAILED"
     default:
       return "ARTIFACT_MISSING"
@@ -1372,6 +1383,49 @@ export function getActiveWorkflowRun(sessionID: string) {
   const session = readWorkflowSession(sessionID)
   if (!session.activeRunId) return session.runs.at(-1)
   return session.runs.find((run) => run.workflowRunId === session.activeRunId) ?? session.runs.at(-1)
+}
+
+function workflowStageTargetsDatasetStage(stage: StageNode, datasetId: string, stageId: string) {
+  const replayInput = normalizeRecord(stage.replayInput)
+  const metadata = normalizeRecord(stage.metadata)
+  const recordedDatasetId =
+    stage.datasetId ??
+    (typeof replayInput.datasetId === "string" ? replayInput.datasetId : undefined) ??
+    (typeof metadata.datasetId === "string" ? metadata.datasetId : undefined)
+  return recordedDatasetId === datasetId && (replayInput.stageId === stageId || metadata.stageId === stageId)
+}
+
+/**
+ * 估计器只能消费当前会话中已经完成画像和 QA 的 canonical stage。
+ * 这条校验放在后端入口，而不是只写进提示词，防止模型直接拿原始路径绕过数据准备。
+ */
+export function assertDatasetStageReadyForEstimation(input: {
+  sessionID: string
+  datasetId: string
+  stageId: string
+}) {
+  const manifest = readDatasetManifest(input.datasetId)
+  const datasetStage = getStage(manifest, input.stageId)
+  const run = getActiveWorkflowRun(input.sessionID)
+  if (!run || run.datasetId !== input.datasetId) {
+    throw new Error("计量估计前必须先在当前会话完成同一数据集阶段的画像与 QA。")
+  }
+
+  const matchingStages = run.stages.filter(
+    (stage) =>
+      stage.status === "completed" && workflowStageTargetsDatasetStage(stage, input.datasetId, input.stageId),
+  )
+  const profile = matchingStages.find((stage) => stage.kind === "profile_or_schema_check")
+  const qa = matchingStages.find(
+    (stage) =>
+      stage.kind === "qa_gate" &&
+      normalizeRecord(stage.metadata).qaGateStatus !== "block" &&
+      stage.verifierReport?.status !== "block",
+  )
+  if (!profile || !qa) {
+    throw new Error("计量估计前必须先完成当前 canonical stage 的数据画像与 QA；请先分析数据结构并通过 QA。")
+  }
+  return { manifest, stage: datasetStage, workflowRun: run, profileStage: profile, qaStage: qa }
 }
 
 export async function ensureAnalysisPlan(input: {
@@ -1792,6 +1846,40 @@ async function loadWorkflowExecutableTool(toolName: string) {
     case "econometrics": {
       const { EconometricsTool } = await import("@/tool/econometrics")
       return EconometricsTool
+    }
+    case "econometrics_recommend":
+    case "ols_regression":
+    case "panel_fe_regression":
+    case "iv_2sls": {
+      const {
+        EconometricsRecommendTool,
+        OlsRegressionTool,
+        PanelFeRegressionTool,
+        Iv2slsTool,
+      } = await import("@/tool/econometrics-method-tools")
+      return {
+        econometrics_recommend: EconometricsRecommendTool,
+        ols_regression: OlsRegressionTool,
+        panel_fe_regression: PanelFeRegressionTool,
+        iv_2sls: Iv2slsTool,
+      }[toolName]
+    }
+    case "hdfe_regression":
+    case "did_static":
+    case "did2s":
+    case "did_event_study_saturated": {
+      const {
+        HdfeRegressionTool,
+        DidStaticTool,
+        Did2sTool,
+        SaturatedDidEventStudyTool,
+      } = await import("@/tool/pyfixest")
+      return {
+        hdfe_regression: HdfeRegressionTool,
+        did_static: DidStaticTool,
+        did2s: Did2sTool,
+        did_event_study_saturated: SaturatedDidEventStudyTool,
+      }[toolName]
     }
     case "workflow": {
       const { WorkflowTool } = await import("@/tool/workflow")
@@ -2731,18 +2819,20 @@ export function resolveToolAvailability(input: {
   if (inputIntent === "conversation") return finalize([])
 
   const readCore: string[] = [...WORKFLOW_READ_CORE_TOOL_IDS]
-  const analysisShellTools: string[] = [...WORKFLOW_ANALYSIS_SHELL_TOOL_IDS]
-  const importBundle: string[] = uniqueToolIDs([...readCore, ...analysisShellTools, ...WORKFLOW_IMPORT_TOOL_IDS])
-  const estimateBundle: string[] = uniqueToolIDs([...readCore, ...analysisShellTools, ...WORKFLOW_ESTIMATE_TOOL_IDS])
+  const importBundle: string[] = uniqueToolIDs([...readCore, ...WORKFLOW_IMPORT_TOOL_IDS])
+  const estimateBundle: string[] = uniqueToolIDs([...readCore, ...WORKFLOW_ESTIMATE_TOOL_IDS])
   const verifyBundle: string[] = uniqueToolIDs([...readCore, "regression_table"])
   const reportBundle: string[] = uniqueToolIDs([...readCore, ...WORKFLOW_REPORT_TOOL_IDS])
 
   const repairBundle: string[] = uniqueToolIDs([
     ...readCore,
-    ...analysisShellTools,
     ...WORKFLOW_IMPORT_TOOL_IDS,
     ...WORKFLOW_ESTIMATE_TOOL_IDS,
   ])
+  const restrictToFailedTool = (tools: string[]) => {
+    if (!input.policy.repairToolName) return tools
+    return tools.filter((tool) => readCore.includes(tool) || tool === input.policy.repairToolName)
+  }
   const bundleForInputIntent = () => {
     if (!inputIntent) return undefined
     // 当还没有 active stage 时，用户意图就是唯一可靠的工具暴露信号；
@@ -2768,12 +2858,14 @@ export function resolveToolAvailability(input: {
   let bundle: string[] = readCore
   if (!stage) {
     bundle =
-      bundleForInputIntent() ??
-      (input.policy.workflowMode === "econometrics"
-        ? [...readCore, ...analysisShellTools, "data_import", "data_batch"]
-        : readCore)
+      inputIntent === "analysis" || inputIntent === "repair"
+        ? importBundle
+        : bundleForInputIntent() ??
+          (input.policy.workflowMode === "econometrics"
+            ? [...readCore, "data_import"]
+            : readCore)
     if (agent === "explorer") {
-      bundle = [...new Set([...readCore, "data_import", "data_batch", "workflow"])]
+      bundle = [...new Set([...readCore, "data_import", "workflow"])]
     }
     if (agent === "analyst" && approvalStatus !== "approved") {
       const allowRegressionTable =
@@ -2791,26 +2883,16 @@ export function resolveToolAvailability(input: {
           ].includes(tool) && (tool !== "regression_table" || allowRegressionTable),
       )
     }
-    bundle = applyCapabilityFilters(uniqueToolIDs(bundle))
+    bundle = applyCapabilityFilters(uniqueToolIDs(restrictToFailedTool(bundle)))
     return finalize(bundle)
   }
 
-  if (
-    stage === "healthcheck" ||
-    stage === "import" ||
-    stage === "profile_or_schema_check" ||
-    stage === "qa_gate" ||
-    stage === "preprocess_or_filter" ||
-    stage === "describe_or_diagnostics"
-  ) {
+  if (stage === "healthcheck" || stage === "import" || stage === "qa_gate") {
     bundle = importBundle
-    if (
-      (stage === "qa_gate" || stage === "preprocess_or_filter" || stage === "describe_or_diagnostics") &&
-      input.policy.workflowMode === "econometrics" &&
-      (inputIntent === "analysis" || inputIntent === "repair" || agent === "general" || agent === "analyst")
-    ) {
-      bundle = [...new Set([...importBundle, "econometrics", "regression_table"])]
-    }
+  } else if (stage === "profile_or_schema_check") {
+    bundle = uniqueToolIDs([...importBundle, ...WORKFLOW_RECOMMEND_TOOL_IDS])
+  } else if (stage === "preprocess_or_filter" || stage === "describe_or_diagnostics") {
+    bundle = uniqueToolIDs([...importBundle, ...WORKFLOW_ANALYSIS_TOOL_IDS, "regression_table"])
   } else if (stage === "baseline_estimate") {
     bundle = estimateBundle
   } else if (stage === "verifier") {
@@ -2820,13 +2902,13 @@ export function resolveToolAvailability(input: {
   }
 
   if (status === "blocked" || status === "failed" || repairOnly) {
-      bundle = stage === "baseline_estimate" ? repairBundle : [...readCore, ...analysisShellTools, "data_import", "data_batch"]
+      bundle = stage === "baseline_estimate" ? repairBundle : [...readCore, "data_import"]
   }
 
   if (agent === "verifier") {
     bundle = [...readCore, "regression_table"]
   } else if (agent === "explorer") {
-    bundle = [...new Set([...readCore, "data_import", "data_batch", "workflow"])]
+    bundle = [...new Set([...readCore, "data_import", "workflow"])]
   } else if (agent === "explore") {
     bundle =
       input.policy.workflowMode === "econometrics" ? [...new Set([...bundle, "workflow"])] : [...readCore, "workflow"]
@@ -2860,6 +2942,7 @@ export function resolveToolAvailability(input: {
     ]
   }
 
+  bundle = restrictToFailedTool(bundle)
   bundle = applyCapabilityFilters(bundle)
 
   return finalize(bundle)

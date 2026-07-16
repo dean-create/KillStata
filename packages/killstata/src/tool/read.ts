@@ -13,6 +13,7 @@ import { numericSnapshotPreview } from "./analysis-tool-metadata"
 import type { NumericSnapshotDocument } from "./analysis-grounding"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionInstruction } from "@/session/instruction"
+import { Truncate } from "./truncation"
 
 const DEFAULT_READ_LIMIT = 2000
 const NUMERIC_SNAPSHOT_READ_LIMIT = 300
@@ -73,12 +74,12 @@ export function buildParquetReadGuidance(filepath: string) {
     ? [
         "This file is the canonical working dataset for killstata.",
         "Do not use the read tool on canonical parquet stages.",
-        "Use datasetId/stageId with data_import or econometrics instead.",
+        "Use datasetId/stageId with data_import or a dedicated estimator tool instead.",
       ]
     : [
         "Parquet is a binary tabular format and is not readable as plain text.",
         "Do not use the read tool on parquet datasets when you need analysis results.",
-        "Use data_import/econometrics on the dataset, or inspect exported CSV/XLSX artifacts instead.",
+        "Import the dataset with data_import, then use the dedicated estimator tool selected for the research design.",
       ]
 
   const alternatives = [
@@ -114,11 +115,12 @@ export const ReadTool = Tool.define("read", {
     limit: z.coerce.number().describe("The number of lines to read (defaults to 2000)").optional(),
   }),
   async execute(params, ctx) {
-    const filepath = resolveWorkspacePath(params.filePath)
+    const outputReferencePath = Truncate.resolveOutputReference(params.filePath)
+    const filepath = outputReferencePath ?? resolveWorkspacePath(params.filePath)
     const title = path.relative(Instance.worktree, filepath)
 
     await assertExternalDirectory(ctx, filepath, {
-      bypass: Boolean(ctx.extra?.["bypassCwdCheck"]),
+      bypass: Boolean(outputReferencePath) || Boolean(ctx.extra?.["bypassCwdCheck"]),
     })
 
     await ctx.ask({

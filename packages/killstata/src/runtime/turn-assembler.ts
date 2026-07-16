@@ -16,8 +16,10 @@ import {
   validateNumericGrounding,
 } from "@/tool/analysis-grounding"
 import { containsEngineInternalData, sanitizeAnalysisAssistantText, type AnalysisToolPartLike } from "./analysis-text-sanitizer"
+import { WORKFLOW_ANALYSIS_TOOL_IDS } from "./tool-catalog"
 
 const FINAL_ANALYSIS_RESULT_TOOLS = new Set([
+  ...WORKFLOW_ANALYSIS_TOOL_IDS,
   "econometrics",
   "regression_table",
   "heterogeneity_runner",
@@ -25,6 +27,10 @@ const FINAL_ANALYSIS_RESULT_TOOLS = new Set([
   "paper_draft",
   "slide_generator",
 ])
+
+export function isFinalAnalysisResultTool(toolName: string) {
+  return FINAL_ANALYSIS_RESULT_TOOLS.has(toolName)
+}
 
 export class TurnAssembler {
   private toolcalls: Record<string, MessageV2.ToolPart> = {}
@@ -466,7 +472,7 @@ export class TurnAssembler {
       const part = parts[index]
       if (part.type !== "tool") continue
       if (part.state.status !== "completed") continue
-      if (FINAL_ANALYSIS_RESULT_TOOLS.has(part.tool)) return index
+      if (isFinalAnalysisResultTool(part.tool)) return index
     }
     return -1
   }

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import warnings
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -94,14 +95,76 @@ def propensity_score_construction(treatment_variable, covariate_variables):
         pd.Series: The estimated propensity score for each sample, which will be named "propensity_score".
     """
     
-    # Adjust input type
-    treatment_variable = treatment_variable.astype(float)
-    covariate_variables = covariate_variables.astype(float)
-    
-    # Directly apply Logistic regression method to estimate the propensity score
-    clf = sm.Logit(treatment_variable, sm.add_constant(covariate_variables).astype(float)).fit()
-    result_series = pd.Series(clf.predict(sm.add_constant(covariate_variables).astype(float)), index = covariate_variables.index)
+    if treatment_variable is None:
+        raise ValueError("Propensity-score construction requires a treatment variable")
+    if covariate_variables is None:
+        raise ValueError("Propensity-score construction requires at least one covariate")
+
+    treatment = pd.Series(treatment_variable, copy=True)
+    covariates = pd.DataFrame(covariate_variables).copy()
+    if covariates.shape[1] == 0:
+        raise ValueError("Propensity-score construction requires at least one covariate")
+    if not treatment.index.equals(covariates.index):
+        raise ValueError("Treatment and covariates must use the same row index")
+    if treatment.isna().any() or covariates.isna().any().any():
+        raise ValueError("Treatment and covariates contain missing values; preprocess the canonical stage first")
+
+    try:
+        treatment = pd.to_numeric(treatment, errors="raise").astype(float)
+        covariates = covariates.apply(pd.to_numeric, errors="raise").astype(float)
+    except Exception as exc:
+        raise ValueError(f"Treatment and covariates must be numeric: {exc}") from exc
+
+    if not np.isfinite(treatment.to_numpy(dtype=float)).all() or not np.isfinite(covariates.to_numpy(dtype=float)).all():
+        raise ValueError("Treatment and covariates must contain only finite numeric values")
+    treatment_values = set(treatment.unique().tolist())
+    if treatment_values != {0.0, 1.0}:
+        raise ValueError("Treatment must be binary 0/1 with both treated and control groups present")
+
+    constant_covariates = [str(column) for column in covariates.columns if covariates[column].nunique(dropna=False) <= 1]
+    if constant_covariates:
+        raise ValueError(f"Propensity-score covariates must vary; constant columns: {constant_covariates}")
+
+    design = sm.add_constant(covariates, has_constant="add").astype(float)
+    if len(design) <= design.shape[1]:
+        raise ValueError("Propensity-score model has too few observations for the requested covariates")
+    rank = int(np.linalg.matrix_rank(design.to_numpy(dtype=float)))
+    if rank < design.shape[1]:
+        raise ValueError(
+            f"Propensity-score design matrix is rank deficient (rank={rank}, columns={design.shape[1]})"
+        )
+
+    try:
+        from statsmodels.tools.sm_exceptions import PerfectSeparationError
+
+        with warnings.catch_warnings(record=True) as fit_warnings:
+            warnings.simplefilter("always")
+            clf = sm.Logit(treatment, design).fit(disp=False, maxiter=200)
+    except PerfectSeparationError as exc:
+        raise ValueError("Propensity-score Logit has perfect separation; revise the covariates") from exc
+    except np.linalg.LinAlgError as exc:
+        raise ValueError("Propensity-score Logit is singular; revise the covariates") from exc
+    except Exception as exc:
+        message = str(exc)
+        if "separation" in message.lower() or "singular" in message.lower():
+            raise ValueError(f"Propensity-score Logit failed: {message}") from exc
+        raise
+
+    if any(warning.category.__name__ == "PerfectSeparationWarning" for warning in fit_warnings):
+        raise ValueError("Propensity-score Logit has perfect separation; revise the covariates")
+    if not bool(getattr(clf, "mle_retvals", {}).get("converged", False)):
+        raise ValueError("Propensity-score Logit did not converge")
+
+    predicted = np.asarray(clf.predict(design), dtype=float)
+    if not np.isfinite(predicted).all():
+        raise ValueError("Propensity-score Logit returned non-finite scores")
+    if np.any(predicted <= 0.0) or np.any(predicted >= 1.0):
+        raise ValueError("Propensity-score Logit returned boundary scores; overlap is not estimable")
+
+    result_series = pd.Series(predicted, index=covariates.index)
     result_series.name = "propensity_score"
+    result_series.attrs["converged"] = True
+    result_series.attrs["iterations"] = int(getattr(clf, "mle_retvals", {}).get("iterations", 0))
     return result_series
 
 def propensity_score_visualize_propensity_score_distribution(treatment_variable, propensity_score):
@@ -403,7 +466,7 @@ def IV_2SLS_regression(dependent_variable, treatment_variable, IV_variable, cova
     """
     
     # Check Input
-    if type(cov_info) == str and cov_info not in ["nonrobust", "HC0", "HC1", "HC2", "HC3"]:
+    if type(cov_info) == str and cov_info not in ["nonrobust", "robust", "HC0", "HC1", "HC2", "HC3"]:
         raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
     elif type(cov_info) == dict and list(cov_info.keys())[0] not in ["HAC", "cluster"]:
         raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
@@ -436,7 +499,8 @@ def IV_2SLS_regression(dependent_variable, treatment_variable, IV_variable, cova
         if cov_info == "nonrobust":
             iv_regression = model.fit(cov_type = "unadjusted")
         else:
-            # HC0/HC1/HC2/HC3 在 IV 场景下统一为异方差稳健。
+            # linearmodels 的线性 IV 后端只区分 unadjusted 与 robust；
+            # HC0/HC1/HC2/HC3 仅为旧调用兼容，新模型工具只暴露 robust。
             iv_regression = model.fit(cov_type = "robust")
     elif list(cov_info.keys())[0] == "HAC":
         iv_regression = model.fit(cov_type = "kernel", bandwidth = cov_info["HAC"])

@@ -3,9 +3,10 @@ import { execFileSync } from "child_process"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { EconometricsTool } from "../../src/tool/econometrics"
+import { Iv2slsTool, OlsRegressionTool } from "../../src/tool/econometrics-method-tools"
 import { resolveRuntimePythonCommand } from "../../src/killstata/runtime-config"
 import { Instance } from "../../src/project/instance"
+import { registerCanonicalDataset } from "../helpers/canonical-dataset"
 
 const ctx = {
   sessionID: "test",
@@ -58,18 +59,23 @@ describe("tool.econometrics IV golden test (Card 1995, real published data)", ()
     await withInstance(async (root) => {
       const csvPath = path.join(root, "card1995.csv")
       fs.copyFileSync(path.join(FIXTURES, "card1995.csv"), csvPath)
+      const source = registerCanonicalDataset({
+        sessionID: ctx.sessionID,
+        sourcePath: csvPath,
+        datasetId: "dataset_card1995_iv",
+      })
 
-      const tool = await EconometricsTool.init()
+      const tool = await Iv2slsTool.init()
       const result = await tool.execute(
         {
-          methodName: "iv_2sls",
-          dataPath: "card1995.csv",
+          ...source,
           dependentVar: EXPECTED.dependent,
-          treatmentVar: EXPECTED.endogenous, // educ：内生的处理变量
+          endogenousVar: EXPECTED.endogenous, // educ：内生的处理变量
+          instrumentVar: EXPECTED.instrument, // nearc4：工具变量
+          instrumentJustification: "The user-provided Card design uses college proximity to shift schooling costs.",
           covariates: EXPECTED.controls,
-          options: { iv_variable: EXPECTED.instrument }, // nearc4：工具变量
-          outputDir: "outputs/card_iv",
-        } as any,
+          covariance: "nonrobust",
+        },
         ctx as any,
       )
 
@@ -89,27 +95,62 @@ describe("tool.econometrics IV golden test (Card 1995, real published data)", ()
     await withInstance(async (root) => {
       const csvPath = path.join(root, "card1995.csv")
       fs.copyFileSync(path.join(FIXTURES, "card1995.csv"), csvPath)
+      const source = registerCanonicalDataset({
+        sessionID: ctx.sessionID,
+        sourcePath: csvPath,
+        datasetId: "dataset_card1995_ols",
+      })
 
-      const tool = await EconometricsTool.init()
+      const tool = await OlsRegressionTool.init()
       const ols = await tool.execute(
         {
-          methodName: "ols_regression",
-          dataPath: "card1995.csv",
+          ...source,
           dependentVar: EXPECTED.dependent,
           treatmentVar: EXPECTED.endogenous,
           covariates: EXPECTED.controls,
-          outputDir: "outputs/card_ols",
-        } as any,
+          covariance: "HC1",
+        },
         ctx as any,
       )
 
       const olsCoef = ols.metadata.result!.coefficient!
       expect(olsCoef).toBeCloseTo(EXPECTED.ols_educ_coefficient, 4)
+      expect(ols.metadata.result!.effective_covariance).toBe("HC1")
 
       // 这是 Card (1995) 论文的实际发现：修正内生性后，教育回报不降反升。
       // 如果我们的 IV 实现把内生性处理反了（或者根本没用上工具变量），
       // IV 估计就会塌回 OLS 附近，这个断言会红。
       expect(EXPECTED.iv_educ_coefficient).toBeGreaterThan(olsCoef * 1.5)
+    })
+  }, 30_000)
+
+  test("the model-facing robust option reports the covariance actually used by linearmodels", async () => {
+    if (!(await supportsEconometricsRuntime())) return
+    await withInstance(async (root) => {
+      const csvPath = path.join(root, "card1995.csv")
+      fs.copyFileSync(path.join(FIXTURES, "card1995.csv"), csvPath)
+      const source = registerCanonicalDataset({
+        sessionID: ctx.sessionID,
+        sourcePath: csvPath,
+        datasetId: "dataset_card1995_iv_robust",
+      })
+      const tool = await Iv2slsTool.init()
+      const result = await tool.execute(
+        {
+          ...source,
+          dependentVar: EXPECTED.dependent,
+          endogenousVar: EXPECTED.endogenous,
+          instrumentVar: EXPECTED.instrument,
+          instrumentJustification: "The user-provided Card design uses college proximity to shift schooling costs.",
+          covariates: EXPECTED.controls,
+          covariance: "robust",
+        },
+        ctx as any,
+      )
+
+      expect(result.metadata.result!.effective_covariance).toBe("robust")
+      expect(result.metadata.result!.std_error).toBeCloseTo(EXPECTED.iv_educ_robust_std_error, 4)
+      expect(result.metadata.result!.std_error).not.toBeCloseTo(EXPECTED.iv_educ_std_error, 5)
     })
   }, 30_000)
 })

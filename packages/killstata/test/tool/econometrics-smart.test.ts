@@ -102,6 +102,55 @@ describe("tool.econometrics-smart", () => {
     expect(recommendation.covariance).toBe("cluster")
   })
 
+  test("never promotes an instrument-like column name into an automatic IV specification", () => {
+    const profile = buildSmartDatasetProfile({
+      rowCount: 500,
+      dependentVar: "outcome",
+      treatmentVar: "education",
+      columns: [
+        {
+          name: "outcome",
+          dtypeFamily: "numeric",
+          nonNullCount: 500,
+          uniqueCount: 480,
+          binary: false,
+          numeric: true,
+          datetime: false,
+          integerLike: false,
+          nonnegative: false,
+        },
+        {
+          name: "education",
+          dtypeFamily: "numeric",
+          nonNullCount: 500,
+          uniqueCount: 20,
+          binary: false,
+          numeric: true,
+          datetime: false,
+          integerLike: true,
+          nonnegative: true,
+        },
+        {
+          name: "z",
+          dtypeFamily: "numeric",
+          nonNullCount: 500,
+          uniqueCount: 2,
+          binary: true,
+          numeric: true,
+          datetime: false,
+          integerLike: true,
+          nonnegative: true,
+        },
+      ],
+    })
+
+    const recommendation = recommendEconometricsPlan(profile)
+    expect(profile.candidateInstrumentVars).toEqual(["z"])
+    expect(recommendation.recommendedMethod).toBe("ols_regression")
+    expect(recommendation.nextBestMethods).not.toContain("psm_double_robust")
+    expect(recommendation.warnings.join("\n")).toContain("must be confirmed by the user or research design")
+  })
+
   test("auto_recommend generates profile and recommendation artifacts", async () => {
     await withInstance(async (root) => {
       const runtime = await getRuntimePythonStatus()
@@ -142,4 +191,13 @@ describe("tool.econometrics-smart", () => {
       expect(fs.existsSync(path.join(outputDir, "results.json"))).toBe(true)
     })
   }, AUTO_RECOMMEND_TEST_TIMEOUT_MS)
+
+  test("auto_recommend handles boolean dtype before numeric subtraction", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "tool", "econometrics.ts"), "utf-8")
+    const boolGuard = source.indexOf("if is_bool_dtype(series):\n        return True")
+    const numericSubtraction = source.indexOf("numeric - numeric.round()")
+
+    expect(boolGuard).toBeGreaterThan(-1)
+    expect(numericSubtraction).toBeGreaterThan(boolGuard)
+  })
 })

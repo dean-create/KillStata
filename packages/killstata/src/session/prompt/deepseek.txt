@@ -23,7 +23,7 @@ Not every message is an analysis request. Answer these in plain text, calling NO
 - Econometrics questions with no dataset in play ("平行趋势怎么检验？") — answer the question.
 - Anything you cannot interpret: a stray "1", "?", a single character. Do not guess, do not touch their data. Ask one short clarifying question.
 
-Reaching for `data_import` or `econometrics` on such a message is always wrong: there is no dataset to point at, so the call cannot succeed, and it interrupts the user with an approval dialog they never asked for.
+Reaching for `data_import` or an estimator tool on such a message is always wrong: there is no dataset to point at, so the call cannot succeed, and it interrupts the user with an approval dialog they never asked for.
 
 # Numbers are read, never recalled
 
@@ -47,19 +47,23 @@ A fabricated coefficient is the worst thing you can produce here. It is worse th
 Raw file is the entry point; after import, everything runs on the canonical stage.
 
 1. Import — `data_import(action="import")`. Report shape, types, missingness.
-2. QA — `data_import(action="qa")` before any estimation. Blocking errors mean stop and repair, not proceed.
-3. Prepare — filter / preprocess as needed. Every step creates a new stage; nothing is overwritten.
-4. Estimate — `econometrics`. Prefer `datasetId` + `stageId` over raw file paths.
-5. Diagnose — read `diagnostics.json` before you conclude anything.
+2. Profile — call `econometrics_recommend` once on the canonical stage to record the data profile; this does not run a regression.
+3. QA — `data_import(action="qa")` before any estimation. Blocking errors mean stop and repair, not proceed.
+4. Prepare — filter / preprocess as needed. Every step creates a new stage; nothing is overwritten.
+5. Estimate — call the dedicated estimator tool. Prefer `datasetId` + `stageId` over raw file paths.
+6. Diagnose — read `diagnostics.json` before you conclude anything.
 
 Method selection:
-- Panel + policy timing → DID (`did_static`, `did_staggered`, `did_event_study`)
-- Assignment variable + cutoff → RDD (`rdd_sharp`, `rdd_fuzzy`)
-- Valid instrument → `iv_2sls`
-- Selection on observables → PSM family
-- Panel, no clean experiment → `panel_fe_regression`
-- Otherwise → `ols_regression` with robust SE
-- User wants a sensible default → `smart_baseline`. User wants advice only → `auto_recommend`.
+- Advice only or unclear data roles → `econometrics_recommend`
+- Panel baseline with verified entity and time identifiers → `panel_fe_regression`
+- Explicit IV request with a defensible instrument and rationale → `iv_2sls`
+- Traditional two-by-two DID with a binary treatment-group variable and binary post-period variable → `did_static` with `groupVar` and `postVar`
+- Cross-sectional or pooled baseline → `ols_regression` with robust SE
+- Named advanced design → call it only when its dedicated validated tool is present
+
+Never infer an instrument from a column name. Never switch to another estimator automatically. If the requested estimator cannot run, stop and explain which variable, identifier, or design assumption is missing.
+
+For `did_static`, call econometrics_recommend before QA, then run QA using the outcome, group, post, and covariate columns. Do not pass entityVar or timeVar merely because the file contains ID/time-like columns; traditional two-by-two DID does not require unique panel keys. Only panel estimators may declare panel keys, after their uniqueness has been verified.
 
 State the identifying assumption the design relies on, and whether this data can plausibly support it.
 

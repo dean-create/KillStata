@@ -1,6 +1,9 @@
 import fs from "fs"
 import path from "path"
+import crypto from "crypto"
 import { projectReflectionRoot } from "./analysis-state"
+import { isWorkflowDiagnosticTool, isWorkflowEstimateTool, isWorkflowRecommendTool } from "@/runtime/tool-catalog"
+import { prepareToolMetadata, sanitizeToolRecord, summarizeToolError } from "@/runtime/tool-result-policy"
 
 export type FailureType =
   | "file_not_found"
@@ -14,6 +17,7 @@ export type FailureType =
   | "estimation_failure"
   | "qa_gate_blocked"
   | "tool_contract_failure"
+  | "process_timeout"
   | "planning_failure"
   | "unknown_failure"
 
@@ -219,7 +223,15 @@ function extractParallelTrendsFailure(diagnostics: Record<string, unknown>) {
 
 function inferFailureType(error: string): FailureType {
   const message = error.toLowerCase()
-  if (message.includes("input file not found") || message.includes("data file not found")) return "file_not_found"
+  if (message.includes("process_timeout") || message.includes("计量分析超过") || message.includes("harness 已终止")) {
+    return "process_timeout"
+  }
+  if (
+    message.includes("input file not found") ||
+    message.includes("data file not found") ||
+    message.includes("filenotfounderror") ||
+    message.includes("enoent")
+  ) return "file_not_found"
   if (message.includes("manifest not found") || message.includes("stage not found")) return "path_resolution_error"
   if (message.includes("variables not found") || message.includes("column not found") || message.includes("not in df.columns")) {
     return "column_not_found"
@@ -230,11 +242,32 @@ function inferFailureType(error: string): FailureType {
   if (message.includes("failed to launch python") || message.includes("python was not found")) return "python_missing"
   if (message.includes("no module named") || message.includes("failed to import")) return "dependency_broken"
   if (message.includes("qa gate") || message.includes("blocking_errors")) return "qa_gate_blocked"
-  if (message.includes("requires inputpath") || message.includes("invalid arguments") || message.includes("requires entityvar")) {
+  if (
+    message.includes("treatment must be binary") ||
+    message.includes("contain missing values") ||
+    message.includes("covariates must vary")
+  ) return "qa_gate_blocked"
+  if (
+    message.includes("requires inputpath") ||
+    message.includes("invalid arguments") ||
+    message.includes("unavailable tool") ||
+    message.includes("no such tool") ||
+    message.includes("requires entityvar") ||
+    message.includes("计量工具参数不合法") ||
+    message.includes("工具调用参数不符合契约")
+  ) {
     return "tool_contract_failure"
   }
   if (message.includes("duplicate entity-time") || message.includes("panel identifiers not found")) return "panel_integrity_failure"
-  if (message.includes("singular") || message.includes("estimation") || message.includes("regression") || message.includes("std. error")) {
+  if (
+    message.includes("singular") ||
+    message.includes("rank deficient") ||
+    message.includes("perfect separation") ||
+    message.includes("did not converge") ||
+    message.includes("estimation") ||
+    message.includes("regression") ||
+    message.includes("std. error")
+  ) {
     return "estimation_failure"
   }
   if (message.includes("schema")) return "schema_mismatch"
@@ -265,7 +298,9 @@ function defaultRepairAction(failureType: FailureType, toolName: string) {
     case "qa_gate_blocked":
       return "Repair blocking QA issues, rerun the QA/clean stage, and only then continue the workflow."
     case "tool_contract_failure":
-      return `Rewrite the ${toolName} tool call to satisfy the expected schema.`
+      return `根据 ${toolName} 的参数描述修正字段、类型或列名，只重试失败调用。`
+    case "process_timeout":
+      return "缩小数据范围或简化同一计量设定后，只重试失败阶段；不要自动改用其他估计方法。"
     case "planning_failure":
       return "Insert a planning/profile/qa step before the failed analysis step."
     default:
@@ -273,14 +308,19 @@ function defaultRepairAction(failureType: FailureType, toolName: string) {
   }
 }
 
-function retryStage(toolName: string, failureType: FailureType) {
+export function retryStageForToolFailure(toolName: string, failureType: FailureType) {
   if (toolName === "data_import") {
     if (failureType === "file_not_found" || failureType === "path_resolution_error") return "ingest"
     if (failureType === "column_not_found" || failureType === "schema_mismatch") return "profile"
     if (failureType === "qa_gate_blocked") return "clean"
     return "clean"
   }
-  if (toolName === "econometrics") {
+  if (isWorkflowRecommendTool(toolName)) return "profile"
+  if (isWorkflowDiagnosticTool(toolName)) {
+    if (failureType === "column_not_found" || failureType === "schema_mismatch") return "profile"
+    return "qa"
+  }
+  if (isWorkflowEstimateTool(toolName)) {
     if (failureType === "qa_gate_blocked") return "qa"
     if (failureType === "panel_integrity_failure" || failureType === "column_not_found") return "qa"
     return "estimate"
@@ -301,17 +341,18 @@ export function classifyToolFailure(input: {
   sessionId?: string
 }): ToolReflection {
   const failureType = inferFailureType(input.error)
+  const safeError = summarizeToolError(input.error)
   return {
     toolName: input.toolName,
     failureType,
-    rootCause: input.error.split("\n")[0] || input.error,
+    rootCause: safeError.split("\n")[0] || safeError,
     blocking: failureType !== "unknown_failure",
-    retryStage: retryStage(input.toolName, failureType),
-    repairAction: deriveRepairAction(input.error, defaultRepairAction(failureType, input.toolName)),
-    userVisibleExplanation: `The ${input.toolName} step failed with ${failureType}. Repair the failed stage only, then retry.`,
+    retryStage: retryStageForToolFailure(input.toolName, failureType),
+    repairAction: deriveRepairAction(safeError, defaultRepairAction(failureType, input.toolName)),
+    userVisibleExplanation: `工具 ${input.toolName} 执行失败（${failureType}）。仅修复失败阶段后再重试。`,
     createdAt: nowIso(),
-    input: input.input,
-    error: input.error,
+    input: sanitizeToolRecord(input.input) as Record<string, unknown> | undefined,
+    error: safeError,
     sessionId: input.sessionId,
   }
 }
@@ -484,7 +525,7 @@ export function evaluateQaGate(input: {
           failureType: "qa_gate_blocked",
           rootCause: qaGateReason,
           blocking: true,
-          retryStage: retryStage(input.toolName, "qa_gate_blocked"),
+          retryStage: retryStageForToolFailure(input.toolName, "qa_gate_blocked"),
           repairAction: defaultRepairAction("qa_gate_blocked", input.toolName),
           userVisibleExplanation: `The ${input.toolName} step is blocked by QA findings. Repair the failed QA stage only, then retry.`,
           createdAt: nowIso(),
@@ -510,9 +551,16 @@ export function evaluateQaGate(input: {
 
 export function persistToolReflection(reflection: ToolReflection) {
   const root = projectReflectionRoot()
-  fs.mkdirSync(root, { recursive: true })
-  const filename = `${reflection.toolName}_${reflection.createdAt.replace(/[:.]/g, "-")}.json`
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 })
+  const safeReflection = prepareToolMetadata(reflection)
+  const safeToolName = reflection.toolName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80) || "tool"
+  const filename = `${safeToolName}_${reflection.createdAt.replace(/[:.]/g, "-")}_${process.pid}_${crypto.randomUUID()}.json`
   const reflectionPath = path.join(root, filename)
-  fs.writeFileSync(reflectionPath, JSON.stringify(reflection, null, 2), "utf-8")
+  fs.writeFileSync(reflectionPath, JSON.stringify(safeReflection, null, 2), {
+    encoding: "utf-8",
+    mode: 0o600,
+    flag: "wx",
+  })
+  fs.chmodSync(reflectionPath, 0o600)
   return reflectionPath
 }
