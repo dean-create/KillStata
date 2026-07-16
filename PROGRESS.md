@@ -1,5 +1,16 @@
 # 当前进度
 
+## 准入路线图 v2 已定（Claude，2026-07-16）
+
+- 盘点结论（全部经代码核实）：9 工具已准入、旁路已封（老 `econometrics` 模型不可见）、提示词无 smart_baseline 残留；PLAN.md 顶部新增总路线图。
+- 三个缺口：①模型调用回放完全缺失（`test/fixtures/replay/`，每工具 ≥5 条，2 正 3 反）；②数值对标分 A/B/C 级，pyfixest 三工具目前是 C 级"自己对自己"，要补 A/B；③准入卡 `docs/methods/<tool>.md` 缺失。
+- 12 个待决方法处置已列表：PSM 家族 5 项准入（LaLonde A 级）、旧 TWFE 交错 DID **砍**（Goodman-Bacon 偏误，已有 did2s/saturated）、iv_test 并入 iv_2sls 诊断、RDD 2 项准入（Lee 2008）、rdd_fuzzy_global 倾向砍（Gelman-Imbens 2019）、smart_baseline 砍（用户已拍板）。
+- 分工：Codex 按清单逐项准入（加挂关⑥回放+关⑦分级）；Claude 做回放基建、对标补课、smart_baseline 砍除、准入卡回填。文件边界见 PLAN.md。
+- PLAN.md 超 300 行已归档：2026-07-15 已完成章节移至 `docs/plans/2026-07-15-econometrics-tool-core.md`。
+- ⚠️ 交接时全量测试 240 过/25 挂，挂点全在 econometric_algorithm.py 未提交手术的下游（Codex 进行中）；准入纪律：红着不开新项。
+
+---
+
 ## 17 个计量函数逐项准入（Codex，2026-07-16）
 
 ### 第 1/17 项已完成：`psm_construction`
