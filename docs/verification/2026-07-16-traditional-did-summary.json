@@ -1,0 +1,46 @@
+[
+  {
+    "specification": "baseline",
+    "covariates": [],
+    "rowsInput": 820,
+    "rowsUsed": 801,
+    "droppedRows": 19,
+    "primary": {
+      "term": "treated:t",
+      "estimate": 2.913982357430412,
+      "stdError": 1.7368182803898533,
+      "statistic": 1.6777704324808969,
+      "pValue": 0.09378398531063303,
+      "confLow": -0.4952962872109401,
+      "confHigh": 6.323261002071764
+    },
+    "warnings": [
+      "数据只有两个时期，无法仅凭本样本检验政策前平行趋势。"
+    ],
+    "resultPath": "/Users/cw/Desktop/KillStata-main/test/did-e2e-20260716/real-backend/baseline/results.json"
+  },
+  {
+    "specification": "controls",
+    "covariates": [
+      "bk",
+      "kfc",
+      "roys"
+    ],
+    "rowsInput": 820,
+    "rowsUsed": 801,
+    "droppedRows": 19,
+    "primary": {
+      "term": "treated:t",
+      "estimate": 2.9350196886916775,
+      "stdError": 1.543422138485333,
+      "statistic": 1.9016311970048683,
+      "pValue": 0.057581101030208304,
+      "confLow": -0.09465038864103947,
+      "confHigh": 5.964689766024394
+    },
+    "warnings": [
+      "数据只有两个时期，无法仅凭本样本检验政策前平行趋势。"
+    ],
+    "resultPath": "/Users/cw/Desktop/KillStata-main/test/did-e2e-20260716/real-backend/controls/results.json"
+  }
+]
