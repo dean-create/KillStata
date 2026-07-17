@@ -3642,6 +3642,124 @@ function buildEstimationResultViews(input: {
   }
 }
 
+async function runAutoRecommendMethod(input: {
+  params: {
+    methodName: MethodName
+    dependentVar?: string
+    treatmentVar?: string
+    entityVar?: string
+    timeVar?: string
+    datasetId?: string
+    stageId?: string
+  }
+  dataPath: string
+  outputDir: string
+  pythonCommand: string
+  ctx: Tool.Context
+  datasetManifest: ReturnType<typeof resolveArtifactInput>["manifest"]
+  runId: string
+  sourceStage: ReturnType<typeof resolveArtifactInput>["stage"]
+  branch: string
+}): Promise<{ title: string; output: string; metadata: EconometricsToolMetadata }> {
+  const { params, dataPath, outputDir, pythonCommand, ctx, datasetManifest, runId, sourceStage, branch } = input
+      const autoResult = await runAutoRecommend({
+        dataPath,
+        outputDir,
+        pythonCommand,
+        params,
+        abort: ctx.abort,
+      })
+
+      const publishedFiles: EconometricsPublishedFile[] = []
+      if (datasetManifest) {
+        appendArtifact(datasetManifest, {
+          artifactId: `${params.methodName}_${Date.now()}`,
+          runId,
+          stageId: params.stageId ?? sourceStage?.stageId,
+          branch,
+          action: params.methodName,
+          outputPath: autoResult.outputPath,
+          summaryPath: autoResult.recommendationPath,
+          logPath: autoResult.narrativePath,
+          createdAt: new Date().toISOString(),
+          metadata: {
+            data_structure: autoResult.profile.dataStructure,
+            recommended_method: autoResult.recommendation.recommendedMethod,
+            covariance: autoResult.recommendation.covariance,
+          },
+        })
+
+        const publish = (key: string, label: string, sourcePath?: string) => {
+          if (!sourcePath) return
+          const visiblePath = publishVisibleOutput({
+            manifest: datasetManifest,
+            key,
+            label,
+            sourcePath,
+            runId,
+            branch: path.join("econometrics", params.methodName),
+            stageId: params.stageId ?? sourceStage?.stageId,
+          })
+          publishedFiles.push({
+            label,
+            relativePath: relativeWithinProject(visiblePath),
+          })
+        }
+
+        publish("auto_recommend_profile", "auto_recommend_profile", autoResult.profilePath)
+        publish("auto_recommend_recommendation", "auto_recommend_recommendation", autoResult.recommendationPath)
+        publish("auto_recommend_summary", "auto_recommend_summary", autoResult.narrativePath)
+        publish("auto_recommend_results", "auto_recommend_results", autoResult.outputPath)
+      }
+
+      let output = `## Econometrics result - ${params.methodName}\n\n`
+      output += `Data file: ${relativeWithinProject(dataPath)}\n`
+      output += `Data structure: ${autoResult.profile.dataStructure}\n`
+      output += `Recommended method: ${autoResult.recommendation.recommendedMethod}\n`
+      output += `Suggested covariance: ${autoResult.recommendation.covariance}\n`
+      if (autoResult.recommendation.preferredEntityVar) {
+        output += `Preferred entity variable: ${autoResult.recommendation.preferredEntityVar}\n`
+      }
+      if (autoResult.recommendation.preferredTimeVar) {
+        output += `Preferred time variable: ${autoResult.recommendation.preferredTimeVar}\n`
+      }
+      if (autoResult.recommendation.preferredTreatmentVar) {
+        output += `Preferred treatment variable: ${autoResult.recommendation.preferredTreatmentVar}\n`
+      }
+      if (autoResult.recommendation.preferredClusterVar) {
+        output += `Preferred cluster variable: ${autoResult.recommendation.preferredClusterVar}\n`
+      }
+      output += `Confidence: ${autoResult.recommendation.confidence}\n`
+      if (autoResult.recommendation.reasons.length) {
+        output += `Reasons: ${autoResult.recommendation.reasons.join(" | ")}\n`
+      }
+      if (autoResult.recommendation.warnings.length) {
+        output += `Warnings: ${autoResult.recommendation.warnings.join(" | ")}\n`
+      }
+      output += `- Profile JSON: ${relativeWithinProject(autoResult.profilePath)}\n`
+      output += `- Recommendation JSON: ${relativeWithinProject(autoResult.recommendationPath)}\n`
+      output += `- Narrative summary: ${relativeWithinProject(autoResult.narrativePath)}\n`
+      output += `- Result JSON: ${relativeWithinProject(autoResult.outputPath)}\n`
+      output += `\nResults directory: ${relativeWithinProject(outputDir)}/\n`
+
+      const metadata: EconometricsToolMetadata = {
+        method: params.methodName,
+        profile: autoResult.profile,
+        recommendation: autoResult.recommendation,
+        datasetId: datasetManifest?.datasetId ?? params.datasetId,
+        stageId: params.stageId ?? sourceStage?.stageId,
+        runId,
+        outputDir: relativeWithinProject(outputDir),
+        publishedFiles,
+      }
+
+      return {
+        title: `Econometrics: ${params.methodName}`,
+        output,
+        metadata,
+      }
+}
+
 export const EconometricsTool = Tool.define("econometrics", async () => ({
   description: DESCRIPTION,
   parameters: z.object({
@@ -3817,102 +3935,17 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
     }
 
     if (params.methodName === "auto_recommend") {
-      const autoResult = await runAutoRecommend({
+      return runAutoRecommendMethod({
+        params,
         dataPath,
         outputDir,
         pythonCommand,
-        params,
-        abort: ctx.abort,
-      })
-
-      const publishedFiles: EconometricsPublishedFile[] = []
-      if (datasetManifest) {
-        appendArtifact(datasetManifest, {
-          artifactId: `${params.methodName}_${Date.now()}`,
-          runId,
-          stageId: params.stageId ?? sourceStage?.stageId,
-          branch,
-          action: params.methodName,
-          outputPath: autoResult.outputPath,
-          summaryPath: autoResult.recommendationPath,
-          logPath: autoResult.narrativePath,
-          createdAt: new Date().toISOString(),
-          metadata: {
-            data_structure: autoResult.profile.dataStructure,
-            recommended_method: autoResult.recommendation.recommendedMethod,
-            covariance: autoResult.recommendation.covariance,
-          },
-        })
-
-        const publish = (key: string, label: string, sourcePath?: string) => {
-          if (!sourcePath) return
-          const visiblePath = publishVisibleOutput({
-            manifest: datasetManifest,
-            key,
-            label,
-            sourcePath,
-            runId,
-            branch: path.join("econometrics", params.methodName),
-            stageId: params.stageId ?? sourceStage?.stageId,
-          })
-          publishedFiles.push({
-            label,
-            relativePath: relativeWithinProject(visiblePath),
-          })
-        }
-
-        publish("auto_recommend_profile", "auto_recommend_profile", autoResult.profilePath)
-        publish("auto_recommend_recommendation", "auto_recommend_recommendation", autoResult.recommendationPath)
-        publish("auto_recommend_summary", "auto_recommend_summary", autoResult.narrativePath)
-        publish("auto_recommend_results", "auto_recommend_results", autoResult.outputPath)
-      }
-
-      let output = `## Econometrics result - ${params.methodName}\n\n`
-      output += `Data file: ${relativeWithinProject(dataPath)}\n`
-      output += `Data structure: ${autoResult.profile.dataStructure}\n`
-      output += `Recommended method: ${autoResult.recommendation.recommendedMethod}\n`
-      output += `Suggested covariance: ${autoResult.recommendation.covariance}\n`
-      if (autoResult.recommendation.preferredEntityVar) {
-        output += `Preferred entity variable: ${autoResult.recommendation.preferredEntityVar}\n`
-      }
-      if (autoResult.recommendation.preferredTimeVar) {
-        output += `Preferred time variable: ${autoResult.recommendation.preferredTimeVar}\n`
-      }
-      if (autoResult.recommendation.preferredTreatmentVar) {
-        output += `Preferred treatment variable: ${autoResult.recommendation.preferredTreatmentVar}\n`
-      }
-      if (autoResult.recommendation.preferredClusterVar) {
-        output += `Preferred cluster variable: ${autoResult.recommendation.preferredClusterVar}\n`
-      }
-      output += `Confidence: ${autoResult.recommendation.confidence}\n`
-      if (autoResult.recommendation.reasons.length) {
-        output += `Reasons: ${autoResult.recommendation.reasons.join(" | ")}\n`
-      }
-      if (autoResult.recommendation.warnings.length) {
-        output += `Warnings: ${autoResult.recommendation.warnings.join(" | ")}\n`
-      }
-      output += `- Profile JSON: ${relativeWithinProject(autoResult.profilePath)}\n`
-      output += `- Recommendation JSON: ${relativeWithinProject(autoResult.recommendationPath)}\n`
-      output += `- Narrative summary: ${relativeWithinProject(autoResult.narrativePath)}\n`
-      output += `- Result JSON: ${relativeWithinProject(autoResult.outputPath)}\n`
-      output += `\nResults directory: ${relativeWithinProject(outputDir)}/\n`
-
-      const metadata: EconometricsToolMetadata = {
-        method: params.methodName,
-        profile: autoResult.profile,
-        recommendation: autoResult.recommendation,
-        datasetId: datasetManifest?.datasetId ?? params.datasetId,
-        stageId: params.stageId ?? sourceStage?.stageId,
+        ctx,
+        datasetManifest,
         runId,
-        outputDir: relativeWithinProject(outputDir),
-        publishedFiles,
-      }
-
-      return {
-        title: `Econometrics: ${params.methodName}`,
-        output,
-        metadata,
-      }
+        sourceStage,
+        branch,
+      })
     }
 
     const payload = {
