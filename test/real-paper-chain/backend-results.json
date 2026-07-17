@@ -1,0 +1,124 @@
+{
+  "recordedAt": "2026-07-17T14:11:01+08:00",
+  "sourceHashes": {
+    "did.xlsx": "1f906de3652b904a1436b1e5169a049ac2bbc948001b072bb2b349b92c7bd5db",
+    "test_datasets.xlsx": "a001c91e746b69d37cb3beeb46b1059065691fa532cb65b1e462eb4c10a02927"
+  },
+  "commonSpecification": {
+    "treatmentVar": "did",
+    "entityVar": "city",
+    "timeVar": "year",
+    "clusterVar": "city",
+    "controls": [
+      "人口密度",
+      "金融发展程度",
+      "城镇化水平",
+      "产业结构整体升级",
+      "产业结构高级化",
+      "教育水平支出",
+      "人力资本"
+    ]
+  },
+  "panelFe": {
+    "tool": "panel_fe_regression",
+    "backend": "linearmodels_panelols",
+    "results": [
+      {
+        "kind": "baseline",
+        "outcome": "经济发展水平",
+        "coefficient": 0.022531813792214743,
+        "stdError": 0.02274759112693289,
+        "pValue": 0.3219771813792205,
+        "rowsUsed": 4709
+      },
+      {
+        "kind": "robustness",
+        "outcome": "人均GDP",
+        "coefficient": -425.71770158240497,
+        "stdError": 263.01005792156406,
+        "pValue": 0.10559702084778633,
+        "rowsUsed": 4709
+      },
+      {
+        "kind": "robustness",
+        "outcome": "高质量发展指数",
+        "coefficient": -0.005217867938476156,
+        "stdError": 0.003061574263973587,
+        "pValue": 0.08839388679538485,
+        "rowsUsed": 4709
+      },
+      {
+        "kind": "robustness",
+        "outcome": "包容性TFP指数",
+        "coefficient": -0.0020768216483176443,
+        "stdError": 0.001455233492800605,
+        "pValue": 0.15361043014910858,
+        "rowsUsed": 4709
+      },
+      {
+        "kind": "mechanism_screen",
+        "outcome": "创新指数",
+        "coefficient": -0.00449295656398864,
+        "stdError": 0.0026592456050824644,
+        "pValue": 0.09118276748270948,
+        "rowsUsed": 4709
+      },
+      {
+        "kind": "mechanism_screen",
+        "outcome": "产业结构高级化2",
+        "coefficient": -0.004255045598162386,
+        "stdError": 0.007485025008639531,
+        "pValue": 0.5697417969835481,
+        "rowsUsed": 4709
+      },
+      {
+        "kind": "mechanism_screen",
+        "outcome": "金融发展程度",
+        "controlsOmitted": ["金融发展程度"],
+        "coefficient": -0.02751195948638983,
+        "stdError": 0.057748306065163235,
+        "pValue": 0.6338048218835262,
+        "rowsUsed": 4709
+      }
+    ]
+  },
+  "hdfeCrosscheck": {
+    "tool": "hdfe_regression",
+    "backend": "pyfixest",
+    "pyfixestVersion": "0.60.0",
+    "fixedEffects": ["city", "year"],
+    "clusterVars": ["city"],
+    "outcome": "经济发展水平",
+    "coefficient": 0.022531813792214767,
+    "stdError": 0.022104820294665574,
+    "pValue": 0.30894526296247404,
+    "rowsUsed": 4709,
+    "coefficientGapVsPanelFe": 2.42861286636753e-17,
+    "inferenceNote": "Point estimates agree to machine precision. Clustered standard errors differ because the backends use different finite-sample covariance corrections."
+  },
+  "digitalPanelFe": {
+    "tool": "panel_fe_regression",
+    "backend": "linearmodels_panelols",
+    "repair": {
+      "operation": "combine_columns",
+      "sourceColumns": ["省份", "地区"],
+      "outputColumn": "省份_地区",
+      "entities": 421,
+      "duplicateEntityTimeRows": 0
+    },
+    "outcome": "数字普惠金融指数",
+    "treatmentVar": "每百人互联网用户数",
+    "covariates": ["计算机服务和软件从业人员占比", "人均电信业务总量", "每百人移动电话用户数"],
+    "entityVar": "省份_地区",
+    "timeVar": "年份",
+    "clusterVar": "省份_地区",
+    "coefficient": 6.957534971271742,
+    "stdError": 0.24802974117349183,
+    "pValue": 0,
+    "rowsUsed": 9683
+  },
+  "interpretationCeilings": {
+    "robustness": "替换结果变量检验不等于自动获得因果识别。",
+    "mechanism_screen": "这些回归只能表述为机制线索或关联证据，不能声称已证明中介因果效应。"
+  }
+}
