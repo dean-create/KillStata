@@ -191,12 +191,8 @@ const SUPPORTED_METHODS = [
   "iv_2sls",
   "iv_test",
   "did_static",
-  "did_staggered",
-  "did_event_study",
-  "did_event_study_viz",
   "rdd_sharp",
   "rdd_fuzzy",
-  "rdd_fuzzy_global",
 ] as const
 
 type MethodName = (typeof SUPPORTED_METHODS)[number]
@@ -219,20 +215,13 @@ const METHOD_REQUIRED_OPTIONS: Partial<Record<MethodName, string[]>> = {
   iv_2sls: ["iv_variable"],
   iv_test: ["iv_variable"],
   did_static: ["treatment_entity_dummy", "treatment_finished_dummy"],
-  did_staggered: ["treatment_entity_dummy", "treatment_finished_dummy"],
-  did_event_study: ["treatment_entity_dummy", "treatment_finished_dummy"],
-  did_event_study_viz: ["treatment_entity_dummy", "treatment_finished_dummy"],
   rdd_sharp: ["running_variable"],
   rdd_fuzzy: ["running_variable"],
-  rdd_fuzzy_global: ["running_variable"],
 }
 
 const METHOD_NEEDS_PANEL_KEYS = new Set<MethodName>([
   "panel_fe_regression",
   "did_static",
-  "did_staggered",
-  "did_event_study",
-  "did_event_study_viz",
 ])
 
 const METHOD_NEEDS_TREATMENT = new Set<MethodName>([
@@ -249,7 +238,6 @@ const METHOD_NEEDS_TREATMENT = new Set<MethodName>([
   "iv_test",
   "rdd_sharp",
   "rdd_fuzzy",
-  "rdd_fuzzy_global",
 ])
 
 type PythonResult = {
@@ -2123,14 +2111,8 @@ function regressionTableTitle(methodName: MethodName) {
       return "双重稳健回归结果表"
     case "did_static":
       return "静态DID结果表"
-    case "did_staggered":
-      return "渐进DID结果表"
-    case "did_event_study":
-      return "事件研究结果表"
     case "rdd_sharp":
       return "Sharp RDD结果表"
-    case "rdd_fuzzy_global":
-      return "全局多项式RDD结果表"
     default:
       return "回归结果表"
   }
@@ -2150,14 +2132,8 @@ function regressionTableSubtitle(methodName: MethodName) {
       return "双重稳健IPW-RA"
     case "did_static":
       return "静态DID"
-    case "did_staggered":
-      return "渐进DID"
-    case "did_event_study":
-      return "事件研究"
     case "rdd_sharp":
       return "Sharp RDD"
-    case "rdd_fuzzy_global":
-      return "全局多项式RDD"
     default:
       return "回归"
   }
@@ -2199,12 +2175,8 @@ required_option_columns = {
     "iv_2sls": ["iv_variable"],
     "iv_test": ["iv_variable"],
     "did_static": ["treatment_entity_dummy", "treatment_finished_dummy"],
-    "did_staggered": ["treatment_entity_dummy", "treatment_finished_dummy"],
-    "did_event_study": ["treatment_entity_dummy", "treatment_finished_dummy"],
-    "did_event_study_viz": ["treatment_entity_dummy", "treatment_finished_dummy"],
     "rdd_sharp": ["running_variable"],
     "rdd_fuzzy": ["running_variable"],
-    "rdd_fuzzy_global": ["running_variable"],
 }
 
 def prepare_panel_inputs(df, payload, covariate_names):
@@ -2677,12 +2649,7 @@ def first_non_const_term(coefficients):
 def build_table_variables(method, treatment_name, covariate_names, coefficients, explicit_primary_term=None):
     if method == "did_static":
         return ["treatment_group_treated", *covariate_names]
-    if method == "did_staggered":
-        return [explicit_primary_term or "treatment_entity_treated", *covariate_names]
-    if method == "did_event_study":
-        terms = [term for term in coefficients["term"].tolist() if term != "const"]
-        return terms
-    if method in ["ols_regression", "iv_2sls", "psm_regression", "psm_dr_ipw_ra", "rdd_sharp", "rdd_fuzzy_global"]:
+    if method in ["ols_regression", "iv_2sls", "psm_regression", "psm_dr_ipw_ra", "rdd_sharp"]:
         primary_term = explicit_primary_term or treatment_name or first_non_const_term(coefficients)
         return [item for item in [primary_term, *covariate_names] if item]
     return []
@@ -2719,26 +2686,6 @@ def iv_strength_diagnostic(treatment_series, iv_series, covariate_frame=None):
             "f_stat": f_stat,
             "instrument_count": int(instrument_count),
             "n_obs": int(len(joined)),
-        }
-    except Exception as exc:
-        return {"status": "skipped", "reason": str(exc)}
-
-def parallel_trends_diagnostic(coefficients):
-    try:
-        if coefficients is None or coefficients.empty or "term" not in coefficients.columns:
-            return {"status": "skipped", "reason": "coefficient table unavailable"}
-        lead_rows = coefficients[coefficients["term"].astype(str).str.startswith("Lead_")].copy()
-        if lead_rows.empty:
-            return {"status": "skipped", "reason": "no lead terms found"}
-        lead_rows["p_value"] = pd.to_numeric(lead_rows["p_value"], errors="coerce")
-        significant = lead_rows[lead_rows["p_value"] < 0.05].copy()
-        min_lead_p_value = None if lead_rows["p_value"].dropna().empty else float(lead_rows["p_value"].dropna().min())
-        return {
-            "status": "pass",
-            "passed": significant.empty,
-            "significant_lead_count": int(len(significant)),
-            "min_lead_p_value": min_lead_p_value,
-            "significant_leads": significant[["term", "coefficient", "p_value"]].to_dict(orient="records"),
         }
     except Exception as exc:
         return {"status": "skipped", "reason": str(exc)}
@@ -2814,7 +2761,7 @@ try:
     if payload.get("treatment_var"):
         required_columns.append(payload["treatment_var"])
     required_columns.extend(payload.get("covariates", []))
-    if method in ["did_static", "did_staggered", "did_event_study", "did_event_study_viz"]:
+    if method in ["did_static"]:
         required_columns.extend([payload.get("entity_var"), payload.get("time_var")])
 
     for opt_key in required_option_columns.get(method, []):
@@ -2841,7 +2788,7 @@ try:
     covariates = df[covariate_names] if covariate_names else None
     analysis_row_count = len(dependent_var) if dependent_var is not None else len(treatment_var) if treatment_var is not None else len(df)
     panel_df = None
-    if method in ["did_static", "did_staggered", "did_event_study", "did_event_study_viz"]:
+    if method in ["did_static"]:
         panel_df, dependent_var, treatment_var, covariates = prepare_panel_inputs(df, payload, covariate_names)
 
     result = {}
@@ -3061,59 +3008,6 @@ try:
         coefficients = empty_coefficient_table()
         output_kind = "test"
 
-    elif method == "did_staggered":
-        effective_covariance = options.get("cov_type", "unadjusted")
-        model = Staggered_Diff_in_Diff_regression(
-            dependent_var,
-            covariate_variables=covariates,
-            treatment_entity_dummy=panel_df[options["treatment_entity_dummy"]],
-            treatment_finished_dummy=panel_df[options["treatment_finished_dummy"]],
-            entity_effect=options.get("entity_effect", None),
-            time_effect=options.get("time_effect", None),
-            cov_type=options.get("cov_type", "unadjusted"),
-            target_type="final_model",
-            output_tables=True,
-        )
-        result = {
-            "success": True,
-            "ate": float(model.params["treatment_entity_treated"]),
-            "std_error": float(model.std_errors["treatment_entity_treated"]),
-            "p_value": float(model.pvalues["treatment_entity_treated"]),
-            "method": "Staggered DID",
-        }
-        coefficients = model_coefficient_table(model)
-        output_kind = "regression"
-        primary_term = "treatment_entity_treated"
-
-    elif method == "did_event_study":
-        effective_covariance = options.get("cov_type", "unadjusted")
-        model = Staggered_Diff_in_Diff_Event_Study_regression(
-            dependent_var,
-            covariate_variables=covariates,
-            relative_time_variable=panel_df[options["relative_time_variable"]] if options.get("relative_time_variable") else None,
-            treatment_entity_dummy=panel_df[options["treatment_entity_dummy"]],
-            treatment_finished_dummy=panel_df[options["treatment_finished_dummy"]],
-            entity_effect=options.get("entity_effect", None),
-            time_effect=options.get("time_effect", None),
-            cov_type=options.get("cov_type", "unadjusted"),
-            target_type="final_model",
-            output_tables=True,
-        )
-        result = {
-            "success": True,
-            "coefficient": float(model.params["D0"]) if "D0" in model.params else None,
-            "std_error": float(model.std_errors["D0"]) if "D0" in model.std_errors else None,
-            "p_value": float(model.pvalues["D0"]) if "D0" in model.pvalues else None,
-            "coefficients": {k: float(v) for k, v in model.params.items()},
-            "std_errors": {k: float(v) for k, v in model.std_errors.items()},
-            "p_values": {k: float(v) for k, v in model.pvalues.items()},
-            "method": "Event-study DID",
-        }
-        coefficients = model_coefficient_table(model)
-        parallel_trends_report = parallel_trends_diagnostic(coefficients)
-        output_kind = "regression"
-        primary_term = "D0"
-
     elif method == "rdd_sharp":
         effective_covariance = options.get("cov_type", "nonrobust")
         running_var = df[options["running_variable"]]
@@ -3288,65 +3182,6 @@ try:
         }
         coefficients = empty_coefficient_table()
         output_kind = "visualization"
-
-    elif method == "did_event_study_viz":
-        effective_covariance = options.get("cov_type", "unadjusted")
-        model = Staggered_Diff_in_Diff_Event_Study_regression(
-            dependent_var,
-            covariate_variables=covariates,
-            relative_time_variable=panel_df[options["relative_time_variable"]] if options.get("relative_time_variable") else None,
-            treatment_entity_dummy=panel_df[options["treatment_entity_dummy"]],
-            treatment_finished_dummy=panel_df[options["treatment_finished_dummy"]],
-            entity_effect=options.get("entity_effect", None),
-            time_effect=options.get("time_effect", None),
-            cov_type=options.get("cov_type", "unadjusted"),
-            target_type="final_model",
-            output_tables=True,
-        )
-        parallel_trends_report = parallel_trends_diagnostic(model_coefficient_table(model))
-        plt = load_matplotlib_pyplot()
-        output_path = Path(payload["output_dir"]) / "event_study.png"
-        Staggered_Diff_in_Diff_Event_Study_visualization(
-            model,
-            see_back_length=options.get("see_back_length", 4),
-            see_forward_length=options.get("see_forward_length", 3),
-        )
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
-        plt.close()
-        result = {
-            "success": True,
-            "plot_path": str(output_path),
-            "method": "Event-study visualization",
-        }
-        coefficients = empty_coefficient_table()
-        output_kind = "visualization"
-
-    elif method == "rdd_fuzzy_global":
-        effective_covariance = options.get("cov_type", "nonrobust")
-        running_var = df[options["running_variable"]]
-        cutoff = options.get("cutoff", 0)
-        polynomial_degree = options.get("polynomial_degree", 3)
-        model = Fuzzy_RDD_Global_Polynomial_Estimator_regression(
-            dependent_var,
-            treatment_var,
-            running_var,
-            covariates,
-            running_variable_cutoff=cutoff,
-            max_order=polynomial_degree,
-            cov_info=options.get("cov_type", "nonrobust"),
-            target_type="final_model",
-            output_tables=True,
-        )
-        coefficients = model_coefficient_table(model)
-        primary_term = treatment_name if treatment_name in coefficients["term"].tolist() else first_non_const_term(coefficients)
-        result = {
-            "success": True,
-            "late": float(model.params[primary_term]),
-            "std_error": float(model_std_errors(model)[primary_term]),
-            "p_value": float(model.pvalues[primary_term]),
-            "method": "Fuzzy RDD global polynomial",
-        }
-        output_kind = "regression"
 
     else:
         result = {
