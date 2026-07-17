@@ -217,6 +217,8 @@ const METHOD_REQUIRED_OPTIONS: Partial<Record<MethodName, string[]>> = {
   did_static: ["treatment_entity_dummy", "treatment_finished_dummy"],
   rdd_sharp: ["running_variable"],
   rdd_fuzzy: ["running_variable"],
+  psm_matching: ["analysis_unit_var", "pre_treatment_aggregation"],
+  psm_ipw: ["analysis_unit_var", "pre_treatment_aggregation"],
 }
 
 const METHOD_NEEDS_PANEL_KEYS = new Set<MethodName>([
@@ -718,6 +720,17 @@ function validateMethodOptions(params: {
   const missing = required.filter((key) => params.options?.[key] === undefined)
   if (missing.length) {
     throw new Error(`Method ${params.methodName} requires options: ${missing.join(", ")}`)
+  }
+
+  if (params.methodName === "psm_matching" || params.methodName === "psm_ipw") {
+    const analysisUnitVar = params.options?.analysis_unit_var
+    const aggregation = params.options?.pre_treatment_aggregation
+    if (typeof analysisUnitVar !== "string" || analysisUnitVar.trim().length === 0) {
+      throw new Error(`${params.methodName} requires a non-empty analysis_unit_var`)
+    }
+    if (!["not_applicable", "baseline", "pre_treatment_mean"].includes(String(aggregation))) {
+      throw new Error(`${params.methodName} requires pre_treatment_aggregation to be not_applicable, baseline, or pre_treatment_mean`)
+    }
   }
 }
 
@@ -2763,6 +2776,8 @@ try:
     required_columns.extend(payload.get("covariates", []))
     if method in ["did_static"]:
         required_columns.extend([payload.get("entity_var"), payload.get("time_var")])
+    if method in ["psm_matching", "psm_ipw"]:
+        required_columns.append(options.get("analysis_unit_var"))
 
     for opt_key in required_option_columns.get(method, []):
         col = options.get(opt_key)
@@ -2779,6 +2794,26 @@ try:
         }
         emit(result)
         raise SystemExit(0)
+
+    if method in ["psm_matching", "psm_ipw"]:
+        analysis_unit_var = options.get("analysis_unit_var")
+        aggregation = options.get("pre_treatment_aggregation")
+        allowed_aggregations = ["not_applicable", "baseline", "pre_treatment_mean"]
+        if not isinstance(analysis_unit_var, str) or not analysis_unit_var.strip():
+            raise ValueError(f"{method} requires a declared analysis unit column")
+        if aggregation not in allowed_aggregations:
+            raise ValueError(
+                f"{method} requires pre_treatment_aggregation to be one of {allowed_aggregations}"
+            )
+        if df[analysis_unit_var].isna().any():
+            raise ValueError(f"{method} analysis unit column {analysis_unit_var} contains missing values")
+        duplicate_units = int(df[analysis_unit_var].duplicated().sum())
+        if duplicate_units:
+            raise ValueError(
+                f"{method} requires exactly one row per analysis unit after pre-treatment aggregation; "
+                f"{analysis_unit_var} has {duplicate_units} duplicate rows. "
+                "Create a canonical stage with one baseline or pre-treatment-mean row per unit before PSM."
+            )
 
     dependent_var = df[payload["dependent_var"]] if payload.get("dependent_var") else None
     treatment_name = payload.get("treatment_var")

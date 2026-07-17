@@ -86,11 +86,12 @@ async function modelVisibleTool() {
 }
 
 describe("strict propensity-score matching", () => {
-  test("runs through the model-visible tool and returns a bounded matched-treated ATT without inference", async () => {
+  test("rejects a repeated entity-time panel even when its analysis unit and aggregation are declared", async () => {
     await withInstance(async (root) => {
-      const sessionID = "psm_matching_tool"
-      const sourcePath = path.join(root, "matched.csv")
-      const rows = ["outcome,treated,x,x_squared"]
+      const sessionID = "psm_matching_repeated_panel"
+      const sourcePath = path.join(root, "repeated_panel.csv")
+      const rows = ["city,year,outcome,treated,x,x_squared"]
+      let city = 0
       for (const [x, controlCount, treatedCount] of [
         [-2, 15, 2],
         [-1, 12, 4],
@@ -98,8 +99,52 @@ describe("strict propensity-score matching", () => {
         [1, 4, 12],
         [2, 2, 15],
       ] as const) {
-        for (let index = 0; index < controlCount; index += 1) rows.push(`${x},0,${x},${x * x}`)
-        for (let index = 0; index < treatedCount; index += 1) rows.push(`${x + 3},1,${x},${x * x}`)
+        for (const [treated, count] of [
+          [0, controlCount],
+          [1, treatedCount],
+        ] as const) {
+          for (let index = 0; index < count; index += 1) {
+            city += 1
+            for (const year of [2020, 2021]) rows.push(`city_${city},${year},${x + treated * 3},${treated},${x},${x * x}`)
+          }
+        }
+      }
+      fs.writeFileSync(sourcePath, rows.join("\n"), "utf-8")
+      const source = registerCanonicalDataset({ sessionID, sourcePath })
+      const tool = await modelVisibleTool()
+      if (!tool) throw new Error("psm_matching is not model-visible")
+
+      await expect(
+        tool.execute(
+          {
+            ...source,
+            dependentVar: "outcome",
+            treatmentVar: "treated",
+            covariates: ["x", "x_squared"],
+            analysisUnitVar: "city",
+            preTreatmentAggregation: "pre_treatment_mean",
+          },
+          context(sessionID) as never,
+        ),
+      ).rejects.toThrow(/分析单位|聚合|analysis unit|aggregation/i)
+    })
+  }, 40_000)
+
+  test("runs through the model-visible tool and returns a bounded matched-treated ATT without inference", async () => {
+    await withInstance(async (root) => {
+      const sessionID = "psm_matching_tool"
+      const sourcePath = path.join(root, "matched.csv")
+      const rows = ["unit,outcome,treated,x,x_squared"]
+      let unit = 0
+      for (const [x, controlCount, treatedCount] of [
+        [-2, 15, 2],
+        [-1, 12, 4],
+        [0, 10, 8],
+        [1, 4, 12],
+        [2, 2, 15],
+      ] as const) {
+        for (let index = 0; index < controlCount; index += 1) rows.push(`${++unit},${x},0,${x},${x * x}`)
+        for (let index = 0; index < treatedCount; index += 1) rows.push(`${++unit},${x + 3},1,${x},${x * x}`)
       }
       fs.writeFileSync(sourcePath, rows.join("\n"), "utf-8")
       const source = registerCanonicalDataset({ sessionID, sourcePath, datasetId: "dataset_psm_matching" })
@@ -112,6 +157,8 @@ describe("strict propensity-score matching", () => {
         dependentVar: "outcome",
         treatmentVar: "treated",
         covariates: ["x", "x_squared"],
+        analysisUnitVar: "unit",
+        preTreatmentAggregation: "not_applicable",
       }
       const execution = await tool.execute(args, context(sessionID) as never)
       const result = execution.metadata.result as
@@ -149,7 +196,7 @@ describe("strict propensity-score matching", () => {
       const sourcePath = path.join(root, "separation.csv")
       fs.writeFileSync(
         sourcePath,
-        ["outcome,treated,x", "0,0,0", "0,0,0.1", "0,0,0.2", "4,1,1", "4,1,1.1", "4,1,1.2"].join("\n"),
+        ["unit,outcome,treated,x", "1,0,0,0", "2,0,0,0.1", "3,0,0,0.2", "4,4,1,1", "5,4,1,1.1", "6,4,1,1.2"].join("\n"),
         "utf-8",
       )
       const source = registerCanonicalDataset({ sessionID, sourcePath })
@@ -159,7 +206,14 @@ describe("strict propensity-score matching", () => {
 
       await expect(
         tool.execute(
-          { ...source, dependentVar: "outcome", treatmentVar: "treated", covariates: ["x"] },
+          {
+            ...source,
+            dependentVar: "outcome",
+            treatmentVar: "treated",
+            covariates: ["x"],
+            analysisUnitVar: "unit",
+            preTreatmentAggregation: "not_applicable",
+          },
           context(sessionID) as never,
         ),
       ).rejects.toThrow(/separation|分离|converg|收敛|boundary|边界/i)
@@ -171,7 +225,8 @@ describe("strict propensity-score matching", () => {
     await withInstance(async (root) => {
       const sessionID = "psm_matching_card"
       const sourcePath = path.join(root, "card1995.csv")
-      fs.copyFileSync(path.join(import.meta.dir, "../fixtures/golden/card1995.csv"), sourcePath)
+      const cardRows = fs.readFileSync(path.join(import.meta.dir, "../fixtures/golden/card1995.csv"), "utf-8").trim().split("\n")
+      fs.writeFileSync(sourcePath, ["unit," + cardRows[0], ...cardRows.slice(1).map((row, index) => `${index + 1},${row}`)].join("\n"), "utf-8")
       const source = registerCanonicalDataset({ sessionID, sourcePath, datasetId: "dataset_card1995_psm_matching" })
       const tool = await modelVisibleTool()
       expect(tool).toBeDefined()
@@ -183,6 +238,8 @@ describe("strict propensity-score matching", () => {
           dependentVar: "lwage",
           treatmentVar: "nearc4",
           covariates: ["exper", "expersq", "black", "south", "smsa"],
+          analysisUnitVar: "unit",
+          preTreatmentAggregation: "not_applicable",
         },
         context(sessionID) as never,
       )

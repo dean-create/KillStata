@@ -78,16 +78,22 @@ const propensityScoreParameters = z
     validateColumnRoles(value, ctx, ["treatmentVar"])
   })
 
+const psmPreTreatmentAggregation = z
+  .enum(["not_applicable", "baseline", "pre_treatment_mean"])
+  .describe("当前 stage 如何已被整理为每个分析单位一行：横截面填 not_applicable；面板只能填 baseline 或 pre_treatment_mean")
+
 const psmMatchingParameters = z
   .object({
     ...canonicalDataSourceFields,
     dependentVar: columnName.describe("结果变量列名"),
     treatmentVar: columnName.describe("严格以 0/1 编码的处理变量列名"),
     covariates: z.array(columnName).min(1, "至少需要一个处理前协变量").describe("用于倾向得分和匹配后平衡检查的处理前协变量列名"),
+    analysisUnitVar: columnName.describe("分析单位唯一标识列；当前 stage 必须已整理为每个单位一行"),
+    preTreatmentAggregation: psmPreTreatmentAggregation,
   })
   .strict()
   .superRefine((value, ctx) => {
-    validateColumnRoles(value, ctx, ["dependentVar", "treatmentVar"])
+    validateColumnRoles(value, ctx, ["dependentVar", "treatmentVar", "analysisUnitVar"])
   })
 
 const psmIpwParameters = z
@@ -96,10 +102,12 @@ const psmIpwParameters = z
     dependentVar: columnName.describe("结果变量列名"),
     treatmentVar: columnName.describe("严格以 0/1 编码的处理变量列名"),
     covariates: z.array(columnName).min(1, "至少需要一个处理前协变量").describe("用于倾向得分和加权平衡检查的处理前协变量列名"),
+    analysisUnitVar: columnName.describe("分析单位唯一标识列；当前 stage 必须已整理为每个单位一行"),
+    preTreatmentAggregation: psmPreTreatmentAggregation,
   })
   .strict()
   .superRefine((value, ctx) => {
-    validateColumnRoles(value, ctx, ["dependentVar", "treatmentVar"])
+    validateColumnRoles(value, ctx, ["dependentVar", "treatmentVar", "analysisUnitVar"])
   })
 
 const olsParameters = z
@@ -250,7 +258,7 @@ export const PropensityScoreVisualizationTool = Tool.define("psm_visualize", asy
 
 export const PsmMatchingTool = Tool.define("psm_matching", async () => ({
   description:
-    "运行固定规则的 1:1 倾向得分最近邻匹配，估计已匹配处理组的 ATT。仅在用户明确要求匹配且已确认处理变量、结果变量和处理前协变量时调用；工具固定 caliper 与匹配规则，不接受自定义比例或阈值。只在匹配后协变量平衡达标时返回效应；不输出 p 值、置信区间或显著性结论。",
+    "运行固定规则的 1:1 倾向得分最近邻匹配，估计已匹配处理组的 ATT。仅在用户明确要求匹配、已确认处理变量/结果变量/处理前协变量，且当前 stage 已按分析单位整理为一行一个单位时调用；面板原始逐期行不得直接匹配。工具固定 caliper 与匹配规则，不接受自定义比例或阈值。只在匹配后协变量平衡达标时返回效应；不输出 p 值、置信区间或显著性结论。",
   parameters: psmMatchingParameters,
   formatValidationError,
   execute: async (params, ctx) => {
@@ -262,6 +270,10 @@ export const PsmMatchingTool = Tool.define("psm_matching", async () => ({
         dependentVar: params.dependentVar,
         treatmentVar: params.treatmentVar,
         covariates: params.covariates,
+        options: {
+          analysis_unit_var: params.analysisUnitVar,
+          pre_treatment_aggregation: params.preTreatmentAggregation,
+        },
       },
       ctx,
     )
@@ -274,7 +286,7 @@ export const PsmMatchingTool = Tool.define("psm_matching", async () => ({
 
 export const PsmIpwTool = Tool.define("psm_ipw", async () => ({
   description:
-    "运行固定规则的 Hájek 逆概率加权，估计 ATE。仅在用户明确要求 IPW/逆概率加权且已确认处理变量、结果变量和处理前协变量时调用；不接受自定义目标效应、截尾、裁剪或权重公式。只有所有倾向得分处于固定重叠区间、两组有效样本量均达标且加权协变量平衡达标时才返回效应；不输出 p 值、置信区间或显著性结论。",
+    "运行固定规则的 Hájek 逆概率加权，估计 ATE。仅在用户明确要求 IPW/逆概率加权、已确认处理变量/结果变量/处理前协变量，且当前 stage 已按分析单位整理为一行一个单位时调用；面板原始逐期行不得直接加权。不接受自定义目标效应、截尾、裁剪或权重公式。只有所有倾向得分处于固定重叠区间、两组有效样本量均达标且加权协变量平衡达标时才返回效应；不输出 p 值、置信区间或显著性结论。",
   parameters: psmIpwParameters,
   formatValidationError,
   execute: async (params, ctx) => {
@@ -286,6 +298,10 @@ export const PsmIpwTool = Tool.define("psm_ipw", async () => ({
         dependentVar: params.dependentVar,
         treatmentVar: params.treatmentVar,
         covariates: params.covariates,
+        options: {
+          analysis_unit_var: params.analysisUnitVar,
+          pre_treatment_aggregation: params.preTreatmentAggregation,
+        },
       },
       ctx,
     )

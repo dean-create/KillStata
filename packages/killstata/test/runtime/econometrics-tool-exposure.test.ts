@@ -200,11 +200,15 @@ describe("model-visible econometrics tools", () => {
         dependentVar: "re78",
         treatmentVar: "treat",
         covariates: ["age", "education"],
+        analysisUnitVar: "person_id",
+        preTreatmentAggregation: "not_applicable",
       }
       expect(matching.parameters.safeParse(valid).success).toBe(true)
       for (const invalid of [
         { ...valid, covariates: ["treat"] },
         { ...valid, covariates: ["age", "age"] },
+        { ...valid, analysisUnitVar: undefined },
+        { ...valid, preTreatmentAggregation: undefined },
         { ...valid, matchingRatio: 2 },
         { ...valid, caliper: 0.5 },
         { ...valid, targetType: "ATE" },
@@ -227,11 +231,15 @@ describe("model-visible econometrics tools", () => {
         dependentVar: "re78",
         treatmentVar: "treat",
         covariates: ["age", "education"],
+        analysisUnitVar: "person_id",
+        preTreatmentAggregation: "not_applicable",
       }
       expect(ipw.parameters.safeParse(valid).success).toBe(true)
       for (const invalid of [
         { ...valid, covariates: ["treat"] },
         { ...valid, covariates: ["age", "age"] },
+        { ...valid, analysisUnitVar: undefined },
+        { ...valid, preTreatmentAggregation: undefined },
         { ...valid, targetType: "ATT" },
         { ...valid, trim: 0.05 },
         { ...valid, weightFormula: "stabilized" },

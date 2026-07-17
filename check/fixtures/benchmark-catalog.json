@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "datasets": [
+    {
+      "id": "did_real_panel",
+      "kind": "user_real_excel",
+      "path": "/Users/cw/Desktop/ks/test/did.xlsx",
+      "sha256": "1f906de3652b904a1436b1e5169a049ac2bbc948001b072bb2b349b92c7bd5db",
+      "sheet": "Data_原始编码",
+      "methodFamilies": ["panel", "did"],
+      "capabilities": ["unique_entity_time", "staggered_treatment", "chinese_headers"]
+    },
+    {
+      "id": "digital_real_panel",
+      "kind": "user_real_excel",
+      "path": "/Users/cw/Desktop/ks/test/test_datasets.xlsx",
+      "sha256": "a001c91e746b69d37cb3beeb46b1059065691fa532cb65b1e462eb4c10a02927",
+      "sheet": "Sheet1",
+      "methodFamilies": ["panel"],
+      "capabilities": ["requires_composite_entity_key", "chinese_headers"]
+    },
+    {
+      "id": "card1995",
+      "kind": "linearmodels_builtin",
+      "path": "check/data/card1995.csv",
+      "sha256": "2abe668bd418c17f3e29eb95a155a72666bd0420ac1ac8a40841c89f03d246b8",
+      "source": "linearmodels.datasets.card@7.0",
+      "methodFamilies": ["ols", "iv"],
+      "capabilities": ["endogenous_education", "instrument_nearc4"]
+    },
+    {
+      "id": "lalonde_nsw_dw",
+      "kind": "authoritative_external",
+      "path": "check/data/nsw_dw.dta",
+      "sha256": "d1bd2680a1c6f799f1c6d2455bf29633fdf19be01cb19490621c20a560b4e072",
+      "source": "Dehejia-Wahba NSW experimental and comparison sample",
+      "sourceUrl": "https://users.nber.org/~rdehejia/data/",
+      "methodFamilies": ["psm"],
+      "capabilities": ["binary_treatment", "pretreatment_covariates", "observed_outcome", "experimental_reference", "requires_check_local_row_id"],
+      "forbiddenSubstitutes": ["card1995"]
+    },
+    {
+      "id": "mpdta",
+      "kind": "authoritative_external",
+      "source": "Callaway-Sant'Anna did package mpdta",
+      "sourceUrl": "https://bcallaway11.github.io/did/reference/mpdta.html",
+      "methodFamilies": ["did"],
+      "capabilities": ["staggered_treatment", "never_treated", "unique_entity_time"]
+    },
+    {
+      "id": "rd_senate",
+      "kind": "authoritative_external",
+      "source": "rdrobust senate replication data",
+      "sourceUrl": "https://rdpackages.github.io/rdrobust/",
+      "methodFamilies": ["rdd"],
+      "capabilities": ["running_variable", "cutoff", "sharp_rdd"]
+    }
+  ],
+  "toolDefaults": {
+    "ols_regression": "card1995",
+    "panel_fe_regression": "did_real_panel",
+    "hdfe_regression": "did_real_panel",
+    "iv_2sls": "card1995",
+    "did_static": "did_real_panel",
+    "did2s": "mpdta",
+    "did_event_study_saturated": "mpdta",
+    "psm_construction": "lalonde_nsw_dw",
+    "psm_visualize": "lalonde_nsw_dw",
+    "psm_matching": "lalonde_nsw_dw",
+    "psm_ipw": "lalonde_nsw_dw",
+    "rdd_sharp": "rd_senate",
+    "rdd_fuzzy": "rd_senate"
+  }
+}
