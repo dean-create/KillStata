@@ -1,4 +1,5 @@
 from __future__ import annotations
+import warnings
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -6,6 +7,7 @@ matplotlib.use("Agg")
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from linearmodels import PanelOLS
+from linearmodels.iv import IV2SLS
 import scipy.stats
 from statsmodels.stats.diagnostic import acorr_breusch_godfrey, het_breuschpagan, het_white
 from statsmodels.stats.outliers_influence import OLSInfluence, variance_inflation_factor
@@ -93,37 +95,124 @@ def propensity_score_construction(treatment_variable, covariate_variables):
         pd.Series: The estimated propensity score for each sample, which will be named "propensity_score".
     """
     
-    # Adjust input type
-    treatment_variable = treatment_variable.astype(float)
-    covariate_variables = covariate_variables.astype(float)
-    
-    # Directly apply Logistic regression method to estimate the propensity score
-    clf = sm.Logit(treatment_variable, sm.add_constant(covariate_variables).astype(float)).fit()
-    result_series = pd.Series(clf.predict(sm.add_constant(covariate_variables).astype(float)), index = covariate_variables.index)
+    if treatment_variable is None:
+        raise ValueError("Propensity-score construction requires a treatment variable")
+    if covariate_variables is None:
+        raise ValueError("Propensity-score construction requires at least one covariate")
+
+    treatment = pd.Series(treatment_variable, copy=True)
+    covariates = pd.DataFrame(covariate_variables).copy()
+    if covariates.shape[1] == 0:
+        raise ValueError("Propensity-score construction requires at least one covariate")
+    if not treatment.index.equals(covariates.index):
+        raise ValueError("Treatment and covariates must use the same row index")
+    if treatment.isna().any() or covariates.isna().any().any():
+        raise ValueError("Treatment and covariates contain missing values; preprocess the canonical stage first")
+
+    try:
+        treatment = pd.to_numeric(treatment, errors="raise").astype(float)
+        covariates = covariates.apply(pd.to_numeric, errors="raise").astype(float)
+    except Exception as exc:
+        raise ValueError(f"Treatment and covariates must be numeric: {exc}") from exc
+
+    if not np.isfinite(treatment.to_numpy(dtype=float)).all() or not np.isfinite(covariates.to_numpy(dtype=float)).all():
+        raise ValueError("Treatment and covariates must contain only finite numeric values")
+    treatment_values = set(treatment.unique().tolist())
+    if treatment_values != {0.0, 1.0}:
+        raise ValueError("Treatment must be binary 0/1 with both treated and control groups present")
+
+    constant_covariates = [str(column) for column in covariates.columns if covariates[column].nunique(dropna=False) <= 1]
+    if constant_covariates:
+        raise ValueError(f"Propensity-score covariates must vary; constant columns: {constant_covariates}")
+
+    design = sm.add_constant(covariates, has_constant="add").astype(float)
+    if len(design) <= design.shape[1]:
+        raise ValueError("Propensity-score model has too few observations for the requested covariates")
+    rank = int(np.linalg.matrix_rank(design.to_numpy(dtype=float)))
+    if rank < design.shape[1]:
+        raise ValueError(
+            f"Propensity-score design matrix is rank deficient (rank={rank}, columns={design.shape[1]})"
+        )
+
+    try:
+        from statsmodels.tools.sm_exceptions import PerfectSeparationError
+
+        with warnings.catch_warnings(record=True) as fit_warnings:
+            warnings.simplefilter("always")
+            clf = sm.Logit(treatment, design).fit(disp=False, maxiter=200)
+    except PerfectSeparationError as exc:
+        raise ValueError("Propensity-score Logit has perfect separation; revise the covariates") from exc
+    except np.linalg.LinAlgError as exc:
+        raise ValueError("Propensity-score Logit is singular; revise the covariates") from exc
+    except Exception as exc:
+        message = str(exc)
+        if "separation" in message.lower() or "singular" in message.lower():
+            raise ValueError(f"Propensity-score Logit failed: {message}") from exc
+        raise
+
+    if any(warning.category.__name__ == "PerfectSeparationWarning" for warning in fit_warnings):
+        raise ValueError("Propensity-score Logit has perfect separation; revise the covariates")
+    if not bool(getattr(clf, "mle_retvals", {}).get("converged", False)):
+        raise ValueError("Propensity-score Logit did not converge")
+
+    predicted = np.asarray(clf.predict(design), dtype=float)
+    if not np.isfinite(predicted).all():
+        raise ValueError("Propensity-score Logit returned non-finite scores")
+    if np.any(predicted <= 0.0) or np.any(predicted >= 1.0):
+        raise ValueError("Propensity-score Logit returned boundary scores; overlap is not estimable")
+
+    result_series = pd.Series(predicted, index=covariates.index)
     result_series.name = "propensity_score"
+    result_series.attrs["converged"] = True
+    result_series.attrs["iterations"] = int(getattr(clf, "mle_retvals", {}).get("iterations", 0))
     return result_series
 
 def propensity_score_visualize_propensity_score_distribution(treatment_variable, propensity_score):
     from matplotlib import pyplot as plt
-    
-    '''
-    VISUALIZE propensity score distribution for treatment group and control group and compare their distributions.
-    The ideal result is that treatment group and control group should distribute similarly across propensity score. One common scenario is
-    treatment group has most sample with propensity score close to 1 and control group has most sample with propensity score close to 0.
-    In this scenario, the best solution is to trim samples with extreme propensity scores and obtain a subsample with similarly distributed propensity score.
-    
-    Args:
-        treatment_variable (pd.Series): Target treatment variable, which should be a binary variable (1 for treatment, 0 for control).
-        propensity_score (pd.Series): Propensity score for each sample to receive treatment, which should not contain nan value.
-    '''
-    
-    # Obtain treatment group propensity score and control group propensity score respectively
-    treatment_group_propensity = propensity_score.loc[treatment_variable[treatment_variable == 1].index]
-    control_group_propensity = propensity_score.loc[treatment_variable[treatment_variable == 0].index]
-    
-    # Visualize the distribution using histogram
-    plt.hist(control_group_propensity, bins = 40, facecolor = "blue", edgecolor = "black", alpha = 0.7, label = "control")
-    plt.hist(treatment_group_propensity, bins = 40, facecolor = "red", edgecolor = "black", alpha = 0.7, label = "treatment")
+
+    """Return a deterministic overlap diagnostic for treated and control scores."""
+    treatment = pd.to_numeric(pd.Series(treatment_variable), errors="coerce")
+    scores = pd.to_numeric(pd.Series(propensity_score), errors="coerce")
+    if not treatment.index.equals(scores.index):
+        raise ValueError("Treatment and propensity-score indexes must match")
+    if treatment.isna().any() or scores.isna().any():
+        raise ValueError("Treatment and propensity scores must not contain missing values")
+    if not np.isfinite(treatment.to_numpy(dtype=float)).all() or not np.isfinite(scores.to_numpy(dtype=float)).all():
+        raise ValueError("Treatment and propensity scores must contain only finite values")
+    if set(treatment.unique().tolist()) != {0, 1}:
+        raise ValueError("Treatment variable must contain both 0 and 1")
+    if ((scores <= 0.0) | (scores >= 1.0)).any():
+        raise ValueError("Propensity scores must lie strictly between 0 and 1")
+
+    treated_scores = scores[treatment == 1].to_numpy(dtype=float)
+    control_scores = scores[treatment == 0].to_numpy(dtype=float)
+    bins = np.linspace(0.0, 1.0, 21)
+    figure, axis = plt.subplots(figsize=(8, 5))
+    # 两组统一分箱并各自归一化为组内占比，避免样本量差异被误读为分布差异。
+    axis.hist(
+        control_scores,
+        bins=bins,
+        weights=np.full(control_scores.size, 1.0 / control_scores.size),
+        color="#4C78A8",
+        edgecolor="white",
+        alpha=0.65,
+        label="Control",
+    )
+    axis.hist(
+        treated_scores,
+        bins=bins,
+        weights=np.full(treated_scores.size, 1.0 / treated_scores.size),
+        color="#E45756",
+        edgecolor="white",
+        alpha=0.65,
+        label="Treated",
+    )
+    axis.set(xlim=(0.0, 1.0), xlabel="Propensity score", ylabel="Share within group")
+    axis.set_title("Propensity-score distribution by treatment group")
+    axis.grid(axis="y", alpha=0.2)
+    axis.legend(frameon=False)
+    figure.tight_layout()
+    return figure
 
 def propensity_score_matching(dependent_variable, treatment_variable, propensity_score, matched_num = 1, target_type = "ATE"):
     
@@ -198,6 +287,243 @@ def propensity_score_matching(dependent_variable, treatment_variable, propensity
         treatment_group_dependent_variable_series = dependent_variable.loc[treatment_group_propensity_score_series.index]
         ATT = treatment_group_dependent_variable_series.mean() - matched_dependent_variable_series.mean()
         return ATT
+
+def propensity_score_nearest_neighbor_att(dependent_variable, treatment_variable, propensity_score, covariate_variables):
+    """Estimate ATT for matched treated observations under KillStata's fixed PSM contract.
+
+    This deliberately is not a configurable general-purpose matcher: the model-facing tool
+    fixes 1:1 nearest-neighbour matching with replacement on the logit propensity score and
+    a 0.2-SD caliper. Exact nearest-distance ties share equal control weight, so a row order
+    can never change the estimate. The function rejects the run before publication when
+    post-match absolute SMD exceeds 0.10; it intentionally does not compute SE, p-values,
+    confidence intervals, or a bootstrap inference shortcut.
+    """
+    outcome = pd.Series(dependent_variable, copy=True)
+    treatment = pd.Series(treatment_variable, copy=True)
+    scores = pd.Series(propensity_score, copy=True)
+    covariates = pd.DataFrame(covariate_variables).copy()
+
+    if covariates.shape[1] == 0:
+        raise ValueError("PSM matching requires at least one pre-treatment covariate")
+    if not (outcome.index.equals(treatment.index) and outcome.index.equals(scores.index) and outcome.index.equals(covariates.index)):
+        raise ValueError("Outcome, treatment, propensity scores, and covariates must use the same row index")
+    if outcome.isna().any() or treatment.isna().any() or scores.isna().any() or covariates.isna().any().any():
+        raise ValueError("PSM matching does not accept missing values; preprocess the canonical stage first")
+
+    try:
+        outcome = pd.to_numeric(outcome, errors="raise").astype(float)
+        treatment = pd.to_numeric(treatment, errors="raise").astype(float)
+        scores = pd.to_numeric(scores, errors="raise").astype(float)
+        covariates = covariates.apply(pd.to_numeric, errors="raise").astype(float)
+    except Exception as exc:
+        raise ValueError(f"PSM matching requires numeric outcome, treatment, scores, and covariates: {exc}") from exc
+
+    if not (
+        np.isfinite(outcome.to_numpy()).all()
+        and np.isfinite(treatment.to_numpy()).all()
+        and np.isfinite(scores.to_numpy()).all()
+        and np.isfinite(covariates.to_numpy()).all()
+    ):
+        raise ValueError("PSM matching does not accept non-finite values")
+    treatment_values = set(treatment.unique().tolist())
+    if treatment_values != {0.0, 1.0}:
+        raise ValueError("PSM matching requires treatment coded exactly as 0 and 1 with both groups present")
+    if (scores <= 0).any() or (scores >= 1).any():
+        raise ValueError("PSM matching requires propensity scores strictly inside (0, 1)")
+
+    logit_scores = np.log(scores / (1.0 - scores))
+    logit_sd = float(np.std(logit_scores.to_numpy(), ddof=1))
+    if not np.isfinite(logit_sd) or logit_sd <= 0:
+        raise ValueError("PSM matching requires non-constant logit propensity scores to define its fixed caliper")
+    caliper = 0.2 * logit_sd
+
+    treated_index = treatment.index[treatment == 1]
+    control_index = treatment.index[treatment == 0]
+    control_logits = logit_scores.loc[control_index]
+    control_weights = pd.Series(0.0, index=control_index)
+    matched_treated_index = []
+    matched_effects = []
+    match_distances = []
+
+    for row_index in treated_index:
+        distances = (control_logits - logit_scores.loc[row_index]).abs()
+        nearest_distance = float(distances.min())
+        if nearest_distance > caliper:
+            continue
+        # Floating-point arithmetic may make mathematically equal distances differ by a few ULPs.
+        # This tight tolerance preserves exact-tie averaging without quietly admitting near matches.
+        nearest_controls = distances.index[np.isclose(distances.to_numpy(), nearest_distance, rtol=0.0, atol=1e-12)]
+        matched_control_outcome = float(outcome.loc[nearest_controls].mean())
+        control_weights.loc[nearest_controls] += 1.0 / len(nearest_controls)
+        matched_treated_index.append(row_index)
+        matched_effects.append(float(outcome.loc[row_index] - matched_control_outcome))
+        match_distances.append(nearest_distance)
+
+    if not matched_treated_index:
+        raise ValueError("PSM matching found no treated observation with a control inside the fixed caliper")
+
+    def standardized_mean_difference(treated_values, control_values, pooled_sd, control_weight=None):
+        treated_values = np.asarray(treated_values, dtype=float)
+        control_values = np.asarray(control_values, dtype=float)
+        treated_mean = float(np.mean(treated_values))
+        if control_weight is None:
+            control_mean = float(np.mean(control_values))
+        else:
+            control_weight = np.asarray(control_weight, dtype=float)
+            control_mean = float(np.average(control_values, weights=control_weight))
+        if pooled_sd == 0:
+            if np.isclose(treated_mean, control_mean, rtol=0.0, atol=1e-12):
+                return 0.0
+            raise ValueError("PSM matching cannot standardize a covariate with zero pooled variance and unequal means")
+        return (treated_mean - control_mean) / pooled_sd
+
+    pre_match_smd = {}
+    post_match_smd = {}
+    for column in covariates.columns:
+        values = covariates[column]
+        pre_treated_values = values.loc[treated_index].to_numpy(dtype=float)
+        pre_control_values = values.loc[control_index].to_numpy(dtype=float)
+        # The unmatched groups define one fixed denominator for pre/post SMD.  It remains
+        # well-defined when the caliper leaves a single matched treated observation.
+        treated_variance = np.var(pre_treated_values, ddof=1) if len(pre_treated_values) > 1 else 0.0
+        control_variance = np.var(pre_control_values, ddof=1) if len(pre_control_values) > 1 else 0.0
+        pooled_sd = float(np.sqrt((treated_variance + control_variance) / 2.0))
+        pre_match_smd[str(column)] = float(
+            standardized_mean_difference(pre_treated_values, pre_control_values, pooled_sd)
+        )
+        post_match_smd[str(column)] = float(
+            standardized_mean_difference(
+                values.loc[matched_treated_index],
+                values.loc[control_index],
+                pooled_sd,
+                control_weights.to_numpy(),
+            )
+        )
+
+    post_match_max_abs_smd = max(abs(value) for value in post_match_smd.values())
+    if post_match_max_abs_smd > 0.10:
+        raise ValueError(
+            f"PSM matching failed post-match balance: max absolute SMD={post_match_max_abs_smd:.4f} exceeds 0.10"
+        )
+
+    return {
+        "att": float(np.mean(matched_effects)),
+        "caliper": float(caliper),
+        "treated_count": int(len(treated_index)),
+        "control_count": int(len(control_index)),
+        "matched_treated_count": int(len(matched_treated_index)),
+        "unmatched_treated_count": int(len(treated_index) - len(matched_treated_index)),
+        "reused_control_count": int((control_weights > 1.0).sum()),
+        "max_match_distance": float(max(match_distances)),
+        "pre_match_smd": pre_match_smd,
+        "post_match_smd": post_match_smd,
+        "pre_match_max_abs_smd": float(max(abs(value) for value in pre_match_smd.values())),
+        "post_match_max_abs_smd": float(post_match_max_abs_smd),
+    }
+
+def propensity_score_hajek_ipw_ate(dependent_variable, treatment_variable, propensity_score, covariate_variables):
+    """Estimate a fixed Hájek IPW ATE under KillStata's model-facing contract.
+
+    The caller cannot select ATT, trimming, clipping, or a weight formula.  Scores outside
+    the declared overlap interval cause an explicit failure rather than silent clipping;
+    both group effective sample sizes and every supplied covariate's weighted SMD must pass
+    before an estimate is returned.  Inference is deliberately absent because this narrow
+    estimator has not yet admitted a validated variance procedure.
+    """
+    outcome = pd.Series(dependent_variable, copy=True)
+    treatment = pd.Series(treatment_variable, copy=True)
+    scores = pd.Series(propensity_score, copy=True)
+    covariates = pd.DataFrame(covariate_variables).copy()
+
+    if covariates.shape[1] == 0:
+        raise ValueError("IPW requires at least one pre-treatment covariate")
+    if not (outcome.index.equals(treatment.index) and outcome.index.equals(scores.index) and outcome.index.equals(covariates.index)):
+        raise ValueError("Outcome, treatment, propensity scores, and covariates must use the same row index")
+    if outcome.isna().any() or treatment.isna().any() or scores.isna().any() or covariates.isna().any().any():
+        raise ValueError("IPW does not accept missing values; preprocess the canonical stage first")
+
+    try:
+        outcome = pd.to_numeric(outcome, errors="raise").astype(float)
+        treatment = pd.to_numeric(treatment, errors="raise").astype(float)
+        scores = pd.to_numeric(scores, errors="raise").astype(float)
+        covariates = covariates.apply(pd.to_numeric, errors="raise").astype(float)
+    except Exception as exc:
+        raise ValueError(f"IPW requires numeric outcome, treatment, scores, and covariates: {exc}") from exc
+
+    if not (
+        np.isfinite(outcome.to_numpy()).all()
+        and np.isfinite(treatment.to_numpy()).all()
+        and np.isfinite(scores.to_numpy()).all()
+        and np.isfinite(covariates.to_numpy()).all()
+    ):
+        raise ValueError("IPW does not accept non-finite values")
+    if set(treatment.unique().tolist()) != {0.0, 1.0}:
+        raise ValueError("IPW requires treatment coded exactly as 0 and 1 with both groups present")
+    if (scores <= 0).any() or (scores >= 1).any():
+        raise ValueError("IPW requires propensity scores strictly inside (0, 1)")
+
+    overlap_lower, overlap_upper = 0.05, 0.95
+    if (scores < overlap_lower).any() or (scores > overlap_upper).any():
+        raise ValueError(
+            "IPW overlap failure: every propensity score must remain inside the fixed [0.05, 0.95] interval; weights are never clipped"
+        )
+
+    treated_index = treatment.index[treatment == 1]
+    control_index = treatment.index[treatment == 0]
+    treatment_weights = 1.0 / scores.loc[treated_index]
+    control_weights = 1.0 / (1.0 - scores.loc[control_index])
+
+    def effective_sample_size(weights):
+        values = np.asarray(weights, dtype=float)
+        return float(np.square(values.sum()) / np.square(values).sum())
+
+    treatment_ess = effective_sample_size(treatment_weights)
+    control_ess = effective_sample_size(control_weights)
+    if treatment_ess < 20.0 or control_ess < 20.0:
+        raise ValueError(
+            f"IPW effective sample size failure: treated ESS={treatment_ess:.2f}, control ESS={control_ess:.2f}; each must be at least 20"
+        )
+
+    # Keep one unmatched-sample pooled SD denominator for pre/post comparison.  The means
+    # below are Hájek-normalized within group, so the reported ATE cannot be altered by
+    # multiplying every group weight by the same constant.
+    weighted_smd = {}
+    for column in covariates.columns:
+        values = covariates[column]
+        treated_values = values.loc[treated_index].to_numpy(dtype=float)
+        control_values = values.loc[control_index].to_numpy(dtype=float)
+        treated_variance = np.var(treated_values, ddof=1) if len(treated_values) > 1 else 0.0
+        control_variance = np.var(control_values, ddof=1) if len(control_values) > 1 else 0.0
+        pooled_sd = float(np.sqrt((treated_variance + control_variance) / 2.0))
+        treated_mean = float(np.average(treated_values, weights=treatment_weights.to_numpy()))
+        control_mean = float(np.average(control_values, weights=control_weights.to_numpy()))
+        if pooled_sd == 0:
+            if np.isclose(treated_mean, control_mean, rtol=0.0, atol=1e-12):
+                weighted_smd[str(column)] = 0.0
+                continue
+            raise ValueError("IPW cannot standardize a covariate with zero pooled variance and unequal weighted means")
+        weighted_smd[str(column)] = float((treated_mean - control_mean) / pooled_sd)
+
+    weighted_max_abs_smd = max(abs(value) for value in weighted_smd.values())
+    if weighted_max_abs_smd > 0.10:
+        raise ValueError(
+            f"IPW failed weighted balance: max absolute SMD={weighted_max_abs_smd:.4f} exceeds 0.10"
+        )
+
+    treated_mean = float(np.average(outcome.loc[treated_index], weights=treatment_weights.to_numpy()))
+    control_mean = float(np.average(outcome.loc[control_index], weights=control_weights.to_numpy()))
+    return {
+        "ate": float(treated_mean - control_mean),
+        "treated_count": int(len(treated_index)),
+        "control_count": int(len(control_index)),
+        "treatment_ess": float(treatment_ess),
+        "control_ess": float(control_ess),
+        "min_propensity_score": float(scores.min()),
+        "max_propensity_score": float(scores.max()),
+        "max_weight": float(max(treatment_weights.max(), control_weights.max())),
+        "weighted_smd": weighted_smd,
+        "weighted_max_abs_smd": float(weighted_max_abs_smd),
+    }
 
 def propensity_score_inverse_probability_weighting(dependent_variable, treatment_variable, propensity_score, target_type = "ATE"):
     
@@ -402,7 +728,7 @@ def IV_2SLS_regression(dependent_variable, treatment_variable, IV_variable, cova
     """
     
     # Check Input
-    if type(cov_info) == str and cov_info not in ["nonrobust", "HC0", "HC1", "HC2", "HC3"]:
+    if type(cov_info) == str and cov_info not in ["nonrobust", "robust", "HC0", "HC1", "HC2", "HC3"]:
         raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
     elif type(cov_info) == dict and list(cov_info.keys())[0] not in ["HAC", "cluster"]:
         raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
@@ -414,44 +740,49 @@ def IV_2SLS_regression(dependent_variable, treatment_variable, IV_variable, cova
     if covariate_variables is not None:
         covariate_variables = covariate_variables.astype(float)
 
-    # First step regression
-    if covariate_variables is None:
-        first_step_X = IV_variable
-    else:
-        first_step_X = pd.concat([IV_variable, covariate_variables], axis = 1).astype(float)
-    if type(cov_info) == str:
-        first_step_regression = sm.OLS(treatment_variable, sm.add_constant(first_step_X)).fit(cov_type = cov_info)
-    elif list(cov_info.keys())[0] == "HAC":
-        first_step_regression = sm.OLS(treatment_variable, sm.add_constant(first_step_X)).fit(cov_type = "HAC", cov_kwds = {"maxlags": cov_info["HAC"]})
-    elif list(cov_info.keys())[0] == "cluster":
-        first_step_regression = sm.OLS(treatment_variable, sm.add_constant(first_step_X)).fit(cov_type = "cluster", cov_kwds = {"groups": cov_info["cluster"]})
-    predicted_treatment_result = pd.Series(first_step_regression.predict(sm.add_constant(first_step_X)), index = treatment_variable.index)
-    predicted_treatment_result.name = treatment_variable.name
+    # 必须用一次性的 IV2SLS 估计，不能手工跑「第一阶段拟合 -> 第二阶段 OLS」。
+    #
+    # 手工两阶段算出的**系数是对的**，但**标准误是错的**：第二阶段的 OLS 把拟合值
+    # predicted_treatment 当成了一个普通的、没有误差的回归元，用它算残差；而正确的 IV
+    # 方差必须基于**原始**内生变量的残差。这会让标准误偏离真值（Card 1995 数据上偏 +2.55%），
+    # 进而算错 t 值和显著性 —— 系数看着对，结论却可能反过来。
+    # 用 Card (1995) 复现测试验证：见 test/tool/iv-golden.test.ts。
+    exog = None if covariate_variables is None else sm.add_constant(covariate_variables)
+    if exog is None:
+        exog = pd.DataFrame({"const": 1.0}, index = dependent_variable.index)
 
-    # Second step regression
-    if covariate_variables is None:
-        second_step_X = predicted_treatment_result
-    else:
-        second_step_X = pd.concat([predicted_treatment_result, covariate_variables], axis = 1).astype(float)
-    if type(cov_info) == str:
-        second_step_regression = sm.OLS(dependent_variable, sm.add_constant(second_step_X)).fit(cov_type = cov_info)
-    elif list(cov_info.keys())[0] == "HAC":
-        second_step_regression = sm.OLS(dependent_variable, sm.add_constant(second_step_X)).fit(cov_type = "HAC", cov_kwds = {"maxlags": cov_info["HAC"]})
-    elif list(cov_info.keys())[0] == "cluster":
-        second_step_regression = sm.OLS(dependent_variable, sm.add_constant(second_step_X)).fit(cov_type = "cluster", cov_kwds = {"groups": cov_info["cluster"]})        
+    endog = treatment_variable.to_frame() if isinstance(treatment_variable, pd.Series) else treatment_variable
+    instruments = IV_variable.to_frame() if isinstance(IV_variable, pd.Series) else IV_variable
 
-    # Output the table if required. ATE is the coefficient of the predicted treatment variable
-    print("Estimated ATE: ", second_step_regression.params[predicted_treatment_result.name])
+    model = IV2SLS(dependent_variable, exog, endog, instruments)
+
+    # 把本函数的 cov_info 约定映射到 linearmodels 的协方差类型。
+    if type(cov_info) == str:
+        if cov_info == "nonrobust":
+            iv_regression = model.fit(cov_type = "unadjusted")
+        else:
+            # linearmodels 的线性 IV 后端只区分 unadjusted 与 robust；
+            # HC0/HC1/HC2/HC3 仅为旧调用兼容，新模型工具只暴露 robust。
+            iv_regression = model.fit(cov_type = "robust")
+    elif list(cov_info.keys())[0] == "HAC":
+        iv_regression = model.fit(cov_type = "kernel", bandwidth = cov_info["HAC"])
+    elif list(cov_info.keys())[0] == "cluster":
+        iv_regression = model.fit(cov_type = "clustered", clusters = cov_info["cluster"])
+
+    treatment_name = endog.columns[0]
+
+    # Output the table if required. ATE is the coefficient of the endogenous treatment variable
+    print("Estimated ATE: ", iv_regression.params[treatment_name])
     if output_tables is True:
-        print(second_step_regression.summary())
+        print(iv_regression.summary)
 
     # Return evaluation metric if needed
     if target_type == "neg_pvalue":
-        return -second_step_regression.pvalues[predicted_treatment_result.name]
+        return -iv_regression.pvalues[treatment_name]
     elif target_type == "rsquared":
-        return second_step_regression.rsquared_adj
+        return iv_regression.rsquared_adj
     elif target_type == "final_model":
-        return second_step_regression
+        return iv_regression
     
 def IV_2SLS_IV_setting_test(dependent_variable, treatment_variable, IV_variable, covariate_variables, cov_type = None):
 
@@ -587,238 +918,6 @@ def Static_Diff_in_Diff_regression(dependent_variable,
         return regression.rsquared
     elif target_type == "final_model":
         return regression
-
-def _panel_treatment_dummy(entity_treatment_dummy = None, treatment_entity_dummy = None, treatment_finished_dummy = None):
-    if entity_treatment_dummy is None:
-        if treatment_entity_dummy is None or treatment_finished_dummy is None:
-            raise RuntimeError("Need either entity_treatment_dummy or both treatment_entity_dummy and treatment_finished_dummy!")
-        entity_treatment_dummy = treatment_entity_dummy.astype(float) * treatment_finished_dummy.astype(float)
-    entity_treatment_dummy = entity_treatment_dummy.astype(float)
-    if list(entity_treatment_dummy.map(int).sort_values().unique()) != [0, 1]:
-        raise RuntimeError("entity_treatment_dummy Input Error! Please Check!")
-    entity_treatment_dummy.name = entity_treatment_dummy.name or "treatment_entity_treated"
-    return entity_treatment_dummy
-
-def _panel_event_study_terms(entity_treatment_dummy, see_back_length: int, see_forward_length: int, relative_time_variable = None):
-    entity_index_name, time_index_name = entity_treatment_dummy.index.names[0], entity_treatment_dummy.index.names[1]
-    treatment_name = entity_treatment_dummy.name
-    data_df = entity_treatment_dummy.reset_index()
-    all_entity_list = list(data_df[entity_index_name].unique())
-    all_time_list = list(data_df[time_index_name].unique())
-    all_time_list.sort()
-    if see_back_length < 4 or see_forward_length < 3:
-        raise RuntimeError("See back day length or see forward day length too few! Please check!")
-    if see_back_length + see_forward_length >= len(all_time_list):
-        raise RuntimeError("See back day length or see forward day length too large! Please check!")
-
-    lead_column_name_list = ["Lead_D" + str(see_back_length) + "+"]
-    for i in np.arange(see_back_length - 1, 1, -1):
-        lead_column_name_list.append("Lead_D" + str(i))
-    lag_column_name_list = []
-    for i in np.arange(1, see_forward_length, 1):
-        lag_column_name_list.append("Lag_D" + str(i))
-    lag_column_name_list.append("Lag_D" + str(see_forward_length) + "+")
-    lead_and_lag_column_name_list = lead_column_name_list + ["D0"] + lag_column_name_list
-
-    considered_data_df = data_df[[entity_index_name, time_index_name]].copy()
-    considered_data_df[lead_and_lag_column_name_list] = 0.0
-
-    if relative_time_variable is not None:
-        relative_time_series = pd.to_numeric(relative_time_variable, errors = "coerce")
-        relative_time_series = relative_time_series.rename("relative_time").reset_index(drop = True)
-        considered_data_df["relative_time"] = relative_time_series
-        for each_index, relative_time in considered_data_df["relative_time"].items():
-            if pd.isna(relative_time) or relative_time == -1:
-                continue
-            relative_time = int(relative_time)
-            if relative_time <= -see_back_length:
-                considered_data_df.loc[each_index, "Lead_D" + str(see_back_length) + "+"] = 1
-            elif -see_back_length < relative_time < -1:
-                considered_data_df.loc[each_index, "Lead_D" + str(abs(relative_time))] = 1
-            elif relative_time == 0:
-                considered_data_df.loc[each_index, "D0"] = 1
-            elif 0 < relative_time < see_forward_length:
-                considered_data_df.loc[each_index, "Lag_D" + str(relative_time)] = 1
-            elif relative_time >= see_forward_length:
-                considered_data_df.loc[each_index, "Lag_D" + str(see_forward_length) + "+"] = 1
-        considered_data_df = considered_data_df.drop(columns = ["relative_time"])
-        return considered_data_df.set_index([entity_index_name, time_index_name]), lead_and_lag_column_name_list
-
-    for each_entity in all_entity_list:
-        temp_df = data_df[data_df[entity_index_name] == each_entity]
-        check_series = temp_df[treatment_name] - temp_df[treatment_name].shift().fillna(0)
-        if check_series[check_series == 1].shape[0] == 0:
-            continue
-        policy_time_index = check_series[check_series == 1].index[0]
-        for each_index in temp_df.index:
-            corresponding_each_time = temp_df.loc[each_index, time_index_name]
-            if each_index - policy_time_index <= -see_back_length:
-                considered_data_df.loc[(considered_data_df[entity_index_name] == each_entity) & (considered_data_df[time_index_name] == corresponding_each_time), "Lead_D" + str(see_back_length) + "+"] = 1
-            elif each_index - policy_time_index > -see_back_length and each_index - policy_time_index < -1:
-                considered_data_df.loc[(considered_data_df[entity_index_name] == each_entity) & (considered_data_df[time_index_name] == corresponding_each_time), "Lead_D" + str(policy_time_index - each_index)] = 1
-            elif each_index == policy_time_index:
-                considered_data_df.loc[(considered_data_df[entity_index_name] == each_entity) & (considered_data_df[time_index_name] == corresponding_each_time), "D0"] = 1
-            elif each_index - policy_time_index > 0 and each_index - policy_time_index < see_forward_length:
-                considered_data_df.loc[(considered_data_df[entity_index_name] == each_entity) & (considered_data_df[time_index_name] == corresponding_each_time), "Lag_D" + str(each_index - policy_time_index)] = 1
-            elif each_index - policy_time_index >= see_forward_length:
-                considered_data_df.loc[(considered_data_df[entity_index_name] == each_entity) & (considered_data_df[time_index_name] == corresponding_each_time), "Lag_D" + str(see_forward_length) + "+"] = 1
-    return considered_data_df.set_index([entity_index_name, time_index_name]), lead_and_lag_column_name_list
-
-def Staggered_Diff_in_Diff_regression(dependent_variable,
-                                      entity_treatment_dummy = None,
-                                      covariate_variables = None,
-                                      treatment_entity_dummy = None,
-                                      treatment_finished_dummy = None,
-                                      entity_effect = True,
-                                      time_effect = True,
-                                      other_effect = None,
-                                      cov_type = "unadjusted",
-                                      target_type = "final_model",
-                                      output_tables = False):
-    if cov_type not in ["unadjusted", "robust", "cluster_entity", "cluster_time", "cluster_both"]:
-        raise RuntimeError("Covariance type input unsupported! This function supports 'unadjusted', 'robust', 'cluster_entity', 'cluster_time' and 'cluster_both' as possible inputs!")
-    count_effects = 0
-    if entity_effect is True:
-        count_effects += 1
-    if time_effect is True:
-        count_effects += 1
-    if other_effect is not None:
-        count_effects += other_effect.shape[1]
-    if count_effects > 2:
-        raise RuntimeError("At most two effects allowed! Please note that now there are " + str(count_effects) + " effects in total!")
-
-    dependent_variable = dependent_variable.astype(float)
-    entity_treatment_dummy = _panel_treatment_dummy(entity_treatment_dummy, treatment_entity_dummy, treatment_finished_dummy)
-    if covariate_variables is not None:
-        covariate_variables = covariate_variables.astype(float)
-
-    entity_treatment_dummy.name = "treatment_entity_treated"
-    if covariate_variables is None:
-        X = entity_treatment_dummy
-    else:
-        X = pd.concat([entity_treatment_dummy, covariate_variables], axis = 1).astype(float)
-    if count_effects == 0:
-        X = sm.add_constant(X)
-
-    if cov_type in ["unadjusted", "robust"]:
-        regression = PanelOLS(dependent_variable, X, entity_effects = entity_effect, time_effects = time_effect, other_effects = other_effect, drop_absorbed = True).fit(cov_type = cov_type)
-    elif cov_type == "cluster_entity":
-        regression = PanelOLS(dependent_variable, X, entity_effects = entity_effect, time_effects = time_effect, other_effects = other_effect, drop_absorbed = True).fit(cov_type = "clustered", cluster_entity = True)
-    elif cov_type == "cluster_time":
-        regression = PanelOLS(dependent_variable, X, entity_effects = entity_effect, time_effects = time_effect, other_effects = other_effect, drop_absorbed = True).fit(cov_type = "clustered", cluster_time = True)
-    elif cov_type == "cluster_both":
-        regression = PanelOLS(dependent_variable, X, entity_effects = entity_effect, time_effects = time_effect, other_effects = other_effect, drop_absorbed = True).fit(cov_type = "clustered", cluster_entity = True, cluster_time = True)
-
-    print("Estimated ATE: ", regression.params[entity_treatment_dummy.name])
-    if output_tables is True:
-        print(regression)
-
-    if target_type == "neg_pvalue":
-        return -regression.pvalues[entity_treatment_dummy.name]
-    elif target_type == "rsquared":
-        return regression.rsquared
-    elif target_type == "final_model":
-        return regression
-
-def Staggered_Diff_in_Diff_Event_Study_regression(dependent_variable,
-                                                  entity_treatment_dummy = None,
-                                                  covariate_variables = None,
-                                                  relative_time_variable = None,
-                                                  treatment_entity_dummy = None,
-                                                  treatment_finished_dummy = None,
-                                                  see_back_length: int = 4,
-                                                  see_forward_length: int = 3,
-                                                  entity_effect = True,
-                                                  time_effect = True,
-                                                  other_effect = None,
-                                                  cov_type = "unadjusted",
-                                                  target_type = "final_model",
-                                                  output_tables = False):
-    if cov_type not in ["unadjusted", "robust", "cluster_entity", "cluster_time", "cluster_both"]:
-        raise RuntimeError("Covariance type input unsupported! This function supports 'unadjusted', 'robust', 'cluster_entity', 'cluster_time' and 'cluster_both' as possible inputs!")
-    count_effects = 0
-    if entity_effect is True:
-        count_effects += 1
-    if time_effect is True:
-        count_effects += 1
-    if other_effect is not None:
-        count_effects += other_effect.shape[1]
-    if count_effects > 2:
-        raise RuntimeError("At most two effects allowed! Please note that now there are " + str(count_effects) + " effects in total!")
-
-    dependent_variable = dependent_variable.astype(float)
-    entity_treatment_dummy = _panel_treatment_dummy(entity_treatment_dummy, treatment_entity_dummy, treatment_finished_dummy)
-    if covariate_variables is not None:
-        covariate_variables = covariate_variables.astype(float)
-
-    considered_data_df, lead_and_lag_column_name_list = _panel_event_study_terms(
-        entity_treatment_dummy,
-        see_back_length = see_back_length,
-        see_forward_length = see_forward_length,
-        relative_time_variable = relative_time_variable,
-    )
-    if covariate_variables is None:
-        X = considered_data_df
-    else:
-        X = pd.concat([considered_data_df, covariate_variables], axis = 1).astype(float)
-    if count_effects == 0:
-        X = sm.add_constant(X)
-
-    if cov_type in ["unadjusted", "robust"]:
-        regression = PanelOLS(dependent_variable, X, entity_effects = entity_effect, time_effects = time_effect, other_effects = other_effect, drop_absorbed = True).fit(cov_type = cov_type)
-    elif cov_type == "cluster_entity":
-        regression = PanelOLS(dependent_variable, X, entity_effects = entity_effect, time_effects = time_effect, other_effects = other_effect, drop_absorbed = True).fit(cov_type = "clustered", cluster_entity = True)
-    elif cov_type == "cluster_time":
-        regression = PanelOLS(dependent_variable, X, entity_effects = entity_effect, time_effects = time_effect, other_effects = other_effect, drop_absorbed = True).fit(cov_type = "clustered", cluster_time = True)
-    elif cov_type == "cluster_both":
-        regression = PanelOLS(dependent_variable, X, entity_effects = entity_effect, time_effects = time_effect, other_effects = other_effect, drop_absorbed = True).fit(cov_type = "clustered", cluster_entity = True, cluster_time = True)
-
-    if output_tables is True:
-        print(regression)
-
-    if target_type == "neg_pvalue":
-        return -regression.pvalues["D0"]
-    elif target_type == "rsquared":
-        return regression.rsquared
-    elif target_type == "final_model":
-        return regression
-    
-def Staggered_Diff_in_Diff_Event_Study_visualization(regression_model, see_back_length: int = 4, see_forward_length: int = 3):
-    from matplotlib import pyplot as plt
-    
-    '''
-    Visualize the Staggered Difference-in-Difference Event Study result. Note that this function needs the regression result from the previously defined function
-    "Staggered_Diff_in_Diff_Event_Study_regression()", and need to set the input parameters "see_back_length" and "see_forward_length" well matched with the regression result.
-    
-    Args:
-        regression_model (linearmodels.PanelOLS): The regression model returned from the previously defined function "Staggered_Diff_in_Diff_Event_Study_regression()", with the input 'target_type == "final_model"'.
-        see_back_length (int): A positive int denote the length of see-back observation. 
-        see_forward_length (int): A positive int denote the length of see-forward observation. 
-    '''
-    
-    # Construct Lead-Lag Dummy Variables (set Lead_D1 as default)
-    Lead_column_name_list = ["Lead_D" + str(see_back_length) + "+"]
-    for i in np.arange(see_back_length - 1, 1, -1):
-        Lead_column_name_list.append("Lead_D" + str(i))
-    Lag_column_name_list = []
-    for i in np.arange(1, see_forward_length, 1):
-        Lag_column_name_list.append("Lag_D" + str(i))
-    Lag_column_name_list.append("Lag_D" + str(see_forward_length) + "+")
-    Lead_and_Lag_column_name_list = Lead_column_name_list + ["D0"] + Lag_column_name_list
-    
-    # Output the graph
-    plt.plot(regression_model.params[Lead_and_Lag_column_name_list])
-    plt.xticks(list(range(len(Lead_and_Lag_column_name_list))), Lead_and_Lag_column_name_list)
-    plt.ylabel("Estimated Coefficients")
-    plt.axhline(y = 0, color = "g", linestyle = "--")
-    plt.axvline(x = 2.5, color = "g", linestyle = "--")
-    for each_x_count in range(len(Lead_and_Lag_column_name_list)):
-        each_x = regression_model.conf_int().index[each_x_count]
-        plt.plot([each_x_count - 1 - 0.1, each_x_count - 1 + 0.1], [regression_model.conf_int().loc[each_x, "lower"], regression_model.conf_int().loc[each_x, "lower"]], color = "#f44336")
-        plt.plot([each_x_count - 1 - 0.1, each_x_count - 1 + 0.1], [regression_model.conf_int().loc[each_x, "upper"], regression_model.conf_int().loc[each_x, "upper"]], color = "#f44336")
-        plt.plot([each_x, each_x], [regression_model.conf_int().loc[each_x, "lower"], regression_model.conf_int().loc[each_x, "upper"]], color = "#f44336")
-        
-#%%
 
 def Sharp_Regression_Discontinuity_Design_regression(dependent_variable, 
                                                      entity_treatment_dummy, 
@@ -1040,153 +1139,6 @@ def Fuzzy_Regression_Discontinuity_Design_regression(dependent_variable,
         return model_1.params[should_be_treated_dummy.name] / model_2.params[should_be_treated_dummy.name]
     elif target_type == "final_models":
         return [model_1, model_2]
-
-def Fuzzy_RDD_Global_Polynomial_Estimator_regression(dependent_variable, 
-                                                     entity_treatment_dummy, 
-                                                     running_variable, 
-                                                     covariate_variables, 
-                                                     running_variable_cutoff, 
-                                                     max_order, 
-                                                     kernel_choice = "uniform", 
-                                                     cov_info = "nonrobust", 
-                                                     target_type = "final_model", 
-                                                     output_tables = False):
-    
-    """
-    Use Two-step Fuzzy Regression Discontinuity Design (Fuzzy RDD) Global Polynomial Estimator approach to estimate Average Treatment Effect (ATE) of 
-    the treatment variable towards the dependent variable. This is the Fuzzy version, denoting that there could be higher possibility, 
-    but not for sure, for an entity with treatment variable above the cutoff to receive the final treatment. In other word, it's not the Sharp method.
-    Also, this is the Global Polynomial Estimator approach, meaning that all samples will be included in the analysis and no bandwidth is required or allowed.
-    If user specifies any fixed effect variable, in the Fuzzy RDD Global Polynomial Estimator method this variable MUST BE transformed into dummy variables first (with one of the categories dropped to avoid multicollinearity with the constant term) and added into covariates.
-    The estimated ATE is the parameter of the entity treatment dummy in the second-step regression model.
-    NOTE THAT THIS FUNCTION DOES NOT RETURN THE FINAL REGRESSION TABLE! All tables can (and only can) be printed out during the function.
-    The final return is some clearly specified parameter or statistic within the regressions, or some regression model object within the function (by adjusting the argument input "target_type").
-    
-    Args:
-        dependent_variable (pd.Series): Target dependent variable, which should not contain nan value.
-        entity_treatment_dummy (pd.Series): A dummy variables series denoting whether the treatment is implemented towards the entity. This input should not contain nan value.
-        running_variable (pd.Series): Target running variable to determine the possibility for the entity to receive treatment, which should not contain nan value.
-        covariate_variables (pd.DataFrame or None): Proposed covariate variables. If user does not specify any covariate variable, this could be None. Otherwise, it should not contain nan value.
-        running_variable_cutoff (float): Denote the threshold of the treatment variable, above which the entity will have higher chance to receive the final treatment.
-        max_order (int): Denote the highest polynomial order in the analysis. Should be an integer no smaller than 1.
-        kernel_choice (str): Denote the choice of kernel function used in this analysis. Default is "uniform" that gives equal weights to all samples in the dataset. Can also accept "triangle" and "Epanechnikov".
-        cov_info (str or dict): The covariance estimator used in the results. Four covariance estimators are supported: If no adjustment, input "nonrobust"; If heteroskedasticity-consistent adjustment (allows "HC0", "HC1", "HC2", "HC3"), take "HC0" as example, input "HC0", and if user specifies to use "robust" standard errors, input "HC1"; If heteroskedasticity and autocorrelation consistent adjustment (HAC) with integer lag terms, take maxlags equal to 5 for example, input {"HAV": 5}; If cluster adjustment with the target groups variable named "groups" (pd.Series or pd.dataframe), input {"cluster": groups}.
-        target_type (str or None): Denote whether this function need to return any specific evaluation metric or any other content. If only want to print out regression tables, this should be None. Otherwise, three possible inputs are supported: "neg_pvalue" for the regression treatment variable coefficient p-value's negative value, "rsquared" for the adjusted R-squared value of the regression, and "final_model" for the final second-step regression model.
-        output_tables (bool): Denote whether this function need to print out regression tables. If want to print out the tabels, this should be True. If only want the evaluation metric outputs, this should be False.
-    """
-    
-    # Check if inputs are proper formatted
-    if kernel_choice not in ["uniform", "triangle", "Epanechnikov"]:
-        raise RuntimeError("Kernel function choice currently only supports 'uniform', 'triangle' and 'Epanechnikov'!")
-    if type(cov_info) == str and cov_info not in ["nonrobust", "HC0", "HC1", "HC2", "HC3"]:
-        raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
-    elif type(cov_info) == dict and list(cov_info.keys())[0] not in ["HAC", "cluster"]:
-        raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
-    if running_variable[running_variable > running_variable_cutoff].shape[0] == 0 or running_variable[running_variable < running_variable_cutoff].shape[0] == 0:
-        raise RuntimeError("Running variable cutoff is out of the range for all running variable values! PLEASE CHECK!")
-    if max_order < 1:
-        raise RuntimeError("max_order input must be no smaller than 1! PLEASE CHECK!")
-    
-    # Adjust input type
-    dependent_variable = dependent_variable.astype(float)
-    entity_treatment_dummy = entity_treatment_dummy.astype(float)
-    running_variable = running_variable.astype(float)
-    if covariate_variables is not None:
-        covariate_variables = covariate_variables.astype(float)
-    
-    # =========================================================================
-    
-    # Construct variables
-    should_be_treated_dummy = running_variable.map(lambda x: 1 if x >= running_variable_cutoff else 0)
-    should_be_treated_dummy.name = running_variable.name + "_dummy"
-
-    # Construct weightings
-    running_variable_bandwidth = max(running_variable.max() - running_variable_cutoff, running_variable_cutoff - running_variable.min())
-    if kernel_choice == "uniform":
-        weight = pd.Series(index = running_variable.index).fillna(1 / running_variable.shape[0])
-    elif kernel_choice == "triangle":
-        weight =  1 - ((running_variable - running_variable_cutoff) / running_variable_bandwidth).abs()
-    elif kernel_choice == "Epanechnikov":
-        weight = running_variable.map(lambda x: 0.75 * (1 - np.abs(((x - running_variable_cutoff) / running_variable_bandwidth)) ** 2))
-
-    # =========================================================================
-
-    # Construct higher order terms for step 1 regression
-    all_constructed_terms_list_step_1 = []
-    for each_order in range(1, max_order + 1):
-        demeaned_running_variable = (running_variable - running_variable_cutoff) ** each_order
-        demeaned_running_variable.name = "demeaned_order_" + str(each_order) + "_" + running_variable.name
-        demeaned_running_interaction_variable = demeaned_running_variable * should_be_treated_dummy
-        demeaned_running_interaction_variable.name = "demeaned_order_" + str(each_order) + "_interaction_" + running_variable.name
-        all_constructed_terms_list_step_1.append(demeaned_running_variable)
-        all_constructed_terms_list_step_1.append(demeaned_running_interaction_variable)
-    all_constructed_terms_list_step_1 = pd.concat(all_constructed_terms_list_step_1, axis = 1)
-    all_constructed_terms_name_list_step_1 = list(all_constructed_terms_list_step_1.columns)
-    
-    # Construct formula and dataset for step 1 regression
-    if covariate_variables is not None:
-        regression_formula_1 = entity_treatment_dummy.name + " ~ " + should_be_treated_dummy.name + " + " + " + ".join(all_constructed_terms_name_list_step_1) + " + " + " + ".join(list(covariate_variables.columns))
-        complete_dataset_1 = pd.concat([entity_treatment_dummy, should_be_treated_dummy, all_constructed_terms_list_step_1, covariate_variables.astype(float)], axis = 1)
-    else:
-        regression_formula_1 = entity_treatment_dummy.name + " ~ " + should_be_treated_dummy.name + " + " + " + ".join(all_constructed_terms_name_list_step_1)
-        complete_dataset_1 = pd.concat([entity_treatment_dummy, should_be_treated_dummy, all_constructed_terms_list_step_1], axis = 1)
-        
-    # Run the step 1 regression and produce prediction
-    if type(cov_info) == str:
-        model_1 = smf.wls(regression_formula_1, complete_dataset_1, weights = weight).fit(cov_type = cov_info)
-    elif list(cov_info.keys())[0] == "HAC":
-        model_1 = smf.wls(regression_formula_1, complete_dataset_1, weights = weight).fit(cov_type = "HAC", cov_kwds = {"maxlags": cov_info["HAC"]})
-    elif list(cov_info.keys())[0] == "cluster":
-        model_1 = smf.wls(regression_formula_1, complete_dataset_1, weights = weight).fit(cov_type = "cluster", cov_kwds = {"groups": cov_info["cluster"]})
-    entity_treatment_dummy_hat = pd.Series(model_1.predict(complete_dataset_1[complete_dataset_1.columns[1:]]))
-    entity_treatment_dummy_hat.name = entity_treatment_dummy.name
-    
-    # =========================================================================
-    
-    # Construct higher order terms for step 2 regression
-    all_constructed_terms_list_step_2 = []
-    for each_order in range(1, max_order + 1):
-        demeaned_running_variable = (running_variable - running_variable_cutoff) ** each_order
-        demeaned_running_variable.name = "demeaned_order_" + str(each_order) + "_" + running_variable.name
-        demeaned_running_interaction_variable = demeaned_running_variable * entity_treatment_dummy_hat
-        demeaned_running_interaction_variable.name = "demeaned_order_" + str(each_order) + "_interaction_" + running_variable.name
-        all_constructed_terms_list_step_2.append(demeaned_running_variable)
-        all_constructed_terms_list_step_2.append(demeaned_running_interaction_variable)
-    all_constructed_terms_list_step_2 = pd.concat(all_constructed_terms_list_step_2, axis = 1)
-    all_constructed_terms_name_list_step_2 = list(all_constructed_terms_list_step_2.columns)
-
-    # Construct formula and dataset for step 2 regression
-    if covariate_variables is not None:
-        regression_formula_2 = dependent_variable.name + " ~ " + entity_treatment_dummy_hat.name + " + " + " + ".join(all_constructed_terms_name_list_step_2) + " + " + " + ".join(list(covariate_variables.columns))
-        complete_dataset_2 = pd.concat([dependent_variable, entity_treatment_dummy_hat, all_constructed_terms_list_step_2, covariate_variables.astype(float)], axis = 1)
-    else:
-        regression_formula_2 = dependent_variable.name + " ~ " + entity_treatment_dummy_hat.name + " + " + " + ".join(all_constructed_terms_name_list_step_2)
-        complete_dataset_2 = pd.concat([dependent_variable, entity_treatment_dummy_hat, all_constructed_terms_list_step_2], axis = 1)
-        
-    # Run the step 2 regression and produce inference
-    if type(cov_info) == str:
-        model_2 = smf.wls(regression_formula_2, complete_dataset_2, weights = weight).fit(cov_type = cov_info)
-    elif list(cov_info.keys())[0] == "HAC":
-        model_2 = smf.wls(regression_formula_2, complete_dataset_2, weights = weight).fit(cov_type = "HAC", cov_kwds = {"maxlags": cov_info["HAC"]})
-    elif list(cov_info.keys())[0] == "cluster":
-        model_2 = smf.wls(regression_formula_2, complete_dataset_2, weights = weight).fit(cov_type = "cluster", cov_kwds = {"groups": cov_info["cluster"]})    
-
-    # =========================================================================
-
-    # Output the table if required
-    print("Final ATE Estimation: ", model_2.params[entity_treatment_dummy_hat.name])
-    if output_tables is True:
-        print(model_1.summary())
-        print(model_2.summary())
-
-    # Return evaluation metric if needed
-    if target_type == "neg_pvalue":
-        return -model_2.pvalues[entity_treatment_dummy_hat.name]
-    elif target_type == "rsquared":
-        return model_2.rsquared
-    elif target_type == "final_model":
-        return model_2
-
 
 def _safe_float(value):
     try:

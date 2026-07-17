@@ -23,7 +23,6 @@ import { defer } from "../util/defer"
 import { clone } from "remeda"
 import { ToolRegistry } from "../tool/registry"
 import { MCP } from "../mcp"
-import { LSP } from "../lsp"
 import { ReadTool } from "../tool/read"
 import { ListTool } from "../tool/ls"
 import { FileTime } from "../file/time"
@@ -44,15 +43,21 @@ import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
-import { Truncate } from "@/tool/truncation"
+import { prepareToolMetadata } from "@/runtime/tool-result-policy"
 import type { InputGraphNode, QueuedSessionAction, ToolAvailabilityPolicy, WorkflowInputIntent } from "@/runtime/types"
 import { RuntimeHooks } from "@/runtime/hooks"
-import { allowMcpToolForWorkflow } from "@/runtime/workflow"
 import { SessionRunCoordinator } from "./run-state"
 import { detectWorkflowLocaleFromText } from "@/runtime/workflow-locale"
+import { isNegatedWorkflowRequest, isWorkflowConsultation } from "@/runtime/input-intent"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
+
+export const AUTOMATIC_TOOL_REPAIR_LIMIT = 2
+
+export function shouldAutomaticallyRepairTool(attempts: number) {
+  return attempts < AUTOMATIC_TOOL_REPAIR_LIMIT
+}
 
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
@@ -85,31 +90,47 @@ export namespace SessionPrompt {
     SessionRunCoordinator.resolveAction(sessionID, message, actionID)
   }
 
-  function detectInputIntent(parts: PromptInput["parts"], explicitIntent?: WorkflowInputIntent): WorkflowInputIntent | undefined {
+  export function detectInputIntent(
+    parts: PromptInput["parts"],
+    explicitIntent?: WorkflowInputIntent,
+  ): WorkflowInputIntent {
     if (explicitIntent) return explicitIntent
 
     const text = parts
       .map((part) => {
         if (part.type === "text") return part.text
-        if (part.type === "file") return [part.filename, part.url, part.source?.type === "file" ? part.source.path : ""].join(" ")
+        if (part.type === "file" && !part.mime?.startsWith("image/")) {
+          return [part.filename, part.url, part.source?.type === "file" ? part.source.path : ""].join(" ")
+        }
         return ""
       })
       .join("\n")
       .toLowerCase()
 
+    if (isNegatedWorkflowRequest(text) || isWorkflowConsultation(text)) return "conversation"
+
     // 如果用户已经明确要做回归或计量分析，这是“导入 + 估计”的复合任务；
     // analysis 工具包会同时暴露 data_import 与 econometrics，避免导入后回归工具被延迟。
     if (
-      /\b(regression|econometric|econometrics|panel_fe|smart_baseline|auto_recommend|did|ols|2sls|iv|psm|rdd)\b/.test(
+      /\b(regression|econometric|econometrics|panel_fe|auto_recommend|did|ols|2sls|iv|psm|rdd)\b/.test(
         text,
       ) ||
-      /计量|回归|固定效应|面板|基准模型|双重差分|工具变量|倾向得分/.test(text)
+      /计量|回归|固定效应|面板|基准模型|双重差分|工具变量|倾向得分|控制变量|稳健性|再分析|重新回归|再估计/.test(text)
     )
       return "analysis"
 
     // Excel/CSV/DTA 这类原始表格输入必须先走 intake 阶段，避免模型跳过 data_import 直接回归。
-    if (/\.(xlsx|xls|csv|dta|sav)\b/.test(text) || /\b(excel|spreadsheet|workbook)\b/.test(text)) return "ingest"
-    return undefined
+    if (
+      parts.some((part) => part.type === "file" && !part.mime?.startsWith("image/")) ||
+      /\.(xlsx|xls|csv|dta|sav)\b/.test(text) ||
+      /\b(excel|spreadsheet|workbook|import)\b/.test(text) ||
+      /导入|读取数据|上传数据|数据文件/.test(text)
+    )
+      return "ingest"
+
+    // Small talk, questions, and unrelated short replies are a first-class mode.
+    // They must not continue an unfinished empirical workflow.
+    return "conversation"
   }
 
   function inputGraphFromParts(parts: PromptInput["parts"], intent?: WorkflowInputIntent): InputGraphNode[] {
@@ -207,7 +228,7 @@ export namespace SessionPrompt {
     queuePriority: z.number().int().optional(),
     queueActionType: z.enum(["prompt", "command", "shell", "continue", "retry", "repair", "compaction"]).optional(),
     queueMetadata: z.record(z.string(), z.any()).optional(),
-    intent: z.enum(["status", "repair", "verify", "report", "analysis", "ingest"]).optional(),
+    intent: z.enum(["conversation", "status", "repair", "verify", "report", "analysis", "ingest"]).optional(),
     parts: z.array(
       z.discriminatedUnion("type", [
         MessageV2.TextPart.omit({
@@ -404,7 +425,9 @@ export namespace SessionPrompt {
     })
 
     let step = 0
-    let analysisRepairAttempts = 0
+    let automaticToolRepairs = 0
+    let activeRepairToolName: string | undefined
+    let activeRepairInputSignature: string | undefined
     const session = await Session.get(sessionID)
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
@@ -696,6 +719,12 @@ export namespace SessionPrompt {
         sessionID: sessionID,
         model,
         abort,
+        repairToolName: activeRepairToolName,
+        repairInputSignature: activeRepairInputSignature,
+        onRepairToolSucceeded: () => {
+          activeRepairToolName = undefined
+          activeRepairInputSignature = undefined
+        },
       })
 
       // Check if user explicitly invoked an agent via @ in this turn
@@ -711,6 +740,7 @@ export namespace SessionPrompt {
         bypassAgentCheck,
         intent: activeAction?.metadata?.["intent"] as WorkflowInputIntent | undefined,
         hasImageInput: Boolean(activeAction?.metadata?.["hasImageInput"]),
+        repairToolName: activeRepairToolName,
       })
 
       if (step === 1) {
@@ -772,47 +802,64 @@ export namespace SessionPrompt {
         ],
         tools,
         model,
+        inputIntent: activeAction?.metadata?.["intent"] as WorkflowInputIntent | undefined,
       })
       if (result === "stop") break
       if (typeof result === "object" && result.type === "repair") {
-        analysisRepairAttempts += 1
-        if (analysisRepairAttempts > 2) break
-        SessionStatus.set(sessionID, {
-          type: "repair",
-          tool: result.toolName,
-          retryStage: result.retryStage,
-          message: result.repairAction,
-        })
-
-        const repairUserMessage: MessageV2.User = {
-          id: Identifier.ascending("message"),
-          sessionID,
-          role: "user",
-          time: {
-            created: Date.now(),
-          },
-          agent: lastUser.agent,
-          model: lastUser.model,
+        if (shouldAutomaticallyRepairTool(automaticToolRepairs)) {
+          automaticToolRepairs += 1
+          if (result.lockTool !== false) {
+            activeRepairToolName ??= result.toolName
+            if (activeRepairToolName === result.toolName) {
+              activeRepairInputSignature = result.failedInputSignature
+            }
+          }
+          const repairToolName = activeRepairToolName ?? result.toolName
+          SessionStatus.set(sessionID, {
+            type: "repair",
+            tool: repairToolName,
+            retryStage: result.retryStage,
+            message: result.repairAction,
+          })
+          const repairMessage: MessageV2.User = {
+            id: Identifier.ascending("message"),
+            sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: lastUser.agent,
+            model: lastUser.model,
+          }
+          await Session.updateMessage(repairMessage)
+          await Session.updatePart({
+            id: Identifier.ascending("part"),
+            messageID: repairMessage.id,
+            sessionID,
+            type: "text",
+            synthetic: true,
+            text: [
+              "<system-reminder>",
+              `上一步 ${repairToolName} 执行失败。`,
+              `只修复阶段 ${result.retryStage}：${result.repairAction}`,
+              result.lockTool === false
+                ? "根据上一条脱敏错误选择已注册工具并生成合法参数。"
+                : "根据工具参数描述和上一条脱敏错误重写参数；不得更换计量方法，不得原样重复失败参数。",
+              `这是自动修复 ${automaticToolRepairs}/${AUTOMATIC_TOOL_REPAIR_LIMIT}。`,
+              "</system-reminder>",
+            ].join("\n"),
+          } satisfies MessageV2.TextPart)
+          continue
         }
-        await Session.updateMessage(repairUserMessage)
+
+        SessionStatus.set(sessionID, { type: "idle" })
         await Session.updatePart({
           id: Identifier.ascending("part"),
-          messageID: repairUserMessage.id,
+          messageID: processor.message.id,
           sessionID,
           type: "text",
-          synthetic: true,
-          text: [
-            `The ${result.toolName} step failed during ${result.retryStage}.`,
-            `Repair action: ${result.repairAction}`,
-            result.reflectionPath ? `Reflection log: ${result.reflectionPath}` : "",
-            "Retry only the failed stage. Reuse successful stages and saved artifacts instead of restarting the whole workflow.",
-          ]
-            .filter(Boolean)
-            .join("\n"),
+          text: `这一步连续修复 ${AUTOMATIC_TOOL_REPAIR_LIMIT} 次仍未完成，已停止执行，避免重复消耗。你可以调整数据或模型设定后再继续。`,
         } satisfies MessageV2.TextPart)
-        continue
+        break
       }
-      analysisRepairAttempts = 0
       if (result === "compact") {
         await SessionCompaction.create({
           sessionID,
@@ -848,10 +895,11 @@ export namespace SessionPrompt {
     bypassAgentCheck: boolean
     intent?: WorkflowInputIntent
     hasImageInput?: boolean
+    repairToolName?: string
   }) {
     using _ = log.time("resolveTools")
     const tools: Record<string, AITool> = {}
-    const resolvedIntent: WorkflowInputIntent = input.intent ?? "analysis"
+    const resolvedIntent: WorkflowInputIntent = input.intent ?? "conversation"
 
     const extractKeyedValue = (input: string, key: string): string | undefined => {
       const match = new RegExp(`\\b${key}\\s*[:=]\\s*([^\\n\\r}]+)`, "i").exec(input)
@@ -926,7 +974,7 @@ export namespace SessionPrompt {
             ...match,
             state: {
               title: val.title,
-              metadata: val.metadata,
+              metadata: prepareToolMetadata(val.metadata ?? {}),
               status: "running",
               input: args,
               time: {
@@ -950,8 +998,9 @@ export namespace SessionPrompt {
       sessionID: input.session.id,
       agent: input.agent.name,
       inputIntent: resolvedIntent,
+      repairToolName: input.repairToolName,
       platformCapabilities: {
-        mcp: true,
+        mcp: false,
         images: input.hasImageInput ?? false,
         remote: Flag.KILLSTATA_CLIENT !== "cli",
       },
@@ -1028,105 +1077,6 @@ export namespace SessionPrompt {
           })
         },
       })
-    }
-
-    for (const [key, item] of Object.entries(await MCP.tools())) {
-      if (!allowMcpToolForWorkflow({ toolName: key, policy: toolAvailability })) continue
-      const execute = item.execute
-      if (!execute) continue
-
-      // Wrap execute to add plugin hooks and format output
-      item.execute = async (args, opts) => {
-        // 规范化工具参数：兼容 JSON 字符串或纯字符串输入
-        const normalizedArgs = normalizeToolArgs(key, args)
-
-        return input.processor.executeTool(key, normalizedArgs, {
-          callID: opts.toolCallId,
-          run: async (finalArgs) => {
-            const ctx = context(finalArgs, opts)
-            await Plugin.trigger(
-              "tool.execute.before",
-              {
-                tool: key,
-                sessionID: ctx.sessionID,
-                callID: opts.toolCallId,
-              },
-              {
-                args: finalArgs,
-              },
-            )
-
-            await ctx.ask({
-              permission: key,
-              metadata: {},
-              patterns: ["*"],
-              always: ["*"],
-            })
-
-            const result = await execute(finalArgs, opts)
-
-            await Plugin.trigger(
-              "tool.execute.after",
-              {
-                tool: key,
-                sessionID: ctx.sessionID,
-                callID: opts.toolCallId,
-              },
-              result,
-            )
-
-            const textParts: string[] = []
-            const attachments: MessageV2.FilePart[] = []
-
-            for (const contentItem of result.content) {
-              if (contentItem.type === "text") {
-                textParts.push(contentItem.text)
-              } else if (contentItem.type === "image") {
-                attachments.push({
-                  id: Identifier.ascending("part"),
-                  sessionID: input.session.id,
-                  messageID: input.processor.message.id,
-                  type: "file",
-                  mime: contentItem.mimeType,
-                  url: `data:${contentItem.mimeType};base64,${contentItem.data}`,
-                })
-              } else if (contentItem.type === "resource") {
-                const { resource } = contentItem
-                if (resource.text) {
-                  textParts.push(resource.text)
-                }
-                if (resource.blob) {
-                  attachments.push({
-                    id: Identifier.ascending("part"),
-                    sessionID: input.session.id,
-                    messageID: input.processor.message.id,
-                    type: "file",
-                    mime: resource.mimeType ?? "application/octet-stream",
-                    url: `data:${resource.mimeType ?? "application/octet-stream"};base64,${resource.blob}`,
-                    filename: resource.uri,
-                  })
-                }
-              }
-            }
-
-            const truncated = await Truncate.output(textParts.join("\n\n"), {}, input.agent)
-            const metadata = {
-              ...(result.metadata ?? {}),
-              truncated: truncated.truncated,
-              ...(truncated.truncated && { outputPath: truncated.outputPath }),
-            }
-
-            return {
-              title: "",
-              metadata,
-              output: truncated.content,
-              attachments,
-              content: result.content,
-            }
-          },
-        })
-      }
-      tools[key] = item
     }
 
     return tools
@@ -1277,28 +1227,8 @@ export namespace SessionPrompt {
                   end: url.searchParams.get("end"),
                 }
                 if (range.start != null) {
-                  const filePathURI = part.url.split("?")[0]
                   let start = parseInt(range.start)
                   let end = range.end ? parseInt(range.end) : undefined
-                  // some LSP servers (eg, gopls) don't give full range in
-                  // workspace/symbol searches, so we'll try to find the
-                  // symbol in the document to get the full range
-                  if (start === end) {
-                    const symbols = await LSP.documentSymbol(filePathURI)
-                    for (const symbol of symbols) {
-                      let range: LSP.Range | undefined
-                      if ("range" in symbol) {
-                        range = symbol.range
-                      } else if ("location" in symbol) {
-                        range = symbol.location.range
-                      }
-                      if (range?.start?.line && range?.start?.line === start) {
-                        start = range.start.line
-                        end = range?.end?.line ?? start
-                        break
-                      }
-                    }
-                  }
                   offset = Math.max(start - 1, 0)
                   if (end) {
                     limit = end - offset
@@ -1711,104 +1641,55 @@ You can provide targeted help in three common ways:
         type: "text",
         text:
           workflowLocale === "zh-CN"
-            ? `<system-reminder>
-Explorer 模式已启用。用户明确表示现在不希望你执行，因此你绝对不能进行任何编辑（下文提到的计划文件除外）、运行任何非只读工具（包括修改配置或提交 commit），也不能对系统做其他任何更改。这条规则优先于你收到的其他指令。
+          ? `<system-reminder>
+探索模式已启用。用户明确表示现在不希望你执行分析，因此你绝对不能修改任何数据、运行任何会派生新数据阶段的工具（import/filter/preprocess/rollback）、也不能运行计量估计。你只能读取数据与产物、做只读检查，并撰写计划文件。这条规则优先于其他指令。
 
-## 计划文件信息：
-${exists ? `计划文件已存在：${plan}。你可以读取它，并使用 edit 工具做增量修改。` : `计划文件尚不存在。你应使用 write 工具在 ${plan} 创建它。`}
-请通过写入或编辑这个文件来逐步构建计划。注意：这是唯一允许你修改的文件；除此之外，你只能执行只读操作。
+## 计划文件
+${exists ? `计划文件已存在：${plan}。可用 edit 工具增量修改。` : `计划文件尚不存在。用 write 工具在 ${plan} 创建。`}
+这是唯一允许你修改的文件；除此之外只能做只读操作。
 
 ## 规划流程
 
-### 阶段 1：初步理解
-目标：通过阅读代码并向用户提问，全面理解需求。关键点：这一阶段只允许使用 explore 子代理类型。
+### 阶段 1：看清数据与问题
+- 用只读方式了解数据：形状、变量类型、缺失情况、是否面板结构（个体+时间）、哪些像处理/结果/工具变量。优先用 data_import 的 describe / correlation / qa（只读），不要用会派生新阶段的动作。
+- 若研究问题或识别策略还不清楚，先用 question tool 澄清：因变量是什么？处理变量是什么？是要因果还是预测？数据是面板还是截面？有没有可用的工具变量或断点？
 
-1. 专注理解用户需求，以及与需求相关的代码。
+### 阶段 2：设计识别策略
+- 基于数据和用户意图，确定识别策略：面板固定效应 / DID / RDD / IV / PSM / OLS。
+- 明确说出这个设计依赖的识别假设，以及当前这份数据能不能支持它。
 
-2. **最多并行启动 3 个 explore agent**（单条消息内多次工具调用），高效探索代码库。
-   - 当任务仅涉及已知文件、用户已给出明确路径、或只是很小的定点修改时，用 1 个 agent。
-   - 当范围不确定、涉及多个模块、或需要先理解现有模式再规划时，再用多个 agent。
-   - 质量高于数量，最多 3 个，但通常越少越好。
-   - 如果用多个 agent，请给每个 agent 指定明确的探索重点。
+### 阶段 3：写计划
+- 计划应包含：研究问题、数据准备步骤（哪些样本/变量/清洗）、要跑的估计规格（方法 + 因变量 + 处理 + 控制 + 聚类）、诊断与稳健性检验、以及打算试哪几组设定。
+- 用 EXPERIMENT_LOG 的思路预告：准备试哪些样本/窗口，好让执行阶段留痕。
+- 计划要能扫读，但足够具体到可执行。
 
-3. 探索后，使用 question tool 先澄清用户需求里的歧义。
-
-### 阶段 2：设计
-目标：设计实现方案。
-
-基于第一阶段的探索结果，启动通用 agent 设计实现方案。
-
-最多并行启动 1 个 agent。
+### 阶段 4：请求确认
+完成计划后，用 exit_plan 请求用户批准，再进入执行。
 </system-reminder>`
-            : `<system-reminder>
-Explorer mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
+          : `<system-reminder>
+Explore mode is active. The user has said they do not want you to run the analysis yet, so you must NOT modify any data, run any tool that produces a new data stage (import/filter/preprocess/rollback), or run an estimation. You may only read data and artifacts, run read-only inspections, and write the plan file. This supersedes other instructions.
 
-## Plan File Info:
-${exists ? `A plan file already exists at ${plan}. You can read it and make incremental edits using the edit tool.` : `No plan file exists yet. You should create your plan at ${plan} using the write tool.`}
-You should build your plan incrementally by writing to or editing this file. NOTE that this is the only file you are allowed to edit - other than this you are only allowed to take READ-ONLY actions.
+## Plan file
+${exists ? `A plan file exists at ${plan}. Use the edit tool to update it.` : `No plan file yet. Use the write tool to create it at ${plan}.`}
+This is the only file you may modify; otherwise you are read-only.
 
-## Plan Workflow
+## Planning workflow
 
-### Phase 1: Initial Understanding
-Goal: Gain a comprehensive understanding of the user's request by reading through code and asking them questions. Critical: In this phase you should only use the explore subagent type.
+### Phase 1: Understand the data and the question
+- Inspect the data read-only: shape, variable types, missingness, whether it is panel (unit + time), which columns look like treatment / outcome / instrument. Prefer data_import describe / correlation / qa (read-only); do not use stage-producing actions.
+- If the research question or identification strategy is unclear, use the question tool first: what is the outcome? the treatment? causal or predictive? panel or cross-section? any valid instrument or cutoff?
 
-1. Focus on understanding the user's request and the code associated with their request
+### Phase 2: Design the identification strategy
+- From the data and the user's intent, settle on a design: panel fixed effects / DID / RDD / IV / PSM / OLS.
+- State the identifying assumption the design relies on, and whether this data can plausibly support it.
 
-2. **Launch up to 3 explore agents IN PARALLEL** (single message, multiple tool calls) to efficiently explore the codebase.
-   - Use 1 agent when the task is isolated to known files, the user provided specific file paths, or you're making a small targeted change.
-   - Use multiple agents when: the scope is uncertain, multiple areas of the codebase are involved, or you need to understand existing patterns before planning.
-   - Quality over quantity - 3 agents maximum, but you should try to use the minimum number of agents necessary (usually just 1)
-   - If using multiple agents: Provide each agent with a specific search focus or area to explore. Example: One agent searches for existing implementations, another explores related components, a third investigates testing patterns
+### Phase 3: Write the plan
+- The plan should cover: the research question, the data-preparation steps (which sample / variables / cleaning), the estimation specifications to run (method + outcome + treatment + controls + clustering), the diagnostics and robustness checks, and which specifications you intend to try.
+- Preview, in the spirit of EXPERIMENT_LOG, which samples/windows you plan to try, so the execution phase leaves a trail.
+- The plan should be scannable yet specific enough to execute.
 
-3. After exploring the code, use the question tool to clarify ambiguities in the user request up front.
-
-### Phase 2: Design
-Goal: Design an implementation approach.
-
-Launch general agent(s) to design the implementation based on the user's intent and your exploration results from Phase 1.
-
-You can launch up to 1 agent(s) in parallel.
-
-**Guidelines:**
-- **Default**: Launch at least 1 Explorer agent for most tasks - it helps validate your understanding and consider alternatives
-- **Skip agents**: Only for truly trivial tasks (typo fixes, single-line changes, simple renames)
-
-Examples of when to use multiple agents:
-- The task touches multiple parts of the codebase
-- It's a large refactor or architectural change
-- There are many edge cases to consider
-- You'd benefit from exploring different approaches
-
-Example perspectives by task type:
-- New feature: simplicity vs performance vs maintainability
-- Bug fix: root cause vs workaround vs prevention
-- Refactoring: minimal change vs clean architecture
-
-In the agent prompt:
-- Provide comprehensive background context from Phase 1 exploration including filenames and code path traces
-- Describe requirements and constraints
-- Request a detailed implementation plan
-
-### Phase 3: Review
-Goal: Review the plan(s) from Phase 2 and ensure alignment with the user's intentions.
-1. Read the critical files identified by agents to deepen your understanding
-2. Ensure that the plans align with the user's original request
-3. Use question tool to clarify any remaining questions with the user
-
-### Phase 4: Final Plan
-Goal: Write your final plan to the plan file (the only file you can edit).
-- Include only your recommended approach, not all alternatives
-- Ensure that the plan file is concise enough to scan quickly, but detailed enough to execute effectively
-- Include the paths of critical files to be modified
-- Include a verification section describing how to test the changes end-to-end (run the code, use MCP tools, run tests)
-
-### Phase 5: Call plan_exit tool
-At the very end of your turn, once you have asked the user questions and are happy with your final plan file - you should always call plan_exit to indicate to the user that you are done planning and ready to switch to analyst agent.
-This is critical - your turn should only end with either asking the user a question or calling plan_exit. Do not stop unless it's for these 2 reasons.
-
-**Important:** Use question tool to clarify requirements/approach, use plan_exit to request plan approval. Do NOT use question tool to ask "Is this plan okay?" - that's what plan_exit does.
-
-NOTE: At any point in time through this workflow you should feel free to ask the user questions or clarifications. Don't make large assumptions about user intent. The goal is to present a well researched plan to the user, and tie any loose ends before implementation begins.
+### Phase 4: Request approval
+When the plan is ready, use exit_plan to request approval before executing.
 </system-reminder>`,
         synthetic: true,
       })

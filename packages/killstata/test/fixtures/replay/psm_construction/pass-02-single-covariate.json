@@ -1,0 +1,10 @@
+{
+  "description": "只有一个处理前协变量也应当允许（min(1) 边界）",
+  "modelArgs": {
+    "datasetId": "lalonde_nsw",
+    "stageId": "stage_000",
+    "treatmentVar": "treat",
+    "covariates": ["age"]
+  },
+  "expect": "pass"
+}

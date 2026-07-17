@@ -84,8 +84,6 @@ from .econometric_algorithm import (
     
     # 双重差分方法
     Static_Diff_in_Diff_regression,
-    Staggered_Diff_in_Diff_regression,
-    Staggered_Diff_in_Diff_Event_Study_regression,
 )
 
 __all__ = [
@@ -154,8 +152,6 @@ __all__ = [
     
     # 双重差分方法
     'Static_Diff_in_Diff_regression',
-    'Staggered_Diff_in_Diff_regression',
-    'Staggered_Diff_in_Diff_Event_Study_regression',
 ]
 
 __version__ = '0.1.0'

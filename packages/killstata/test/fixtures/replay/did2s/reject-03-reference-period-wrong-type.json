@@ -1,0 +1,15 @@
+{
+  "description": "模型把参考期当成一个分类标签字符串，而不是相对时期的整数索引（真实的相对时期用负数表示处理前）",
+  "modelArgs": {
+    "datasetId": "staggered_adoption",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "relativeTimeVar": "rel_time",
+    "entityVar": "firm",
+    "timeVar": "year",
+    "referencePeriod": "pre"
+  },
+  "expect": "reject",
+  "rejectHint": ["referencePeriod"]
+}

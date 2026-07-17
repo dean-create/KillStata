@@ -2,8 +2,6 @@ import type { AnalysisChecklistItem, WorkflowRun, WorkflowStageKind } from "./ty
 
 export type WorkflowLocale = "zh-CN" | "en"
 
-const CHINESE_CHAR = /[\u3400-\u9fff\uf900-\ufaff]/
-
 const CHECKLIST_LABELS: Record<AnalysisChecklistItem["id"], { en: string; zh: string }> = {
   data_readiness: {
     en: "Data readiness",
@@ -53,12 +51,13 @@ const APPROVAL_LABELS: Record<NonNullable<WorkflowRun["approvalStatus"]>, { en: 
 }
 
 export function detectWorkflowLocaleFromText(text?: string): WorkflowLocale {
-  const normalized = text?.trim()
-  if (!normalized) return "en"
-  return CHINESE_CHAR.test(normalized) ? "zh-CN" : "en"
+  // KillStata 面向中文用户，工作流提示不跟随模型或数据字段切换语言。
+  // 这样历史会话和英文变量名也不会让审批界面退回英文。
+  void text
+  return "zh-CN"
 }
 
-export async function inferWorkflowLocaleFromSession(sessionID: string, fallback: WorkflowLocale = "en") {
+export async function inferWorkflowLocaleFromSession(sessionID: string, fallback: WorkflowLocale = "zh-CN") {
   const { MessageV2 } = await import("@/session/message-v2")
   let latest = ""
   for await (const message of MessageV2.stream(sessionID)) {
@@ -75,7 +74,7 @@ export async function inferWorkflowLocaleFromSession(sessionID: string, fallback
 }
 
 export function workflowLocaleLabel(locale: WorkflowLocale, values: { en: string; zh: string }) {
-  return locale === "zh-CN" ? values.zh : values.en
+  return values.zh
 }
 
 export function workflowChecklistLabel(locale: WorkflowLocale, id: AnalysisChecklistItem["id"]) {
@@ -98,67 +97,38 @@ export function workflowStageLabel(locale: WorkflowLocale, stage?: WorkflowStage
 }
 
 export function workflowPlanTitle(locale: WorkflowLocale) {
-  return locale === "zh-CN" ? "工作流计划" : "Workflow Plan"
+  return "工作流计划"
 }
 
 export function workflowApprovalTitle(locale: WorkflowLocale) {
-  return locale === "zh-CN" ? "审批" : "Approval"
+  return "审批"
 }
 
 export function workflowStageTitle(locale: WorkflowLocale) {
-  return locale === "zh-CN" ? "阶段" : "Stage"
+  return "阶段"
 }
 
 export function workflowAnalysisPlanHeader(locale: WorkflowLocale) {
-  return locale === "zh-CN" ? "分析计划" : "Analysis Plan"
+  return "分析计划"
 }
 
 export function workflowChecklistIntro(locale: WorkflowLocale, kind: "analysis" | "empirical") {
-  if (locale === "zh-CN") {
-    return kind === "empirical" ? "Analyst 已整理出这份实证执行清单：" : "Analyst 已整理出这份执行清单："
-  }
-  return kind === "empirical"
-    ? "Analyst prepared this empirical execution checklist:"
-    : "Analyst prepared this execution checklist:"
+  return kind === "empirical" ? "已整理出这份实证执行清单：" : "已整理出这份执行清单："
 }
 
 export function workflowChecklistApprovalPrompt(locale: WorkflowLocale, kind: "analysis" | "empirical") {
-  if (locale === "zh-CN") {
-    return kind === "empirical" ? "确认后将开始计量执行流程。" : "现在开始执行这份计划吗？"
-  }
-  return kind === "empirical"
-    ? "Approve it to start the econometric workflow."
-    : "Start executing this plan now?"
+  return kind === "empirical" ? "确认后将开始计量执行流程。" : "现在开始执行这份计划吗？"
 }
 
 export function workflowChecklistOptions(locale: WorkflowLocale, kind: "analysis" | "empirical") {
-  if (locale === "zh-CN") {
-    return {
-      yes: {
-        label: "是",
-        description: kind === "empirical" ? "批准计划并开始计量执行" : "批准计划并继续数据与分析步骤",
-      },
-      no: {
-        label: "否",
-        description: kind === "empirical" ? "保持规划模式，暂不运行模型" : "保持规划模式，先不执行",
-      },
-    }
-  }
-
   return {
     yes: {
-      label: "Yes",
-      description:
-        kind === "empirical"
-          ? "Approve the plan and start econometric execution"
-          : "Approve the plan and continue with data and analysis steps",
+      label: "是",
+      description: kind === "empirical" ? "批准计划并开始计量执行" : "批准计划并继续数据与分析步骤",
     },
     no: {
-      label: "No",
-      description:
-        kind === "empirical"
-          ? "Stay in planning mode and do not run the model yet"
-          : "Stay in planning mode and stop before execution",
+      label: "否",
+      description: kind === "empirical" ? "保持规划模式，暂不运行模型" : "保持规划模式，先不执行",
     },
   }
 }

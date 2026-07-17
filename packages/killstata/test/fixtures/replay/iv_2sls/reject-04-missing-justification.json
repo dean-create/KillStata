@@ -1,0 +1,12 @@
+{
+  "description": "模型完全没提供识别依据字段，试图仅凭列名让工具变量生效",
+  "modelArgs": {
+    "datasetId": "card1995",
+    "stageId": "stage_000",
+    "dependentVar": "log_wage",
+    "endogenousVar": "education",
+    "instrumentVar": "near_college"
+  },
+  "expect": "reject",
+  "rejectHint": ["instrumentJustification"]
+}

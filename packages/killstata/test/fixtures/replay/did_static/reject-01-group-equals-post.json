@@ -1,0 +1,12 @@
+{
+  "description": "处理组变量和政策后变量填成了同一列",
+  "modelArgs": {
+    "datasetId": "DID_8f6c9020",
+    "stageId": "stage_000",
+    "dependentVar": "fte",
+    "groupVar": "t",
+    "postVar": "t"
+  },
+  "expect": "reject",
+  "rejectHint": ["彼此不同"]
+}

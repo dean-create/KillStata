@@ -398,7 +398,9 @@ export interface WorkflowRun {
   updatedAt: string
 }
 
-export type WorkflowInputIntent = "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
+// Conversation is deliberately separate from empirical work. A normal sentence must
+// never inherit the previous import/repair workflow or receive data tools.
+export type WorkflowInputIntent = "conversation" | "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
 
 export interface ToolAvailabilityPolicy {
   sessionID?: string
@@ -418,6 +420,7 @@ export interface ToolAvailabilityPolicy {
   }
   inputIntent?: WorkflowInputIntent
   repairOnly?: boolean
+  repairToolName?: string
 }
 
 export interface WorkflowCommandContext {
@@ -513,6 +516,8 @@ export interface LifecycleHookResult {
     retryStage: string
     repairAction: string
     reflectionPath?: string
+    lockTool?: boolean
+    failedInputSignature?: string
   }
 }
 
@@ -526,6 +531,8 @@ export type QueryRuntimeResult =
       retryStage: string
       repairAction: string
       reflectionPath?: string
+      lockTool?: boolean
+      failedInputSignature?: string
     }
 
 export type QueryEvent =

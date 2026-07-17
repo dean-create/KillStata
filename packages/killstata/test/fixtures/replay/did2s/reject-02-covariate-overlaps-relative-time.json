@@ -1,0 +1,15 @@
+{
+  "description": "控制变量列表里混入了相对时期变量本身",
+  "modelArgs": {
+    "datasetId": "staggered_adoption",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "relativeTimeVar": "rel_time",
+    "entityVar": "firm",
+    "timeVar": "year",
+    "covariates": ["rel_time", "x1"]
+  },
+  "expect": "reject",
+  "rejectHint": ["covariates", "控制变量不能与 DID2S 设计变量重复"]
+}

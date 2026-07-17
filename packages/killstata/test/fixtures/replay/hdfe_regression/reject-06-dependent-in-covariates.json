@@ -1,0 +1,13 @@
+{
+  "description": "结果变量同时又被塞进了控制变量列表",
+  "modelArgs": {
+    "datasetId": "firm_panel",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "covariates": ["y", "x1"],
+    "fixedEffects": ["firm", "year"]
+  },
+  "expect": "reject",
+  "rejectHint": ["dependentVar", "因变量不能同时作为解释变量"]
+}

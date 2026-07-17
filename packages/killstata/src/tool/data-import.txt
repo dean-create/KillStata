@@ -32,7 +32,8 @@ Internal format policy:
 - Prefer CSV/XLSX/DTA for user-facing delivery; Parquet remains the internal canonical format
 
 3. preprocess
-- Apply explicit cleaning operations such as drop_missing, fill_constant, fill_mean, fill_median, forward_fill, backward_fill, linear_interpolate, group_linear_interpolate, regression_impute, log_transform, standardize, winsorize, and create_dummies
+- Apply explicit cleaning operations such as drop_missing, fill_constant, fill_mean, fill_median, forward_fill, backward_fill, linear_interpolate, group_linear_interpolate, regression_impute, log_transform, standardize, winsorize, create_dummies, and combine_columns
+- For `combine_columns`, pass at least two source columns in `variables` and set `params.output_column`; `params.separator` defaults to `_`. The operation rejects missing/empty components, existing output columns, and identifier collisions.
 - These operations are backed by the Python preprocessing library and return audit-ready summaries for each step
 - Save the processed dataset as a new Parquet stage plus audit files and inspection tables
 

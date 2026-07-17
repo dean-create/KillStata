@@ -11,11 +11,9 @@ import { SDKProvider, useSDK } from "@tui/context/sdk"
 import { SyncProvider, useSync } from "@tui/context/sync"
 import { LocalProvider, useLocal } from "@tui/context/local"
 import { DialogModel, useConnected } from "@tui/component/dialog-model"
-import { DialogStatus } from "@tui/component/dialog-status"
 import { DialogThemeList } from "@tui/component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
 import { CommandProvider, useCommandDialog } from "@tui/component/dialog-command"
-import { DialogAgent } from "@tui/component/dialog-agent"
 import { DialogSessionList } from "@tui/component/dialog-session-list"
 import { KeybindProvider } from "@tui/context/keybind"
 import { ThemeProvider, useTheme } from "@tui/context/theme"
@@ -416,21 +414,6 @@ function App() {
       },
     },
     {
-      title: "智能体",
-      hidden: !showAdvancedCommands(),
-      description: "切换 Analyst、Explorer 等工作智能体",
-      value: "agent.list",
-      keybind: "agent_list",
-      category: "核心",
-      slash: {
-        name: "agent",
-        aliases: ["agents"],
-      },
-      onSelect: () => {
-        dialog.replace(() => <DialogAgent />)
-      },
-    },
-    {
       title: "Agent cycle",
       value: "agent.cycle",
       keybind: "agent_cycle",
@@ -471,21 +454,6 @@ function App() {
       },
       onSelect: () => {
         dialog.replace(() => <DialogProviderList />)
-      },
-      category: "核心",
-    },
-    {
-      title: "状态",
-      description: "查看当前会话、模型和服务状态",
-      keybind: "status_view",
-      value: "killstata.status",
-      // 藏进 advanced：会话/模型状态已经在底栏常驻显示，命令面板里再放一条是噪音。
-      hidden: !showAdvancedCommands(),
-      slash: {
-        name: "status",
-      },
-      onSelect: () => {
-        dialog.replace(() => <DialogStatus />)
       },
       category: "核心",
     },

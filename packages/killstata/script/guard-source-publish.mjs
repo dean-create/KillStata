@@ -24,8 +24,8 @@ This package still contains workspace:* dependencies, so publishing from
 packages/killstata would create an npm package that users cannot install.
 
 Use the release package instead:
-  bun run pack:publish:windows
-  bun run publish:windows
+  bun run pack:release --version X.Y.Z
+  bun run release:npm --version X.Y.Z
 `)
 
 process.exit(1)

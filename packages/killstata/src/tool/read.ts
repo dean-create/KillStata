@@ -2,7 +2,6 @@ import z from "zod"
 import * as fs from "fs"
 import * as path from "path"
 import { Tool } from "./tool"
-import { LSP } from "../lsp"
 import { FileTime } from "../file/time"
 import DESCRIPTION from "./read.txt"
 import { Instance } from "../project/instance"
@@ -14,6 +13,7 @@ import { numericSnapshotPreview } from "./analysis-tool-metadata"
 import type { NumericSnapshotDocument } from "./analysis-grounding"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionInstruction } from "@/session/instruction"
+import { Truncate } from "./truncation"
 
 const DEFAULT_READ_LIMIT = 2000
 const NUMERIC_SNAPSHOT_READ_LIMIT = 300
@@ -33,6 +33,32 @@ function isBinaryTabularPath(filepath: string) {
   return [".dta", ".xls", ".xlsx"].includes(path.extname(filepath).toLowerCase())
 }
 
+// 超过这个大小的 CSV 就不是「一张小结果表」，而是一份数据集了。
+const RAW_CSV_READ_LIMIT_BYTES = 256 * 1024
+
+function isCsvPath(filepath: string) {
+  return path.extname(filepath).toLowerCase() === ".csv"
+}
+
+// killstata 自己产出的 CSV（coefficient_table、inspection 导出等）是结果产物，
+// 模型读它们是正当的 —— guidance 里就明确推荐读 inspection CSV。
+function isKillstataArtifact(filepath: string) {
+  return path.normalize(filepath).includes(`${path.sep}.killstata${path.sep}`)
+}
+
+export function buildRawCsvReadGuidance(filepath: string, bytes: number) {
+  const mb = (bytes / 1024 / 1024).toFixed(1)
+  return [
+    `Refusing to read a ${mb} MB dataset as text: ${filepath}`,
+    "This is raw data, not an analysis artifact. Reading it would only put a truncated,",
+    "arbitrary slice of rows into context — and any statistic derived from that slice would be wrong.",
+    "Recommended instead:",
+    '- use data_import with action="import" to bring the dataset in, then action="qa" / action="describe"',
+    "- read numeric_snapshot.json / results.json / diagnostics.json for grounded numbers",
+    "- if you only need the column names and types, the import summary already reports them",
+  ].join("\n")
+}
+
 export function buildParquetReadGuidance(filepath: string) {
   const normalized = path.normalize(filepath)
   const isCanonicalStage =
@@ -48,12 +74,12 @@ export function buildParquetReadGuidance(filepath: string) {
     ? [
         "This file is the canonical working dataset for killstata.",
         "Do not use the read tool on canonical parquet stages.",
-        "Use datasetId/stageId with data_import or econometrics instead.",
+        "Use datasetId/stageId with data_import or a dedicated estimator tool instead.",
       ]
     : [
         "Parquet is a binary tabular format and is not readable as plain text.",
         "Do not use the read tool on parquet datasets when you need analysis results.",
-        "Use data_import/econometrics on the dataset, or inspect exported CSV/XLSX artifacts instead.",
+        "Import the dataset with data_import, then use the dedicated estimator tool selected for the research design.",
       ]
 
   const alternatives = [
@@ -89,11 +115,12 @@ export const ReadTool = Tool.define("read", {
     limit: z.coerce.number().describe("The number of lines to read (defaults to 2000)").optional(),
   }),
   async execute(params, ctx) {
-    const filepath = resolveWorkspacePath(params.filePath)
+    const outputReferencePath = Truncate.resolveOutputReference(params.filePath)
+    const filepath = outputReferencePath ?? resolveWorkspacePath(params.filePath)
     const title = path.relative(Instance.worktree, filepath)
 
     await assertExternalDirectory(ctx, filepath, {
-      bypass: Boolean(ctx.extra?.["bypassCwdCheck"]),
+      bypass: Boolean(outputReferencePath) || Boolean(ctx.extra?.["bypassCwdCheck"]),
     })
 
     await ctx.ask({
@@ -166,6 +193,14 @@ export const ReadTool = Tool.define("read", {
       throw new Error(buildBinaryTabularReadGuidance(filepath))
     }
 
+    // CSV 是纯文本，所以上面的二进制拦截拦不住它 —— 但一份几 MB 的原始 CSV 被当文本读进来，
+    // 危害不在于撑爆窗口（有截断兜底），而在于模型会拿到几千行**被截断过的**数据，
+    // 然后对着这个任意切片心算统计量，绕过 data_import 的 grounding 链路。
+    // 我们自己产出的结果表（.killstata/ 下）不在此限。
+    if (isCsvPath(filepath) && !isKillstataArtifact(filepath) && file.size > RAW_CSV_READ_LIMIT_BYTES) {
+      throw new Error(buildRawCsvReadGuidance(filepath, file.size))
+    }
+
     const isBinary = await isBinaryFile(filepath, file)
     if (isBinary) throw new Error(`Cannot read binary file: ${filepath}`)
 
@@ -223,8 +258,6 @@ export const ReadTool = Tool.define("read", {
       output += `\n\n<system-reminder>\n${loaded.map((item) => item.content).join("\n\n")}\n</system-reminder>`
     }
 
-    // just warms the lsp client
-    LSP.touchFile(filepath, false)
     FileTime.read(ctx.sessionID, filepath)
 
     return {

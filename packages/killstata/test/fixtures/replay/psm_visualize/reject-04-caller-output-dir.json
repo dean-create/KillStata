@@ -1,0 +1,12 @@
+{
+  "description": "模型试图指定输出目录；诊断产物只能写入 Harness 管理的隔离目录",
+  "modelArgs": {
+    "datasetId": "lalonde_nsw",
+    "stageId": "stage_000",
+    "treatmentVar": "treat",
+    "covariates": ["age", "education"],
+    "outputDir": "/tmp/model-owned"
+  },
+  "expect": "reject",
+  "rejectHint": ["outputDir"]
+}

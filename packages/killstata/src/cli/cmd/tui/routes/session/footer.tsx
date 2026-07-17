@@ -1,189 +1,29 @@
-import { createMemo, Match, onCleanup, onMount, Show, Switch } from "solid-js"
-import { createStore } from "solid-js/store"
-import { workflowStageLabel } from "@/runtime/workflow-locale"
+import { Show, createMemo } from "solid-js"
 import { useConnected } from "../../component/dialog-model"
-import { useDirectory } from "../../context/directory"
 import { useRoute } from "../../context/route"
 import { useSync } from "../../context/sync"
 import { useTheme } from "../../context/theme"
-import { workflowAgentDisplayLabel, workflowStatusDisplayLabel, workflowStatusLabel } from "../../context/runtime-state"
 
+// This is a product status line, not a developer console. Internal workflow,
+// Git, LSP, MCP and context diagnostics remain out of the user's way.
 export function Footer() {
   const { theme } = useTheme()
   const sync = useSync()
   const route = useRoute()
-  const mcp = createMemo(() => Object.values(sync.data.mcp).filter((x) => x.status === "connected").length)
-  const mcpError = createMemo(() => Object.values(sync.data.mcp).some((x) => x.status === "failed"))
-  const lsp = createMemo(() => Object.keys(sync.data.lsp))
-  const permissions = createMemo(() => {
-    if (route.data.type !== "session") return []
-    return sync.data.permission[route.data.sessionID] ?? []
-  })
-  const runtimeQuery = createMemo(() => {
-    if (route.data.type !== "session") return
-    return sync.data.runtimeQuery[route.data.sessionID]
-  })
-  const runtimeQueue = createMemo(() => {
-    if (route.data.type !== "session") return
-    return sync.data.runtimeQueue[route.data.sessionID]
-  })
-  const workflow = createMemo(() => {
-    if (route.data.type !== "session") return
-    return sync.data.workflow[route.data.sessionID]
-  })
-  const runtimeTask = createMemo(() => {
-    if (route.data.type !== "session") return
-    return sync.data.runtimeTask[route.data.sessionID]
-  })
-  const runtimePolicy = createMemo(() => {
-    if (route.data.type !== "session") return
-    return sync.data.runtimeExecPolicy[route.data.sessionID]
-  })
-  const runtimeContext = createMemo(() => {
-    if (route.data.type !== "session") return
-    return sync.data.runtimeContext[route.data.sessionID]
-  })
-  const agentControl = createMemo(() => {
-    if (route.data.type !== "session") return
-    return sync.data.runtimeAgentControl[route.data.sessionID]
-  })
-  const workflowLabel = createMemo(() => workflowStatusLabel(workflow()))
-  const workflowLocale = createMemo(() => workflow()?.workflowLocale ?? "en")
-  const workflowDisplayLabel = createMemo(() => workflowStatusDisplayLabel(workflow(), workflowLocale()))
-  const directory = useDirectory()
   const connected = useConnected()
-
-  const [store, setStore] = createStore({
-    welcome: false,
-  })
-
-  onMount(() => {
-    const timeouts: ReturnType<typeof setTimeout>[] = []
-
-    function tick() {
-      if (connected()) return
-      if (!store.welcome) {
-        setStore("welcome", true)
-        timeouts.push(setTimeout(() => tick(), 5000))
-        return
-      }
-
-      if (store.welcome) {
-        setStore("welcome", false)
-        timeouts.push(setTimeout(() => tick(), 10_000))
-        return
-      }
-    }
-
-    timeouts.push(setTimeout(() => tick(), 10_000))
-
-    onCleanup(() => {
-      timeouts.forEach(clearTimeout)
-    })
+  const status = createMemo(() => {
+    if (route.data.type !== "session") return undefined
+    return sync.data.session_status?.[route.data.sessionID]?.type
   })
 
   return (
-    <box flexDirection="row" justifyContent="space-between" gap={1} flexShrink={0}>
-      <text fg={theme.textMuted}>{directory()}</text>
-      <box gap={2} flexDirection="row" flexShrink={0}>
-        <Switch>
-          <Match when={store.welcome}>
-            <text fg={theme.text}>
-              Restart to add your API key
-            </text>
-          </Match>
-          <Match when={connected()}>
-            <Show when={workflowDisplayLabel()}>
-              <text
-                fg={
-                  workflowLabel() === "verifier-pass"
-                    ? theme.success
-                    : workflowLabel() === "verifier-warn"
-                      ? theme.warning
-                      : theme.error
-                }
-              >
-                {workflowDisplayLabel()}
-              </text>
-            </Show>
-            <Show when={workflow()?.activeStage}>
-              <text fg={theme.textMuted}>
-                {workflowLocale() === "zh-CN" ? "阶段" : "stage"}{" "}
-                {workflowStageLabel(workflowLocale(), workflow()?.activeStage) ?? workflow()?.activeStage}
-              </text>
-            </Show>
-            <Show when={workflow()?.activeCoordinatorAgent}>
-              <text fg={theme.textMuted}>
-                {workflowLocale() === "zh-CN" ? "执行者" : "agent"}{" "}
-                {workflowAgentDisplayLabel(workflow()?.activeCoordinatorAgent, workflowLocale()) ??
-                  workflow()?.activeCoordinatorAgent}
-              </text>
-            </Show>
-            <Show when={agentControl()?.activeAgent && agentControl()?.activeAgent !== workflow()?.activeCoordinatorAgent}>
-              <text fg={theme.textMuted}>
-                control {workflowAgentDisplayLabel(agentControl()?.activeAgent, workflowLocale()) ?? agentControl()?.activeAgent}
-              </text>
-            </Show>
-            <Show when={runtimePolicy()}>
-              <text
-                fg={
-                  runtimePolicy()?.action === "deny"
-                    ? theme.error
-                    : runtimePolicy()?.action === "ask"
-                      ? theme.warning
-                      : theme.textMuted
-                }
-              >
-                policy {runtimePolicy()?.action}:{runtimePolicy()?.toolName}
-              </text>
-            </Show>
-            <Show when={runtimeContext()}>
-              <text fg={theme.textMuted}>
-                ctx v{runtimeContext()?.historyVersion}
-                {runtimeContext()?.tokenEstimate ? ` ~${runtimeContext()?.tokenEstimate}t` : ""}
-              </text>
-            </Show>
-            <Show when={runtimeTask() && runtimeTask()?.status !== "completed"}>
-              <text fg={theme.textMuted}>
-                task {runtimeTask()?.status}
-                {runtimeTask()?.latestCheckpointId ? " checkpoint" : ""}
-              </text>
-            </Show>
-            <Show when={runtimeQuery() && runtimeQuery()?.phase !== "idle"}>
-              <text fg={theme.textMuted}>
-                {runtimeQuery()?.phase}
-                {runtimeQuery()?.action ? `:${runtimeQuery()?.action}` : ""}
-              </text>
-            </Show>
-            <Show when={(runtimeQueue()?.pending ?? 0) > 0}>
-              <text fg={theme.warning}>queue {runtimeQueue()?.pending}</text>
-            </Show>
-            <Show when={permissions().length > 0}>
-              <text fg={theme.warning}>
-                <span style={{ fg: theme.warning }}>!</span> {permissions().length} Permission
-                {permissions().length > 1 ? "s" : ""}
-              </text>
-            </Show>
-            <text fg={theme.text}>
-              <span style={{ fg: lsp().length > 0 ? theme.success : theme.textMuted }}>o</span> {lsp().length} LSP
-            </text>
-            <Show when={mcp()}>
-              <text fg={theme.text}>
-                <Switch>
-                  <Match when={mcpError()}>
-                    <span style={{ fg: theme.error }}>x</span>
-                  </Match>
-                  <Match when={true}>
-                    <span style={{ fg: theme.success }}>o</span>
-                  </Match>
-                </Switch>
-                {mcp()} MCP
-              </text>
-            </Show>
-            <text fg={theme.textMuted}>/status</text>
-          </Match>
-        </Switch>
-      </box>
+    <box flexDirection="row" justifyContent="space-between" flexShrink={0} paddingTop={1}>
+      <text fg={theme.textMuted}>KillStata · 计量分析工作台</text>
+      <Show when={connected()}>
+        <text fg={status() === "busy" ? theme.primary : theme.textMuted}>
+          {status() === "busy" ? "正在处理" : "就绪"}
+        </text>
+      </Show>
     </box>
   )
 }

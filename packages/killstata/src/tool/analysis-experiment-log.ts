@@ -32,6 +32,8 @@ export type ExperimentEntry = {
   parentRowCount?: number
   dependentVar?: string
   treatmentVar?: string
+  groupVar?: string
+  postVar?: string
   covariates?: string[]
   entityVar?: string
   timeVar?: string
@@ -90,7 +92,10 @@ function describeSampleChange(entry: ExperimentEntry) {
 function describeSpec(entry: ExperimentEntry) {
   const parts: string[] = []
   if (entry.dependentVar) {
-    const rhs = [entry.treatmentVar, ...(entry.covariates ?? [])].filter(Boolean).join(" + ")
+    const didTerms = entry.groupVar && entry.postVar
+      ? [entry.groupVar, entry.postVar, `${entry.groupVar}:${entry.postVar}`]
+      : []
+    const rhs = [entry.treatmentVar, ...didTerms, ...(entry.covariates ?? [])].filter(Boolean).join(" + ")
     parts.push(`\`${entry.dependentVar} ~ ${rhs || "—"}\``)
   }
   if (entry.entityVar) parts.push(`个体 \`${entry.entityVar}\``)
@@ -210,13 +215,28 @@ function readResultNumbers(outputPath?: string) {
   if (!outputPath || !fs.existsSync(outputPath)) return {}
   try {
     const parsed = JSON.parse(fs.readFileSync(outputPath, "utf-8")) as Record<string, any>
+    const primary = parsed.primary && typeof parsed.primary === "object"
+      ? parsed.primary as Record<string, unknown>
+      : {}
     return {
-      coefficient: typeof parsed.coefficient === "number" ? parsed.coefficient : undefined,
-      stdError: typeof parsed.std_error === "number" ? parsed.std_error : undefined,
-      pValue: typeof parsed.p_value === "number" ? parsed.p_value : undefined,
-      rSquared: typeof parsed.r_squared === "number" ? parsed.r_squared : undefined,
-      rowsUsed: typeof parsed.rows_used === "number" ? parsed.rows_used : undefined,
-      effectiveMethod: typeof parsed.effective_method === "string" ? parsed.effective_method : undefined,
+      coefficient: typeof parsed.coefficient === "number"
+        ? parsed.coefficient
+        : typeof primary.estimate === "number" ? primary.estimate : undefined,
+      stdError: typeof parsed.std_error === "number"
+        ? parsed.std_error
+        : typeof primary.stdError === "number" ? primary.stdError : undefined,
+      pValue: typeof parsed.p_value === "number"
+        ? parsed.p_value
+        : typeof primary.pValue === "number" ? primary.pValue : undefined,
+      rSquared: typeof parsed.r_squared === "number"
+        ? parsed.r_squared
+        : typeof parsed.rSquared === "number" ? parsed.rSquared : undefined,
+      rowsUsed: typeof parsed.rows_used === "number"
+        ? parsed.rows_used
+        : typeof parsed.rowsUsed === "number" ? parsed.rowsUsed : undefined,
+      effectiveMethod: typeof parsed.effective_method === "string"
+        ? parsed.effective_method
+        : typeof parsed.method === "string" ? parsed.method : undefined,
       degradedFrom: typeof parsed.degraded_from === "string" ? parsed.degraded_from : undefined,
       warnings: Array.isArray(parsed.warnings) ? (parsed.warnings as string[]) : undefined,
     }
@@ -264,6 +284,8 @@ export function buildExperimentEntries(manifest: DatasetManifest): ExperimentEnt
       parentRowCount: parent?.rowCount,
       dependentVar: spec["dependentVar"],
       treatmentVar: spec["treatmentVar"],
+      groupVar: spec["groupVar"],
+      postVar: spec["postVar"],
       covariates: Array.isArray(spec["covariates"]) ? spec["covariates"] : undefined,
       entityVar: spec["entityVar"],
       timeVar: spec["timeVar"],

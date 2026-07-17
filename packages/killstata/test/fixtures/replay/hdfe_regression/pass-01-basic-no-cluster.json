@@ -1,0 +1,12 @@
+{
+  "description": "两个固定效应维度，不聚类，走默认 HC1",
+  "modelArgs": {
+    "datasetId": "firm_panel",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "covariates": ["x1"],
+    "fixedEffects": ["firm", "year"]
+  },
+  "expect": "pass"
+}

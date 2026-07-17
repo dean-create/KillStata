@@ -1,0 +1,15 @@
+{
+  "description": "真实会话种子（ses_09e...，2026-07-15 传统 DID 端到端验收）：Card-Krueger 式最低工资数据，fte 对 treated×t 的静态 DID",
+  "modelArgs": {
+    "datasetId": "DID_8f6c9020",
+    "stageId": "stage_000",
+    "runId": "run_20260716-004755_9zi6gt",
+    "branch": "main",
+    "dependentVar": "fte",
+    "groupVar": "treated",
+    "postVar": "t",
+    "covariates": ["bk", "kfc", "roys"],
+    "covariance": "HC1"
+  },
+  "expect": "pass"
+}

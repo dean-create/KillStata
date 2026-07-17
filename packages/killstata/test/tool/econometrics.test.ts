@@ -51,7 +51,7 @@ describe("tool.econometrics", () => {
   test("requires panel keys for DID-family methods", async () => {
     await withInstance(async () => {
       const tool = await EconometricsTool.init()
-      for (const methodName of ["did_static", "did_staggered", "did_event_study", "did_event_study_viz"] as const) {
+      for (const methodName of ["did_static"] as const) {
         await expect(
           tool.execute(
             {
@@ -70,27 +70,6 @@ describe("tool.econometrics", () => {
     })
   })
 
-  test("does not require relative_time_variable at validation time", async () => {
-    await withInstance(async () => {
-      const tool = await EconometricsTool.init()
-      await expect(
-        tool.execute(
-          {
-            methodName: "did_event_study",
-            dataPath: "missing.csv",
-            dependentVar: "y",
-            entityVar: "entity",
-            timeVar: "year",
-            options: {
-              treatment_entity_dummy: "treated_entity",
-              treatment_finished_dummy: "treated_finished",
-            },
-          },
-          ctx as any,
-        ),
-      ).rejects.not.toThrow("relative_time_variable")
-    })
-  })
 
   test("persists common output helpers and parameter mappings in source", () => {
     const sourcePath = path.join(process.cwd(), "src", "tool", "econometrics.ts")
@@ -100,8 +79,11 @@ describe("tool.econometrics", () => {
     expect(source).toContain('result["summary_path"]')
     expect(source).toContain("running_variable_cutoff=cutoff")
     expect(source).toContain("running_variable_bandwidth=options.get(\"bandwidth\", None)")
-    expect(source).toContain("max_order=polynomial_degree")
-    expect(source).toContain("target_type = options.get(\"target_type\", \"ATE\")")
+    expect(source).toContain("propensity_score_nearest_neighbor_att(")
+    expect(source).toContain('"post_match_max_abs_smd"')
+    expect(source).toContain("propensity_score_hajek_ipw_ate(")
+    expect(source).toContain('"weighted_max_abs_smd"')
+    expect(source).not.toContain("target_type = options.get(\"target_type\", \"ATE\")")
     const generalTemplateStart = source.indexOf("required_option_columns = {")
     const generalPanelHelper = source.indexOf("def prepare_panel_inputs(df, payload, covariate_names):", generalTemplateStart)
     const didPanelUse = source.indexOf("prepare_panel_inputs(df, payload, covariate_names)", generalPanelHelper + 1)
@@ -115,10 +97,9 @@ describe("tool.econometrics", () => {
     expect(source).toContain('matplotlib.use("Agg")')
     expect(source).toContain("def propensity_score_visualize_propensity_score_distribution")
     expect(source).toContain("from matplotlib import pyplot as plt")
-    expect(source).toContain("def Staggered_Diff_in_Diff_Event_Study_visualization")
   })
 
-  test("auto downgrades panel FE to pooled OLS when duplicate panel keys remain", async () => {
+  test("blocks panel FE when duplicate panel keys remain instead of changing estimators", async () => {
     if (!(await supportsEconometricsRuntime())) return
     await withInstance(async (root) => {
       const csvPath = path.join(root, "panel_duplicates.csv")
@@ -135,24 +116,20 @@ describe("tool.econometrics", () => {
       fs.writeFileSync(csvPath, rows.join("\n"), "utf-8")
 
       const tool = await EconometricsTool.init()
-      const result = await tool.execute(
-        {
-          methodName: "panel_fe_regression",
-          dataPath: "panel_duplicates.csv",
-          dependentVar: "y",
-          treatmentVar: "did",
-          entityVar: "firm_id",
-          timeVar: "year",
-          outputDir: "outputs/panel_duplicate_case",
-        },
-        ctx as any,
-      )
-
-      expect(result.metadata.result).toBeDefined()
-      expect(result.metadata.result!.degraded_from).toBe("panel_fe_regression")
-      expect(result.metadata.result!.effective_method).toBe("pooled_ols")
-      expect(result.metadata.result!.effective_covariance).toBe("HC1")
-      expect(result.metadata.result!.decision_trace?.some((item: any) => String(item.message).includes("duplicate entity-time rows"))).toBe(true)
+      await expect(
+        tool.execute(
+          {
+            methodName: "panel_fe_regression",
+            dataPath: "panel_duplicates.csv",
+            dependentVar: "y",
+            treatmentVar: "did",
+            entityVar: "firm_id",
+            timeVar: "year",
+            outputDir: "outputs/panel_duplicate_case",
+          },
+          ctx as any,
+        ),
+      ).rejects.toThrow(/duplicate entity-time|重复的个体-时间/is)
     })
   })
 
@@ -260,40 +237,4 @@ describe("tool.econometrics", () => {
     })
   })
 
-  test("smart_baseline executes the recommended baseline and preserves planning trace", async () => {
-    if (!(await supportsEconometricsRuntime())) return
-    await withInstance(async (root) => {
-      const csvPath = path.join(root, "smart_panel.csv")
-      const rows = ["firm_id,year,did,y"]
-      for (let firm = 1; firm <= 8; firm += 1) {
-        for (let year = 2018; year <= 2021; year += 1) {
-          const did = year >= 2020 ? 1 : 0
-          const y = 1 + firm * 0.4 + year * 0.02 + did * 1.5
-          rows.push(`${firm},${year},${did},${y.toFixed(4)}`)
-        }
-      }
-      fs.writeFileSync(csvPath, rows.join("\n"), "utf-8")
-
-      const tool = await EconometricsTool.init()
-      const result = await tool.execute(
-        {
-          methodName: "smart_baseline",
-          dataPath: "smart_panel.csv",
-          dependentVar: "y",
-          treatmentVar: "did",
-          entityVar: "firm_id",
-          timeVar: "year",
-          outputDir: "outputs/smart_baseline_case",
-        },
-        ctx as any,
-      )
-
-      expect(result.metadata.recommendation).toBeDefined()
-      expect(result.metadata.recommendation!.recommendedMethod).toBe("panel_fe_regression")
-      expect(result.metadata.result?.effective_method).toBeDefined()
-      expect(result.metadata.result?.decision_trace?.length).toBeGreaterThan(0)
-      expect(result.output).toContain("Executed method:")
-      expect(result.output).toContain("Planning trace:")
-    })
-  })
 })

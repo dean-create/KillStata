@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import fs from "fs"
 import path from "path"
+import { WORKFLOW_ANALYSIS_TOOL_IDS } from "@/runtime/tool-catalog"
 
 // 这些断言锁住的是「用户看到什么」的产品决策，不是实现细节：
 // 工具调用默认只报告做了什么，代码正文 / diff / 命令输出 / 数据表格都藏在 /details 后面。
@@ -12,9 +13,13 @@ describe("session output style", () => {
     const source = fs.readFileSync(SESSION_VIEW, "utf-8")
 
     // 每个铺开正文的 BlockTool 分支都必须挂在 showDetails 门禁后面。
+    // Bash 的正文 key 在 metadata.output，Edit 的在 metadata.diff。
     expect(source).toContain("<Match when={ctx.showDetails() && props.metadata.output !== undefined}>")
-    expect(source).toContain("<Match when={ctx.showDetails() && props.metadata.diagnostics !== undefined}>")
     expect(source).toContain("<Match when={ctx.showDetails() && props.metadata.diff !== undefined}>")
+    // Write 的详情视图挂在 showDetails 本身（LSP 删除后不再有 diagnostics 门禁，
+    // 否则 Write 详情会永不渲染），正文取自 props.input.filePath。
+    expect(source).toContain("<Match when={ctx.showDetails()}>")
+    expect(source).not.toContain("props.metadata.diagnostics")
 
     // 反向断言：不能再出现无门禁的裸展开分支（这正是改造前的写法）。
     expect(source).not.toContain("<Match when={props.metadata.diff !== undefined}>")
@@ -53,7 +58,13 @@ describe("session output style", () => {
     for (const named of prompt.match(/`([a-z_]+_[a-z_0-9]+)`/g) ?? []) {
       const id = named.replace(/`/g, "")
       // 只校验看起来像估计方法的（含下划线且不是工具名/文件名）
-      const toolsAndFiles = ["data_import", "experiment_log", "numeric_snapshot", "results_json"]
+      const toolsAndFiles = [
+        "data_import",
+        "experiment_log",
+        "numeric_snapshot",
+        "results_json",
+        ...WORKFLOW_ANALYSIS_TOOL_IDS,
+      ]
       if (toolsAndFiles.includes(id) || id.includes(".")) continue
       if (!supported.has(id)) {
         throw new Error(`prompt 点名了一个不存在的方法: ${id}（不在 SUPPORTED_METHODS 里）`)

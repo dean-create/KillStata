@@ -1,0 +1,13 @@
+{
+  "description": "传统 DID 的协方差目前只支持 HC1 这一个取值；模型把 iv_2sls 的 robust 搬了过来",
+  "modelArgs": {
+    "datasetId": "DID_8f6c9020",
+    "stageId": "stage_000",
+    "dependentVar": "fte",
+    "groupVar": "treated",
+    "postVar": "t",
+    "covariance": "robust"
+  },
+  "expect": "reject",
+  "rejectHint": ["covariance", "HC1"]
+}

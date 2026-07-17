@@ -3,6 +3,7 @@ import type { MessageV2 } from "../session/message-v2"
 import type { Agent } from "../agent/agent"
 import type { PermissionNext } from "../permission/next"
 import { Truncate } from "./truncation"
+import { prepareToolMetadata, prepareToolOutput } from "@/runtime/tool-result-policy"
 
 export namespace Tool {
   interface Metadata {
@@ -44,6 +45,24 @@ export namespace Tool {
   export type InferParameters<T extends Info> = T extends Info<infer P> ? z.infer<P> : never
   export type InferMetadata<T extends Info> = T extends Info<any, infer M> ? M : never
 
+  /**
+   * 某些模型会把工具参数整体序列化成 JSON 字符串而不是对象；
+   * 这里做一次尽力而为的规整，解析失败时原样返回，交给 Zod 产出可读错误。
+   */
+  export function normalizeToolArgs(args: unknown): unknown {
+    if (typeof args === "string") {
+      try {
+        const parsed = JSON.parse(args)
+        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+          return parsed
+        }
+      } catch {
+        // JSON 解析失败，保留原始值让 Zod 验证产生有意义的错误信息
+      }
+    }
+    return args
+  }
+
   export function define<Parameters extends z.ZodType, Result extends Metadata>(
     id: string,
     init: Info<Parameters, Result>["init"] | Awaited<ReturnType<Info<Parameters, Result>["init"]>>,
@@ -54,19 +73,7 @@ export namespace Tool {
         const toolInfo = init instanceof Function ? await init(initCtx) : init
         const execute = toolInfo.execute
         toolInfo.execute = async (args, ctx) => {
-          // 规范化工具参数：某些模型可能返回 JSON 字符串而非解析后的对象
-          // 这会导致 Zod 验证失败："expected object, received string"
-          let normalizedArgs = args
-          if (typeof args === "string") {
-            try {
-              const parsed = JSON.parse(args)
-              if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-                normalizedArgs = parsed
-              }
-            } catch {
-              // JSON 解析失败，保留原始值让 Zod 验证产生有意义的错误信息
-            }
-          }
+          const normalizedArgs = normalizeToolArgs(args)
 
           let parsedArgs: any
           try {
@@ -81,19 +88,32 @@ export namespace Tool {
             )
           }
           const result = await execute(parsedArgs, ctx)
+          const prepared = prepareToolOutput(result.output)
+          const sanitizedResult = {
+            ...result,
+            output: prepared.text,
+            metadata: prepareToolMetadata({
+              ...result.metadata,
+              outputPolicy: {
+                redactions: prepared.redactions,
+                collapsedLines: prepared.collapsedLines,
+                shortenedLines: prepared.shortenedLines,
+              },
+            }) as Result,
+          }
           // skip truncation for tools that handle it themselves
           if (result.metadata.truncated !== undefined) {
-            return result
+            return sanitizedResult
           }
-          const truncated = await Truncate.output(result.output, {}, initCtx?.agent)
+          const truncated = await Truncate.output(prepared.text, {}, initCtx?.agent)
           return {
-            ...result,
+            ...sanitizedResult,
             output: truncated.content,
-            metadata: {
-              ...result.metadata,
+            metadata: prepareToolMetadata({
+              ...sanitizedResult.metadata,
               truncated: truncated.truncated,
               ...(truncated.truncated && { outputPath: truncated.outputPath }),
-            },
+            }) as Result,
           }
         }
         return toolInfo

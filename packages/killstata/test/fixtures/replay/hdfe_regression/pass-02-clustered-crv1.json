@@ -1,0 +1,13 @@
+{
+  "description": "按企业聚类，显式选择 CRV1",
+  "modelArgs": {
+    "datasetId": "firm_panel",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "fixedEffects": ["firm", "year"],
+    "clusterVars": ["firm"],
+    "covariance": "CRV1"
+  },
+  "expect": "pass"
+}

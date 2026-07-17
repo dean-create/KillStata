@@ -9,10 +9,8 @@ import type {
   Command,
   PermissionRequest,
   QuestionRequest,
-  LspStatus,
   McpStatus,
   McpResource,
-  FormatterStatus,
   SessionStatus,
   ProviderListResponse,
   ProviderAuthMethod,
@@ -22,7 +20,6 @@ import { createStore, produce, reconcile } from "solid-js/store"
 import { useSDK } from "@tui/context/sdk"
 import { Binary } from "@killstata/util/binary"
 import { createSimpleContext } from "./helper"
-import type { Snapshot } from "@/snapshot"
 import { useExit } from "./exit"
 import { useArgs } from "./args"
 import { batch, onMount } from "solid-js"
@@ -72,9 +69,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       runtimeContext: Record<string, RuntimeContextTuiState>
       runtimeAgentControl: Record<string, RuntimeAgentControlTuiState>
       workflow: Record<string, WorkflowTuiState>
-      session_diff: {
-        [sessionID: string]: Snapshot.FileDiff[]
-      }
       todo: {
         [sessionID: string]: Todo[]
       }
@@ -84,14 +78,12 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       part: {
         [messageID: string]: Part[]
       }
-      lsp: LspStatus[]
       mcp: {
         [key: string]: McpStatus
       }
       mcp_resource: {
         [key: string]: McpResource
       }
-      formatter: FormatterStatus[]
       vcs: VcsInfo | undefined
       path: Path
     }>({
@@ -120,14 +112,11 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       runtimeContext: {},
       runtimeAgentControl: {},
       workflow: {},
-      session_diff: {},
       todo: {},
       message: {},
       part: {},
-      lsp: [],
       mcp: {},
       mcp_resource: {},
-      formatter: [],
       vcs: undefined,
       path: { state: "", config: "", worktree: "", directory: "" },
     })
@@ -219,8 +208,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           setStore("todo", event.properties.sessionID, event.properties.todos)
           break
 
-        case "session.diff":
-          setStore("session_diff", event.properties.sessionID, event.properties.diff)
           break
 
         case "session.deleted": {
@@ -340,11 +327,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
                 draft.splice(result.index, 1)
               }),
             )
-          break
-        }
-
-        case "lsp.updated": {
-          sdk.client.lsp.status().then((x) => setStore("lsp", x.data!))
           break
         }
 
@@ -511,15 +493,10 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           Promise.all([
             ...(args.continue ? [] : [sessionListPromise]),
             sdk.client.command.list().then((x) => setStore("command", reconcile(x.data ?? []))),
-            sdk.client.lsp.status().then((x) => setStore("lsp", reconcile(x.data!))),
-            sdk.client.mcp.status().then((x) => setStore("mcp", reconcile(x.data!))),
-            sdk.client.experimental.resource.list().then((x) => setStore("mcp_resource", reconcile(x.data ?? {}))),
-            sdk.client.formatter.status().then((x) => setStore("formatter", reconcile(x.data!))),
             sdk.client.session.status().then((x) => {
               setStore("session_status", reconcile(x.data!))
             }),
             sdk.client.provider.auth().then((x) => setStore("provider_auth", reconcile(x.data ?? {}))),
-            sdk.client.vcs.get().then((x) => setStore("vcs", reconcile(x.data))),
             sdk.client.path.get().then((x) => setStore("path", reconcile(x.data!))),
           ]).then(() => {
             setStore("status", "complete")
@@ -567,11 +544,10 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         },
         async sync(sessionID: string) {
           if (fullSyncedSessions.has(sessionID)) return
-          const [session, messages, todo, diff] = await Promise.all([
+          const [session, messages, todo] = await Promise.all([
             sdk.client.session.get({ sessionID }, { throwOnError: true }),
             sdk.client.session.messages({ sessionID, limit: 100 }),
             sdk.client.session.todo({ sessionID }),
-            sdk.client.session.diff({ sessionID }),
           ])
           setStore(
             produce((draft) => {
@@ -583,7 +559,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
               for (const message of messages.data!) {
                 draft.part[message.info.id] = message.parts
               }
-              draft.session_diff[sessionID] = diff.data ?? []
             }),
           )
           fullSyncedSessions.add(sessionID)

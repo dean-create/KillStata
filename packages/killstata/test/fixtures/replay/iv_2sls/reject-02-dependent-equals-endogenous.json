@@ -1,0 +1,13 @@
+{
+  "description": "结果变量和内生解释变量填成了同一列",
+  "modelArgs": {
+    "datasetId": "card1995",
+    "stageId": "stage_000",
+    "dependentVar": "education",
+    "endogenousVar": "education",
+    "instrumentVar": "near_college",
+    "instrumentJustification": "地理距离满足相关性、外生性与排除限制，是标准的 Card (1995) 识别策略。"
+  },
+  "expect": "reject",
+  "rejectHint": ["endogenousVar", "不能与"]
+}

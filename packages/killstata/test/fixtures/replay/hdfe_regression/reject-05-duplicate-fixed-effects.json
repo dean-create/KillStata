@@ -1,0 +1,12 @@
+{
+  "description": "固定效应列表里同一列重复出现",
+  "modelArgs": {
+    "datasetId": "firm_panel",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "fixedEffects": ["firm", "firm", "year"]
+  },
+  "expect": "reject",
+  "rejectHint": ["fixedEffects", "不能包含重复项"]
+}

@@ -2,6 +2,7 @@ import path from "path"
 import fs from "fs/promises"
 import { Global } from "../global"
 import z from "zod"
+import { prepareToolMetadata, sanitizeToolRecord, summarizeToolError } from "@/runtime/tool-result-policy"
 
 export namespace Log {
   export const Level = z.enum(["DEBUG", "INFO", "WARN", "ERROR"]).meta({ ref: "LogLevel", description: "Log level" })
@@ -63,8 +64,11 @@ export namespace Log {
       Global.Path.log,
       options.dev ? "dev.log" : new Date().toISOString().split(".")[0].replace(/:/g, "") + ".log",
     )
+    await fs.mkdir(Global.Path.log, { recursive: true })
+    const handle = await fs.open(logpath, "w", 0o600)
+    await handle.close()
+    await fs.chmod(logpath, 0o600)
     const logfile = Bun.file(logpath)
-    await fs.truncate(logpath).catch(() => {})
     const writer = logfile.writer()
     write = async (msg: any) => {
       const num = writer.write(msg)
@@ -87,11 +91,22 @@ export namespace Log {
     await Promise.all(filesToDelete.map((file) => fs.unlink(file).catch(() => {})))
   }
 
-  function formatError(error: Error, depth = 0): string {
-    const result = error.message
-    return error.cause instanceof Error && depth < 10
-      ? result + " Caused by: " + formatError(error.cause, depth + 1)
-      : result
+  function safeValue(value: unknown, key = "") {
+    const sanitized = key ? sanitizeToolRecord(value, key) : value
+    if (value instanceof Error) return summarizeToolError(value)
+    if (typeof sanitized === "object" && sanitized !== null) {
+      return summarizeToolError(JSON.stringify(prepareToolMetadata(sanitized)))
+    }
+    return summarizeToolError(String(sanitized))
+  }
+
+  function boundLine(value: string, maxBytes = 16 * 1024) {
+    if (Buffer.byteLength(value, "utf-8") <= maxBytes) return value
+    const suffix = "… [日志行已截断]"
+    const available = maxBytes - Buffer.byteLength(suffix, "utf-8")
+    let preview = Buffer.from(value, "utf-8").subarray(0, Math.max(1, available)).toString("utf-8")
+    if (preview.endsWith("�")) preview = preview.slice(0, -1)
+    return preview + suffix
   }
 
   let last = Date.now()
@@ -114,15 +129,18 @@ export namespace Log {
         .filter(([_, value]) => value !== undefined && value !== null)
         .map(([key, value]) => {
           const prefix = `${key}=`
-          if (value instanceof Error) return prefix + formatError(value)
-          if (typeof value === "object") return prefix + JSON.stringify(value)
-          return prefix + value
+          return prefix + safeValue(value, key)
         })
         .join(" ")
       const next = new Date()
       const diff = next.getTime() - last
       last = next.getTime()
-      return [next.toISOString().split(".")[0], "+" + diff + "ms", prefix, message].filter(Boolean).join(" ") + "\n"
+      const safeMessage = message === undefined || message === null ? undefined : safeValue(message)
+      return boundLine(
+        [next.toISOString().split(".")[0], "+" + diff + "ms", prefix, safeMessage]
+          .filter(Boolean)
+          .join(" "),
+      ) + "\n"
     }
     const result: Logger = {
       debug(message?: any, extra?: Record<string, any>) {

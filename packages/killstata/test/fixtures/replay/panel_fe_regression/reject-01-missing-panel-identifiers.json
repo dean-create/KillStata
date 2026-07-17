@@ -1,0 +1,11 @@
+{
+  "description": "模型把 panel_fe_regression 当成'OLS 加个固定效应开关'来调用，漏了个体和时间标识列——这是面板法最常见的误用",
+  "modelArgs": {
+    "datasetId": "grunfeld_08bce7a7",
+    "stageId": "stage_000",
+    "dependentVar": "invest",
+    "treatmentVar": "value"
+  },
+  "expect": "reject",
+  "rejectHint": ["entityVar", "timeVar"]
+}

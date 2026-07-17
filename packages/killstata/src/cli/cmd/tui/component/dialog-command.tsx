@@ -160,9 +160,53 @@ export function CommandProvider(props: ParentProps) {
 
 function DialogCommand(props: { options: CommandOption[]; suggestedOptions: CommandOption[] }) {
   let ref: DialogSelectRef<string>
+  const format = (options: CommandOption[]) =>
+    options
+      // Ctrl+P is a user command palette, not a list of invisible keyboard
+      // shortcuts. Every visible entry therefore has a slash form.
+      .filter((option) => option.slash)
+      .map((option) => ({
+        ...option,
+        title: `/${option.slash!.name}`,
+        // DialogSelect renders footer at the far right. Put the human-facing
+        // Chinese explanation there and keep the command itself on the left.
+        description: undefined,
+        footer: chineseDescription(option),
+        category: chineseCategory(option.category),
+      }))
   const list = () => {
-    if (ref?.filter) return props.options
-    return [...props.suggestedOptions, ...props.options]
+    if (ref?.filter) return format(props.options)
+    return format([...props.suggestedOptions, ...props.options])
   }
-  return <DialogSelect ref={(r) => (ref = r)} title="命令" options={list()} />
+  return <DialogSelect ref={(r) => (ref = r)} title="命令" placeholder="搜索命令" options={list()} />
+}
+
+function chineseCategory(category?: string) {
+  return ({ Session: "会话", Agent: "模型", System: "系统", Input: "输入" } as Record<string, string>)[category ?? ""] ?? category
+}
+
+function chineseDescription(option: CommandOption) {
+  if (option.description && /[\u4e00-\u9fff]/.test(option.description)) return option.description
+  const slash = option.slash?.name
+  const labels: Record<string, string> = {
+    sessions: "切换或恢复会话",
+    new: "开始一段新对话",
+    model: "选择当前使用的模型",
+    config: "设置模型与 API Key",
+    help: "查看使用帮助",
+    exit: "退出 KillStata",
+    editor: "在编辑器中编写长消息",
+    themes: "切换界面主题",
+    rename: "修改当前会话标题",
+    timeline: "跳转到指定消息",
+    compact: "整理较长的会话内容",
+    undo: "撤销上一条提问",
+    redo: "恢复已撤销的提问",
+    timestamps: "显示或隐藏消息时间",
+    thinking: "显示或隐藏分析过程",
+    details: "查看处理过程的技术详情",
+    copy: "复制当前会话内容",
+    export: "导出当前会话记录",
+  }
+  return labels[slash ?? ""] ?? option.title
 }

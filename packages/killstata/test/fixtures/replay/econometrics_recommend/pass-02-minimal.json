@@ -1,0 +1,8 @@
+{
+  "description": "刚导入数据、还不知道任何变量角色时，只带 datasetId/stageId 调用",
+  "modelArgs": {
+    "datasetId": "candidate_clues_492dc07a",
+    "stageId": "stage_000"
+  },
+  "expect": "pass"
+}

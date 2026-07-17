@@ -1,0 +1,11 @@
+{
+  "description": "不带控制变量的双变量回归，显式选择 HC3 稳健标准误",
+  "modelArgs": {
+    "datasetId": "wage_survey",
+    "stageId": "stage_000",
+    "dependentVar": "wage",
+    "treatmentVar": "education",
+    "covariance": "HC3"
+  },
+  "expect": "pass"
+}

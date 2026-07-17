@@ -61,18 +61,21 @@ Windows-priority build:
 bun run --cwd packages/killstata build:windows-priority
 ```
 
-Dry-run the automated Windows npm release:
+Build and inspect a cross-platform npm release without publishing:
 
 ```bash
-bun run --cwd packages/killstata release:windows:latest --dry-run
+bun run --cwd packages/killstata release:npm --version 0.1.26 --dry-run
 ```
 
-Run the automated Windows npm release:
+Publish from a clean, synchronized `main`/`master` branch:
 
 ```bash
-$env:NPM_TOKEN="your_npm_token"
-bun run --cwd packages/killstata release:windows:latest
+bun run --cwd packages/killstata release:npm --version 0.1.26
 ```
+
+The release is resumable: packages already present with identical integrity are skipped, while immutable
+same-version content conflicts stop before upload. Authentication is managed by npm itself; never put a Token
+in the repository or command arguments. See [`docs/npm-release.md`](./docs/npm-release.md).
 
 Run the CLI from source:
 

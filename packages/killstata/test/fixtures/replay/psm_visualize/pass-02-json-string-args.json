@@ -1,0 +1,5 @@
+{
+  "description": "模型把参数对象序列化成 JSON 字符串时仍能恢复为严格参数",
+  "modelArgs": "{\"datasetId\":\"lalonde_nsw\",\"stageId\":\"stage_001\",\"treatmentVar\":\"treat\",\"covariates\":[\"age\",\"education\"]}",
+  "expect": "pass"
+}

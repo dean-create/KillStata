@@ -3,9 +3,10 @@ import { execFileSync } from "child_process"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { EconometricsTool } from "../../src/tool/econometrics"
+import { PanelFeRegressionTool } from "../../src/tool/econometrics-method-tools"
 import { resolveRuntimePythonCommand } from "../../src/killstata/runtime-config"
 import { Instance } from "../../src/project/instance"
+import { registerCanonicalDataset } from "../helpers/canonical-dataset"
 
 const ctx = {
   sessionID: "test",
@@ -56,18 +57,21 @@ describe("tool.econometrics panel_fe_regression golden test (Grunfeld, linearmod
     await withInstance(async (root) => {
       const csvPath = path.join(root, "grunfeld.csv")
       fs.copyFileSync(path.join(process.cwd(), "test", "fixtures", "golden", "grunfeld.csv"), csvPath)
+      const source = registerCanonicalDataset({
+        sessionID: ctx.sessionID,
+        sourcePath: csvPath,
+        datasetId: "dataset_grunfeld_fe",
+      })
 
-      const tool = await EconometricsTool.init()
+      const tool = await PanelFeRegressionTool.init()
       const result = await tool.execute(
         {
-          methodName: "panel_fe_regression",
-          dataPath: "grunfeld.csv",
+          ...source,
           dependentVar: "invest",
           treatmentVar: "value",
           covariates: ["capital"],
           entityVar: "firm",
           timeVar: "year",
-          outputDir: "outputs/grunfeld_case",
         },
         ctx as any,
       )

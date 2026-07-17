@@ -1,0 +1,13 @@
+{
+  "description": "个体标识列和结果变量填成了同一列",
+  "modelArgs": {
+    "datasetId": "staggered_adoption",
+    "stageId": "stage_000",
+    "dependentVar": "firm",
+    "cohortVar": "first_treat_year",
+    "entityVar": "firm",
+    "timeVar": "year"
+  },
+  "expect": "reject",
+  "rejectHint": ["彼此不同"]
+}

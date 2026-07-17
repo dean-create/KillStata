@@ -1,0 +1,12 @@
+{
+  "description": "模型把这个工具当成普通面板回归调用，没意识到 saturated 估计量需要一个独立的首次处理时期（cohort）变量",
+  "modelArgs": {
+    "datasetId": "staggered_adoption",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "entityVar": "firm",
+    "timeVar": "year"
+  },
+  "expect": "reject",
+  "rejectHint": ["cohortVar"]
+}

@@ -17,7 +17,6 @@ import { Instance } from "../project/instance"
 import { SessionPrompt } from "./prompt"
 import { fn } from "@/util/fn"
 import { Command } from "../command"
-import { Snapshot } from "@/snapshot"
 
 import type { Provider } from "@/provider/provider"
 import { PermissionNext } from "@/permission/next"
@@ -46,14 +45,6 @@ export namespace Session {
       projectID: z.string(),
       directory: z.string(),
       parentID: Identifier.schema("session").optional(),
-      summary: z
-        .object({
-          additions: z.number(),
-          deletions: z.number(),
-          files: z.number(),
-          diffs: Snapshot.FileDiff.array().optional(),
-        })
-        .optional(),
       share: z
         .object({
           url: z.string(),
@@ -72,8 +63,15 @@ export namespace Session {
         .object({
           messageID: z.string(),
           partID: z.string().optional(),
-          snapshot: z.string().optional(),
-          diff: z.string().optional(),
+          // 撤销时数据被退回到了哪个阶段。没动过数据的会话不带这个字段，
+          // 此时 /undo 就只是撤回消息。
+          dataset: z
+            .object({
+              datasetId: z.string(),
+              stageId: z.string(),
+              undoneAction: z.string(),
+            })
+            .optional(),
         })
         .optional(),
     })
@@ -109,13 +107,6 @@ export namespace Session {
       "session.deleted",
       z.object({
         info: Info,
-      }),
-    ),
-    Diff: BusEvent.define(
-      "session.diff",
-      z.object({
-        sessionID: z.string(),
-        diff: Snapshot.FileDiff.array(),
       }),
     ),
     Error: BusEvent.define(
@@ -307,11 +298,6 @@ export namespace Session {
     })
     return result
   }
-
-  export const diff = fn(Identifier.schema("session"), async (sessionID) => {
-    const diffs = await Storage.read<Snapshot.FileDiff[]>(["session_diff", sessionID])
-    return diffs ?? []
-  })
 
   export const messages = fn(
     z.object({

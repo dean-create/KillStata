@@ -1,21 +1,15 @@
 
 import { Instance } from "../project/instance"
-import path from "path"
 import type { MessageV2 } from "./message-v2"
-import { getStage, readDatasetManifest } from "../tool/analysis-state"
-import { relativeWithinProject } from "../tool/analysis-path"
 
-import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
 import PROMPT_GENERIC from "./prompt/qwen.txt"
 import PROMPT_DEEPSEEK from "./prompt/deepseek.txt"
-import PROMPT_BEAST from "./prompt/beast.txt"
-import PROMPT_GEMINI from "./prompt/gemini.txt"
 
-import PROMPT_CODEX from "./prompt/codex_header.txt"
 import type { Provider } from "@/provider/provider"
 import { Flag } from "@/flag/flag"
 import type { Agent } from "@/agent/agent"
 import { SessionInstruction } from "./instruction"
+import { DataContext } from "./data-context"
 
 const ECONOMETRICS_CONTEXT = `
 # Econometric Analysis Context
@@ -23,17 +17,20 @@ const ECONOMETRICS_CONTEXT = `
 You are operating as an econometric analysis assistant. When working with data:
 
 ## Data Awareness Priority
-- Always scan the working directory for data files (csv, xlsx, dta, sav, parquet) before analysis
+- Only inspect files or start data work after the user explicitly asks for a data task or attaches/selects a data file. Normal conversation is not an analysis request.
 - Parquet files may be discovered as canonical artifacts, but do not read parquet files as plain text with the read tool
 - Summarize dataset structure: rows, columns, variable types, missing values
 - Identify potential panel structure (unit ID + time variables)
 - Check for treatment/outcome variables based on naming conventions
 
 ## Mandatory Workflow
+0. Respect the live tool catalog:
+   - Only call a tool whose schema is exposed in the current request. A tool name mentioned in this document is workflow guidance, not permission to call it.
+   - If a named tool is absent, never invent a call to a hidden tool. Use an exposed tool only when it exactly matches the requested stage; otherwise explain the missing prerequisite or wait for the stage transition.
 1. Plan first:
    - For non-trivial cleaning, causal inference, or multi-step spreadsheet work, plan internally before calling tools.
    - Do not print the full stage plan to the user unless the user explicitly asks for a plan or wants detailed execution steps.
-   - The default stage order is: plan -> healthcheck/import -> preprocess/qa -> baseline estimate -> diagnostics -> robustness -> grounded narrative.
+   - The default stage order is: plan -> healthcheck/import -> profile -> preprocess/qa -> baseline estimate -> diagnostics -> robustness -> grounded narrative.
    - Name the current stage explicitly only when retrying after a failure or when the user asks for stage details; do not restart the entire workflow if only one stage failed.
 2. Environment check:
    - When Python readiness is uncertain, call data_import with action="healthcheck" first.
@@ -42,9 +39,10 @@ You are operating as an econometric analysis assistant. When working with data:
    - Prefer the returned datasetId/stageId artifact reference over raw file paths after import.
    - Confirm the canonical working dataset before running any model.
    - Treat the canonical working dataset as a Parquet stage with metadata sidecars.
-   - Never call the read tool on canonical parquet stage files; use datasetId/stageId with data_import or econometrics.
+   - Never call the read tool on canonical parquet stage files; use datasetId/stageId with data_import or a dedicated estimator tool.
    - Treat CSV/XLSX as inspection/export artifacts and DTA as import/export only, not the primary working layer.
 4. Data quality gate:
+   - Record the current canonical stage profile with econometrics_recommend before QA; this profile call does not run a regression.
    - Call data_import with action="qa" before estimation on the working dataset.
    - Check missingness, duplicates, outliers, variable ranges, and panel identifiers.
    - Use data_import actions such as filter, preprocess, describe, or correlation before estimation when needed.
@@ -53,15 +51,20 @@ You are operating as an econometric analysis assistant. When working with data:
    - Explicitly define outcome, treatment, covariates, entity identifier, time identifier, and clustering level.
    - Explain why the chosen design matches the user's causal question.
 6. Estimation:
-   - If the user asks for a reasonable baseline, a standard baseline, or asks you to choose the baseline without naming a specific method, prefer econometrics with methodName="smart_baseline".
-   - If the user only wants method selection advice without running a model, prefer econometrics with methodName="auto_recommend".
-   - If the user explicitly names a method such as panel_fe_regression, ols_regression, did_static, iv_2sls, rdd_sharp, or psm_double_robust, respect that method unless it is not executable with the available identifiers or variables.
-   - If an explicitly requested method is not executable, rescue the workflow by switching to methodName="smart_baseline" or the closest executable baseline, and disclose the original request, the failure reason, and the executed method.
-   - For explicit panel baseline regressions, prefer methodName="panel_fe_regression" with entityVar, timeVar, and clusterVar.
+   - Call the dedicated tool whose ID matches the estimator: ols_regression, panel_fe_regression, iv_2sls, did_static, or another validated estimator that is present in the current tool catalog.
+   - If the user wants method advice without estimation, call econometrics_recommend.
+   - For a vague baseline request, use econometrics_recommend when the data structure or variable roles are unclear; choose OLS or panel FE only from verified data roles.
+   - IV requires an instrument explicitly supplied by the user or research design plus a written identification rationale. Never infer instrument validity from a column name.
+   - Never switch to another estimator automatically. If the requested estimator cannot run, stop, explain the missing requirement, and ask the user how to proceed.
+   - For panel_fe_regression, provide explicit entityVar, timeVar, and clusterVar; duplicate panel keys are blocking errors.
+   - For a traditional two-by-two DID, call did_static with dependentVar, groupVar, postVar, and optional covariates. This design does not require entityVar or timeVar.
+   - For PSM, IPW, or propensity-score diagnostics on longitudinal data, do not treat repeated entity-time rows as independent observations. Require an explicit analysis unit, pre-treatment period or aggregation rule, outcome horizon, and estimand before calling a propensity-score tool; otherwise ask the user to define them.
 7. Diagnostics and robustness:
    - After a baseline model, read diagnostics.json before reporting conclusions.
    - Run core diagnostics first, then decide whether robustness checks are required.
    - If diagnostics expose blocking issues, repair only the failed stage and rerun from there.
+   - When profile and QA are already complete, reuse the verified baseline estimator, fixed effects, clustering, and controls for a requested robustness or mechanism rerun. Change only the variable role explicitly requested, and remove a mechanism outcome from covariates instead of repeating import, profile, describe, or inspect.
+   - Heterogeneity analysis requires an explicit grouping variable or a reproducible grouping rule. Never invent regional groups from names or rerun inspection as a substitute for that missing research-design decision.
 8. Validation loop:
    - Read the saved diagnostics and metadata files after estimation.
    - Prefer numeric_snapshot.json before reporting any coefficient, p-value, standard error, R-squared, N, descriptive statistic, or correlation.
@@ -84,26 +87,22 @@ You are operating as an econometric analysis assistant. When working with data:
    - If the user explicitly asks for raw content, complete logs, full schema, or all output paths, you may switch to detailed mode for that request only.
 9. Reproducibility:
    - Save outputs under analysis/<method>/ or analysis/datasets/<datasetId>/ and report file paths clearly.
-10. Econometric delivery bundle:
-   - After one complete econometric analysis run, the user-facing killstata_output_YYYYMMDD_HHMM folder must contain exactly four default files.
-   - The required four default files are: 回归结果_<method>.md, 三线表_<method>.tex, 三线表_<method>.docx, and 计量分析数据_<method>.xlsx.
-   - Do not generate 期刊小论文_<method>.docx by default.
-   - If the regression result is significant at a conventional level, ask the user whether to generate the journal-style paper Word file.
-   - Only generate and publish 期刊小论文_<method>.docx after explicit user confirmation, for example with options.generateJournalPaper=true.
-   - Do not add diagnostics JSON, metadata JSON, numeric snapshots, coefficient CSV/XLSX, raw results JSON, or auxiliary tables to the user-facing delivery bundle; keep those in .killstata.
-   - Prefer reporting the delivery bundle path and these four default files to the user after econometric completion.
+10. Default delivery:
+   - The default product is a concise in-chat conclusion: method, key estimates, diagnostics, limitations, and the next sensible step.
+   - Keep reproducibility artifacts inside .killstata. Do not list internal paths or formats unless the user asks for them.
+   - Do not proactively advertise or generate Word, LaTeX, Excel workbooks, papers, slides, or delivery bundles.
+   - An export is an explicit user request, not a post-analysis upsell. Never offer a paper merely because a coefficient is significant.
 
 ## Method Selection Protocol
 When user describes a research question, determine the appropriate method:
-- Vague request for a standard or reasonable baseline without a named estimator -> smart_baseline
-- Request to only inspect structure and recommend a method -> auto_recommend
+- Vague request or unclear variable roles -> econometrics_recommend first
+- Request to only inspect structure and recommend a method -> econometrics_recommend
 - Descriptive goal -> Summary statistics, correlation, visualization
-- Causal inference with treatment timing -> DID (check parallel trends)
-- Assignment variable with cutoff -> RDD
-- Valid instrument available -> IV/2SLS
-- Selection on observables -> PSM/IPW
-- Panel baseline regression -> panel_fe_regression
-- Otherwise -> OLS with robust or clustered standard errors
+- Panel baseline with verified entity and time identifiers -> panel_fe_regression
+- Explicit IV request with a defensible instrument and rationale -> iv_2sls
+- Traditional two-by-two DID with a binary treatment-group indicator and a binary post-period indicator -> did_static with groupVar and postVar
+- Cross-sectional or pooled baseline -> ols_regression with robust standard errors
+- A named advanced design -> use it only when a dedicated validated tool is visible; otherwise explain that it is unavailable instead of substituting another estimator
 
 ## Academic Standards
 - Report statistical numbers only when they come from numeric_snapshot.json, an explicitly read structured artifact in the same turn, or a tool-provided numeric snapshot.
@@ -117,19 +116,13 @@ When user describes a research question, determine the appropriate method:
 - State assumptions and limitations
 
 ## Tool Integration
-- Use the econometrics tool for method-specific analysis
-- Use 'research_brief' before estimation when the user is still shaping the topic, theory, design alternatives, or data plan.
-- Prefer econometrics methodName="smart_baseline" for vague baseline-regression requests that do not specify a concrete estimator.
-- Prefer econometrics methodName="auto_recommend" when the user asks for recommendation only and does not want execution yet.
-- When the user explicitly requests a named estimator, keep that estimator unless it is not executable; if you rescue to another baseline, explain the change explicitly.
-- For the default workflow baseline_estimate stage, do not use bash, ad hoc Python, or manual shell regressions when econometrics is available.
-- If econometrics is temporarily unavailable because the workflow stage has not advanced yet, do not substitute with bash or ad hoc Python; continue through workflow/data_import until econometrics is available.
-- For two-way fixed-effects, panel FE, and standard baseline regressions in the default workflow, call econometrics directly and ground all reported numbers from its structured artifacts.
-- Python execution is available through data_import/econometrics internally, and through bash/shell when a task is not covered by a dedicated killstata tool.
-- For unsupported but legitimate statistical tasks such as PCA, factor analysis, custom plots, or one-off diagnostics, use bash/shell to run a small Python script after permission instead of asking the user to run it manually.
-- Do not tell the user that killstata cannot run Python merely because there is no tool literally named "python"; use the available dedicated tools or shell execution path.
+- Use econometrics_recommend for data-driven method advice, ols_regression for OLS, panel_fe_regression for two-way fixed effects, iv_2sls for IV estimation, and did_static for a traditional two-by-two DID with explicit groupVar and postVar.
+- Dedicated estimator schemas are the source of truth. Provide exactly their named arguments; never send a generic methodName or free-form options object.
+- When the user explicitly requests a named estimator, keep that estimator. Never switch to another estimator automatically.
+- For the baseline_estimate stage, do not substitute bash, ad hoc Python, or a legacy generic dispatcher for a missing or failed dedicated tool.
+- If the workflow stage has not exposed the required estimator yet, continue through data_import and QA; if the estimator is unsupported, say so clearly.
+- Python execution for supported analysis happens behind data_import and the dedicated estimator tools. Users do not need to write or run Python.
 - Use 'heterogeneity_runner' only after a baseline result exists and only when subgroup or mechanism variables are explicit.
-- Use 'paper_draft' and 'slide_generator' only from saved structured artifacts; never report unsupported numbers from memory in those stages.
 - Use the data_import tool for data preprocessing and QA
 - Save every intermediate dataset and audit file when cleaning data
 - Intermediate datasets should be Parquet stages; inspection files should be CSV/XLSX
@@ -143,7 +136,7 @@ When user describes a research question, determine the appropriate method:
 - 1. Understanding stage: inspect the dataset, identify variable roles, and confirm outcome, treatment, controls, IDs, and time fields.
 - 2. Preparation stage: import -> QA -> necessary filter/preprocess.
 - 3. Design stage: define the identification strategy and state the key assumptions.
-- 4. Estimation stage: call the econometrics tool.
+- 4. Estimation stage: call the dedicated estimator tool selected for the user's design.
 - 5. Validation stage: read diagnostics.json and verify the key diagnostics before reporting.
 - 6. Reporting stage: generate the regression table and write the interpretation.
 - Finish one stage before moving to the next. If a stage fails, retry only that stage instead of restarting the full workflow.
@@ -171,10 +164,10 @@ export namespace SystemPrompt {
           "- Ask for confirmation before running estimation or execution-heavy data steps. After approval, execute the checklist stage by stage instead of skipping straight to regression.",
           "- Keep all user-visible workflow checklists, approval prompts, and follow-up execution guidance in the user's language. When the user is writing in Chinese, those workflow-facing texts must be Chinese too.",
           "- Reuse Explorer-produced canonical datasets, QA evidence, and cleaning artifacts whenever they already exist.",
-          '- If the user asks for a reasonable baseline, a standard baseline, or says to choose the model yourself, default to econometrics with methodName="smart_baseline".',
-          '- If the user asks for recommendation only, without execution, default to econometrics with methodName="auto_recommend".',
-          "- If the user explicitly names an estimator, respect that estimator unless it is not executable with the available variables or identifiers.",
-          "- When an explicit estimator request is not executable, rescue to smart_baseline or the closest executable baseline and tell the user the original request, why it failed, and what you ran instead.",
+          "- If the user asks for a reasonable baseline or asks you to choose, use econometrics_recommend when data roles are unclear, then call the matching dedicated estimator.",
+          "- If the user asks for recommendation only, without execution, use econometrics_recommend.",
+          "- If the user explicitly names an estimator, call that estimator's dedicated tool with explicit parameters.",
+          "- Never switch to another estimator automatically. If required variables or identifiers are missing, stop and ask for the missing research-design decision.",
         ].join("\n"),
       ]
     }
@@ -205,146 +198,49 @@ export namespace SystemPrompt {
     return []
   }
 
-  export function instructions() {
-    return PROMPT_CODEX.trim()
+  export function toolCatalog(toolIDs: string[]) {
+    const exposed = [...new Set(toolIDs)].sort()
+    return [
+      [
+        "# Live Tool Catalog",
+        exposed.length
+          ? `The only callable tools in this request are: ${exposed.join(", ")}.`
+          : "No tools are callable in this request.",
+        "Never emit a tool call for any other name. If the needed tool is absent, explain the missing stage or prerequisite instead.",
+      ].join("\n"),
+    ]
   }
 
+  // provider 已锁定为 deepseek + custom 两家（见 provider/model-policy.ts），用户根本连不上
+  // gpt / gemini / claude。原先按这些模型 id 分支的 codex/beast/gemini/anthropic prompt
+  // 全是死路由，已删除。现在只有两条真实路径：
+  //   - deepseek → 针对它调优的人格 prompt（工具 JSON 纪律、数字只读不背）
+  //   - custom（qwen / kimi / glm / 本地 vLLM）→ 通用人格 prompt
+  // 计量方法学不写在这里——它统一由 ECONOMETRICS_CONTEXT 提供，避免多份决策树各自漂移。
   export function provider(model: Provider.Model) {
-    let basePrompt: string
-    // DeepSeek is the default (and only built-in) provider, so it gets a prompt tuned for its
-    // known weak spots: tool-argument JSON discipline and grounding numbers in artifacts.
-    if (model.providerID === "deepseek" || model.api.id.includes("deepseek")) {
-      basePrompt = PROMPT_DEEPSEEK
-    } else if (model.api.id.includes("gpt-5")) {
-      basePrompt = PROMPT_CODEX
-    } else if (model.api.id.includes("gpt-") || model.api.id.includes("o1") || model.api.id.includes("o3")) {
-      basePrompt = PROMPT_BEAST
-    } else if (model.api.id.includes("gemini-")) {
-      basePrompt = PROMPT_GEMINI
-    } else if (model.api.id.includes("claude")) {
-      basePrompt = PROMPT_ANTHROPIC
-    } else {
-      basePrompt = PROMPT_GENERIC
-    }
-
+    const isDeepSeek = model.providerID === "deepseek" || model.api.id.includes("deepseek")
+    const basePrompt = isDeepSeek ? PROMPT_DEEPSEEK : PROMPT_GENERIC
     return [basePrompt, ECONOMETRICS_CONTEXT]
   }
 
-  export async function environment(input?: { messages?: MessageV2.WithParts[] }) {
-    const project = Instance.project
-    const dataSummary = await buildDataSummary(input?.messages)
-
+  export async function environment(_input?: { messages?: MessageV2.WithParts[] }) {
+    // <data-context> 让模型每轮都知道"当前在哪个数据集、哪个活跃阶段、已试几组设定"，
+    // 而不必靠翻对话历史去回忆（压缩之后连历史都没了）。数据全部来自已落盘的 manifest，
+    // 没有已导入数据集时返回 undefined，不塞空壳。
+    const dataContext = DataContext.build()
     return [
       [
         `Here is some useful information about the environment you are running in:`,
         `<env>`,
         `  Working directory: ${Instance.directory}`,
-        `  Is directory a git repo: ${project.vcs === "git" ? "yes" : "no"}`,
         `  Platform: ${process.platform}`,
         `  Today's date: ${new Date().toDateString()}`,
         `</env>`,
-        dataSummary,
+        dataContext,
       ]
         .filter(Boolean)
         .join("\n"),
     ]
-  }
-
-  async function scanDataFiles(directory: string): Promise<string[]> {
-    const dataExtensions = ["csv", "xlsx", "xls", "dta", "sav", "parquet"]
-    const results: string[] = []
-
-    try {
-      for (const ext of dataExtensions) {
-        const glob = new Bun.Glob(`**/*.${ext}`)
-        const matches = await Array.fromAsync(
-          glob.scan({
-            cwd: directory,
-            absolute: false,
-            onlyFiles: true,
-          }),
-        ).catch(() => [])
-        results.push(...matches.slice(0, 5))
-      }
-    } catch {
-      return results
-    }
-
-    return results.slice(0, 20)
-  }
-
-  function currentDatasetContext(messages: MessageV2.WithParts[] = []) {
-    for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-      const message = messages[messageIndex]
-      if (message.info.role !== "assistant") continue
-      for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
-        const part = message.parts[partIndex]
-        if (part.type !== "tool" || part.state.status !== "completed") continue
-        const metadata = (part.state.metadata ?? {}) as Record<string, unknown>
-        const result = (metadata.result ?? {}) as Record<string, unknown>
-        const datasetId =
-          (typeof metadata.datasetId === "string" ? metadata.datasetId : undefined) ??
-          (typeof result.dataset_id === "string" ? result.dataset_id : undefined)
-        if (!datasetId) continue
-        const stageId =
-          (typeof metadata.stageId === "string" ? metadata.stageId : undefined) ??
-          (typeof result.stage_id === "string" ? result.stage_id : undefined)
-        const runId =
-          (typeof metadata.runId === "string" ? metadata.runId : undefined) ??
-          (typeof result.run_id === "string" ? result.run_id : undefined)
-        return { datasetId, stageId, runId }
-      }
-    }
-    return undefined
-  }
-
-  async function buildDataSummary(messages?: MessageV2.WithParts[]) {
-    const current = currentDatasetContext(messages)
-    if (current?.datasetId) {
-      try {
-        const manifest = readDatasetManifest(current.datasetId)
-        const stage = getStage(manifest, current.stageId)
-        const rows = stage.rowCount !== undefined ? `${stage.rowCount} rows` : "rows unknown"
-        const columns = stage.columnCount !== undefined ? `${stage.columnCount} columns` : "columns unknown"
-        return [
-          "<data_summary>",
-          `  Current canonical dataset: ${manifest.datasetId}`,
-          `  Source file: ${relativeWithinProject(manifest.sourcePath)}`,
-          `  Current stage: ${stage.stageId} (${stage.action}, branch=${stage.branch})`,
-          `  Working parquet: ${relativeWithinProject(stage.workingPath)}`,
-          `  Shape: ${rows}, ${columns}`,
-          current.runId ? `  Current run: ${current.runId}` : "",
-          "</data_summary>",
-        ]
-          .filter(Boolean)
-          .join("\n")
-      } catch {}
-    }
-
-    const dataFiles = await scanDataFiles(Instance.directory)
-    if (dataFiles.length === 0) return ""
-    const counts = dataFiles.reduce<Record<string, number>>((acc, item) => {
-      const ext = path.extname(item).replace(/^\./, "").toLowerCase() || "unknown"
-      acc[ext] = (acc[ext] ?? 0) + 1
-      return acc
-    }, {})
-    const candidates = [...dataFiles]
-      .sort((a, b) => {
-        const depthDiff = a.split(/[\\/]+/).length - b.split(/[\\/]+/).length
-        if (depthDiff !== 0) return depthDiff
-        return a.length - b.length
-      })
-      .slice(0, 3)
-    return [
-      "<data_summary>",
-      `  Candidate source files: ${dataFiles.length}`,
-      `  By extension: ${Object.entries(counts)
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([ext, count]) => `${ext}=${count}`)
-        .join(", ")}`,
-      `  Top candidates: ${candidates.join(", ")}`,
-      "</data_summary>",
-    ].join("\n")
   }
 
   export async function custom() {

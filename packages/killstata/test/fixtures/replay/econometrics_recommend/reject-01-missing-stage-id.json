@@ -1,0 +1,8 @@
+{
+  "description": "模型漏传 stageId（只知道数据集，忘了当前阶段）",
+  "modelArgs": {
+    "datasetId": "grunfeld_08bce7a7"
+  },
+  "expect": "reject",
+  "rejectHint": ["stageId"]
+}

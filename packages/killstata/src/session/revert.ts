@@ -1,14 +1,13 @@
 import z from "zod"
 import { Identifier } from "../id/id"
-import { Snapshot } from "../snapshot"
 import { MessageV2 } from "./message-v2"
 import { Session } from "."
+import { RevertDataset } from "./revert-dataset"
 import { Log } from "../util/log"
 import { splitWhen } from "remeda"
 import { Storage } from "../storage/storage"
 import { Bus } from "../bus"
 import { SessionPrompt } from "./prompt"
-import { SessionSummary } from "./summary"
 
 export namespace SessionRevert {
   const log = Log.create({ service: "session.revert" })
@@ -27,17 +26,11 @@ export namespace SessionRevert {
     const session = await Session.get(input.sessionID)
 
     let revert: Session.Info["revert"]
-    const patches: Snapshot.Patch[] = []
     for (const msg of all) {
       if (msg.info.role === "user") lastUser = msg.info
       const remaining = []
       for (const part of msg.parts) {
-        if (revert) {
-          if (part.type === "patch") {
-            patches.push(part)
-          }
-          continue
-        }
+        if (revert) continue
 
         if (!revert) {
           if ((msg.info.id === input.messageID && !input.partID) || part.id === input.partID) {
@@ -54,24 +47,29 @@ export namespace SessionRevert {
     }
 
     if (revert) {
-      const session = await Session.get(input.sessionID)
-      revert.snapshot = session.revert?.snapshot ?? (await Snapshot.track())
-      await Snapshot.revert(patches)
-      if (revert.snapshot) revert.diff = await Snapshot.diff(revert.snapshot)
       const rangeMessages = all.filter((msg) => msg.info.id >= revert!.messageID)
-      const diffs = await SessionSummary.computeDiff({ messages: rangeMessages })
-      await Storage.write(["session_diff", input.sessionID], diffs)
-      Bus.publish(Session.Event.Diff, {
-        sessionID: input.sessionID,
-        diff: diffs,
-      })
+      const advancingRedo = Boolean(session.revert && revert.messageID > session.revert.messageID)
+
+      if (advancingRedo && session.revert?.dataset) {
+        const restoreTarget = RevertDataset.findRedoAdvanceTarget(
+          all,
+          session.revert.messageID,
+          revert.messageID,
+          session.revert.dataset.datasetId,
+        )
+        if (restoreTarget) await RevertDataset.rollback(restoreTarget, input.sessionID)
+      }
+
+      // 撤销 = 把数据退回到这些操作之前的那个阶段。没有动过数据的会话（只是聊天、只跑了
+      // 回归、只看了描述统计）自然找不到目标，此时 /undo 退化为纯粹的消息撤销——这是对的。
+      const target = RevertDataset.findTarget(rangeMessages)
+      if (target) {
+        if (!advancingRedo) await RevertDataset.rollback(target, input.sessionID)
+        revert.dataset = target
+      }
+
       return Session.update(input.sessionID, (draft) => {
         draft.revert = revert
-        draft.summary = {
-          additions: diffs.reduce((sum, x) => sum + x.additions, 0),
-          deletions: diffs.reduce((sum, x) => sum + x.deletions, 0),
-          files: diffs.length,
-        }
       })
     }
     return session
@@ -82,7 +80,16 @@ export namespace SessionRevert {
     SessionPrompt.assertNotBusy(input.sessionID)
     const session = await Session.get(input.sessionID)
     if (!session.revert) return session
-    if (session.revert.snapshot) await Snapshot.restore(session.revert.snapshot)
+
+    // 最后一轮重做会恢复边界后的全部消息，因此数据也要恢复到这些消息最后生成的阶段。
+    // 仍然通过 rollback 派生新 stage，不修改或抹掉既有血缘。
+    if (session.revert.dataset) {
+      const all = await Session.messages({ sessionID: input.sessionID })
+      const hidden = all.filter((message) => message.info.id >= session.revert!.messageID)
+      const target = RevertDataset.findRestoreTarget(hidden, session.revert.dataset.datasetId)
+      if (target) await RevertDataset.rollback(target, input.sessionID)
+    }
+
     const next = await Session.update(input.sessionID, (draft) => {
       draft.revert = undefined
     })

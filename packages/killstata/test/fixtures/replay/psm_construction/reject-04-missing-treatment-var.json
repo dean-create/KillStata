@@ -1,0 +1,10 @@
+{
+  "description": "模型忘了指定处理变量，只给了协变量",
+  "modelArgs": {
+    "datasetId": "lalonde_nsw",
+    "stageId": "stage_000",
+    "covariates": ["age", "education"]
+  },
+  "expect": "reject",
+  "rejectHint": ["treatmentVar"]
+}

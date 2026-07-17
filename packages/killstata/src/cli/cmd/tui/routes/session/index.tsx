@@ -7,6 +7,8 @@ import {
   For,
   Match,
   on,
+  onCleanup,
+  onMount,
   Show,
   Switch,
   useContext,
@@ -47,7 +49,6 @@ import { useSDK } from "@tui/context/sdk"
 import { useCommandDialog } from "@tui/component/dialog-command"
 import { useKeybind } from "@tui/context/keybind"
 import { Header } from "./header"
-import { parsePatch } from "diff"
 import { useDialog } from "../../ui/dialog"
 import { TodoItem } from "../../component/todo-item"
 import { DialogMessage } from "./dialog-message"
@@ -57,7 +58,7 @@ import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
 import { Sidebar } from "./sidebar"
-import { LANGUAGE_EXTENSIONS } from "@/lsp/language"
+import { LANGUAGE_EXTENSIONS } from "@tui/util/language"
 import parsers from "../../../../../../parsers-config.ts"
 import { Clipboard } from "../../util/clipboard"
 import { Toast, useToast } from "../../ui/toast"
@@ -65,25 +66,24 @@ import { useKV } from "../../context/kv.tsx"
 import { Editor } from "../../util/editor"
 import stripAnsi from "strip-ansi"
 import { Footer } from "./footer.tsx"
-import { SubagentFooter } from "./subagent-footer.tsx"
 import { usePromptRef } from "../../context/prompt"
 import { useExit } from "../../context/exit"
-import { Filesystem } from "@/util/filesystem"
 import { Global } from "@/global"
 import { PermissionPrompt } from "./permission"
 import { QuestionPrompt } from "./question"
 import { DialogExportOptions } from "../../ui/dialog-export-options"
 import { formatTranscript } from "../../util/transcript"
 import { readToolDisplay, renderToolDisplay } from "@/tool/analysis-display"
+import { readToolAnalysisView } from "@/tool/analysis-user-view"
 import {
   sanitizeAnalysisAssistantText,
   containsEngineInternalData,
   userFacingAnalysisErrorText,
   type AnalysisToolPartLike,
 } from "@/runtime/analysis-text-sanitizer"
-import { isAnalysisTurn } from "@/runtime/analysis-user-view"
+import { isAnalysisTurn, pendingTaskLabel, shouldShowReasoning } from "@/runtime/analysis-user-view"
+import { WORKFLOW_ANALYSIS_TOOL_IDS, isWorkflowAnalysisTool, isWorkflowEstimateTool } from "@/runtime/tool-catalog"
 import { isReasoningExpanded, toggleReasoningExpandedState } from "./reasoning-state"
-import { workflowStageLabel } from "@/runtime/workflow-locale"
 
 addDefaultParsers(parsers.parsers)
 
@@ -122,9 +122,10 @@ function analysisErrorDisplayText(input: {
   const message = input.text?.trim()
   if (!message) return undefined
   const friendly = userFacingAnalysisErrorText(message)
-  if (friendly && !input.showDetails) return friendly
-  if (!input.isAnalysis || input.showDetails) return message
+  if (friendly) return friendly
+  if (!input.isAnalysis) return message
   if (input.waitingForAccess) return undefined
+  if (/[A-Za-z]{3}/.test(message)) return "分析未完成，未生成可用结果。请检查任务参数后重试。"
   return isInternalAnalysisErrorText(message) ? undefined : message
 }
 
@@ -893,32 +894,6 @@ export function Session() {
   const revertInfo = createMemo(() => session()?.revert)
   const revertMessageID = createMemo(() => revertInfo()?.messageID)
 
-  const revertDiffFiles = createMemo(() => {
-    const diffText = revertInfo()?.diff ?? ""
-    if (!diffText) return []
-
-    try {
-      const patches = parsePatch(diffText)
-      return patches.map((patch) => {
-        const filename = patch.newFileName || patch.oldFileName || "unknown"
-        const cleanFilename = filename.replace(/^[ab]\//, "")
-        return {
-          filename: cleanFilename,
-          additions: patch.hunks.reduce(
-            (sum, hunk) => sum + hunk.lines.filter((line) => line.startsWith("+")).length,
-            0,
-          ),
-          deletions: patch.hunks.reduce(
-            (sum, hunk) => sum + hunk.lines.filter((line) => line.startsWith("-")).length,
-            0,
-          ),
-        }
-      })
-    } catch (error) {
-      return []
-    }
-  })
-
   const revertRevertedMessages = createMemo(() => {
     const messageID = revertMessageID()
     if (!messageID) return []
@@ -932,57 +907,16 @@ export function Session() {
     return {
       messageID: info.messageID,
       reverted: revertRevertedMessages(),
-      diff: info.diff,
-      diffFiles: revertDiffFiles(),
+      dataset: info.dataset,
     }
   })
 
   const dialog = useDialog()
   const renderer = useRenderer()
-  const runtimeQuery = createMemo(() => sync.data.runtimeQuery[route.sessionID])
-  const runtimeQueue = createMemo(() => sync.data.runtimeQueue[route.sessionID])
-  const workflow = createMemo(() => sync.data.workflow[route.sessionID])
   const promptHint = createMemo(() => {
-    const workflowState = workflow()
-    if (workflowState?.repairOnly || workflowState?.verifierStatus === "block") {
-      return <text fg={theme.error}>verifier blocked; repair the failed stage before report</text>
-    }
-    const query = runtimeQuery()
-    if (query && query.phase !== "idle") {
-      return (
-        <text fg={theme.textMuted}>
-          {query.phase}
-          {query.action ? `:${query.action}` : ""}
-          {(runtimeQueue()?.pending ?? 0) > 0 ? ` queue ${runtimeQueue()?.pending}` : ""}
-        </text>
-      )
-    }
     return undefined
   })
-  const promptRight = createMemo(() => {
-    const workflowState = workflow()
-    if (!workflowState?.activeStage && !workflowState?.verifierStatus && !workflowState?.activeCoordinatorAgent) return
-    const workflowLocale = workflowState.workflowLocale ?? "en"
-    return (
-      <>
-        <Show when={workflowState.activeStage}>
-          <text fg={theme.textMuted}>
-            {workflowStageLabel(workflowLocale, workflowState.activeStage) ?? workflowState.activeStage}
-          </text>
-        </Show>
-        <Show when={workflowState.verifierStatus}>
-          <text fg={workflowState.verifierStatus === "block" ? theme.error : theme.textMuted}>
-            {workflowLocale === "zh-CN"
-              ? `校验器 ${workflowState.verifierStatus === "pass" ? "通过" : workflowState.verifierStatus === "warn" ? "警告" : "阻塞"}`
-              : `verifier ${workflowState.verifierStatus}`}
-          </text>
-        </Show>
-        <Show when={workflowState.activeCoordinatorAgent}>
-          <text fg={theme.textMuted}>{workflowState.activeCoordinatorAgent}</text>
-        </Show>
-      </>
-    )
-  })
+  const promptRight = createMemo(() => undefined)
 
   // snap to bottom when session changes
   createEffect(on(() => route.sessionID, toBottom))
@@ -1067,26 +1001,16 @@ export function Session() {
                               paddingLeft={2}
                               backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
                             >
-                              <text fg={theme.textMuted}>{revert()!.reverted.length} message reverted</text>
+                              <text fg={theme.textMuted}>已撤回 {revert()!.reverted.length} 条消息</text>
                               <text fg={theme.textMuted}>
-                                <span style={{ fg: theme.text }}>{keybind.print("messages_redo")}</span> or /redo to
-                                restore
+                                <span style={{ fg: theme.text }}>{keybind.print("messages_redo")}</span> 或 /redo 恢复
                               </text>
-                              <Show when={revert()!.diffFiles?.length}>
+                              <Show when={revert()!.dataset}>
                                 <box marginTop={1}>
-                                  <For each={revert()!.diffFiles}>
-                                    {(file) => (
-                                      <text fg={theme.text}>
-                                        {file.filename}
-                                        <Show when={file.additions > 0}>
-                                          <span style={{ fg: theme.diffAdded }}> +{file.additions}</span>
-                                        </Show>
-                                        <Show when={file.deletions > 0}>
-                                          <span style={{ fg: theme.diffRemoved }}> -{file.deletions}</span>
-                                        </Show>
-                                      </text>
-                                    )}
-                                  </For>
+                                  <text fg={theme.text}>
+                                    数据已回到 <span style={{ fg: theme.success }}>{revert()!.dataset!.stageId}</span>
+                                  </text>
+                                  <text fg={theme.textMuted}>撤销的操作：{revert()!.dataset!.undoneAction}</text>
                                 </box>
                               </Show>
                             </box>
@@ -1133,7 +1057,6 @@ export function Session() {
               <Show when={permissions().length === 0 && questions().length > 0}>
                 <QuestionPrompt request={questions()[0]} />
               </Show>
-              <SubagentFooter />
               <Prompt
                 visible={!session()?.parentID && permissions().length === 0 && questions().length === 0}
                 ref={(r) => {
@@ -1204,12 +1127,15 @@ function UserMessage(props: {
   const local = useLocal()
   const text = createMemo(() => props.parts.flatMap((x) => (x.type === "text" && !x.synthetic ? [x] : []))[0])
   const files = createMemo(() => props.parts.flatMap((x) => (x.type === "file" ? [x] : [])))
-  const sync = useSync()
   const { theme } = useTheme()
-  const [hover, setHover] = createSignal(false)
   const queued = createMemo(() => props.pending && props.message.id > props.pending)
   const color = createMemo(() => (queued() ? theme.accent : local.agent.color(props.message.agent)))
-  const metadataVisible = createMemo(() => queued() || ctx.showTimestamps())
+  const queuedTask = createMemo(() =>
+    pendingTaskLabel({
+      text: text()?.text,
+      files: files().map((file) => ({ filename: file.filename, url: file.url, mime: file.mime })),
+    }),
+  )
 
   const compaction = createMemo(() => props.parts.find((x) => x.type === "compaction"))
 
@@ -1218,28 +1144,18 @@ function UserMessage(props: {
       <Show when={text()}>
         <box
           id={props.message.id}
-          border={["left"]}
-          borderColor={color()}
-          customBorderChars={SplitBorder.customBorderChars}
-          marginTop={props.index === 0 ? 0 : 1}
+          onMouseUp={props.onMouseUp}
+          marginTop={props.index === 0 ? 0 : 2}
+          paddingLeft={1}
+          flexShrink={0}
         >
-          <box
-            onMouseOver={() => {
-              setHover(true)
-            }}
-            onMouseOut={() => {
-              setHover(false)
-            }}
-            onMouseUp={props.onMouseUp}
-            paddingTop={1}
-            paddingBottom={1}
-            paddingLeft={2}
-            backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
-            flexShrink={0}
-          >
+          <box flexDirection="row" gap={1}>
+            <text fg={color()} flexShrink={0}>●</text>
+            <text fg={theme.textMuted} flexShrink={0}>用户</text>
             <text fg={theme.text}>{text()?.text}</text>
+          </box>
             <Show when={files().length}>
-              <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
+              <box flexDirection="row" paddingLeft={3} paddingTop={1} gap={1} flexWrap="wrap">
                 <For each={files()}>
                   {(file) => {
                     const bg = createMemo(() => {
@@ -1250,7 +1166,7 @@ function UserMessage(props: {
                     return (
                       <text fg={theme.text}>
                         <span style={{ bg: bg(), fg: theme.background }}> {MIME_BADGE[file.mime] ?? file.mime} </span>
-                        <span style={{ bg: theme.backgroundElement, fg: theme.textMuted }}> {file.filename} </span>
+                        <span style={{ fg: theme.textMuted }}> {file.filename} </span>
                       </text>
                     )
                   }}
@@ -1261,19 +1177,19 @@ function UserMessage(props: {
               when={queued()}
               fallback={
                 <Show when={ctx.showTimestamps()}>
-                  <text fg={theme.textMuted}>
-                    <span style={{ fg: theme.textMuted }}>
-                      {Locale.todayTimeOrDateTime(props.message.time.created)}
-                    </span>
+                  <text paddingLeft={3} fg={theme.textMuted}>
+                    {Locale.todayTimeOrDateTime(props.message.time.created)}
                   </text>
                 </Show>
               }
             >
-              <text fg={theme.textMuted}>
-                <span style={{ bg: theme.accent, fg: theme.backgroundPanel, bold: true }}> QUEUED </span>
-              </text>
+              <box paddingLeft={3} flexDirection="row" gap={1} flexShrink={0}>
+                <Show when={queuedTask()} fallback={<text fg={theme.textMuted}>等待回复</text>}>
+                  <text fg={theme.primary}>{queuedTask()}</text>
+                  <ProgressDots />
+                </Show>
+              </box>
             </Show>
-          </box>
         </box>
       </Show>
       <Show when={compaction()}>
@@ -1291,22 +1207,8 @@ function UserMessage(props: {
 
 function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; last: boolean }) {
   const ctx = use()
-  const local = useLocal()
   const { theme } = useTheme()
   const sync = useSync()
-  const messages = createMemo(() => sync.data.message[props.message.sessionID] ?? [])
-
-  const final = createMemo(() => {
-    return props.message.finish && !["tool-calls", "unknown"].includes(props.message.finish)
-  })
-
-  const duration = createMemo(() => {
-    if (!final()) return 0
-    if (!props.message.time.completed) return 0
-    const user = messages().find((x) => x.role === "user" && x.id === props.message.parentID)
-    if (!user || !user.time) return 0
-    return props.message.time.completed - user.time.created
-  })
 
   const visibleError = createMemo(() => {
     const error = props.message.error
@@ -1340,43 +1242,19 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
       <Show when={visibleError()}>
         <box
           border={["left"]}
-          paddingTop={1}
-          paddingBottom={1}
-          paddingLeft={2}
+          paddingTop={0}
+          paddingBottom={0}
+          paddingLeft={1}
           marginTop={1}
-          backgroundColor={theme.backgroundPanel}
           customBorderChars={SplitBorder.customBorderChars}
           borderColor={theme.error}
         >
           <text fg={theme.textMuted}>{visibleError()}</text>
         </box>
       </Show>
-      <Switch>
-        <Match when={props.last || final() || props.message.error?.name === "MessageAbortedError"}>
-          <box paddingLeft={3}>
-            <text marginTop={1}>
-              <span
-                style={{
-                  fg:
-                    props.message.error?.name === "MessageAbortedError"
-                      ? theme.textMuted
-                      : local.agent.color(props.message.agent),
-                }}
-              >
-                ▣{" "}
-              </span>{" "}
-              <span style={{ fg: theme.text }}>{Locale.titlecase(props.message.mode)}</span>
-              <span style={{ fg: theme.textMuted }}> · {props.message.modelID}</span>
-              <Show when={duration()}>
-                <span style={{ fg: theme.textMuted }}> · {Locale.duration(duration())}</span>
-              </Show>
-              <Show when={props.message.error?.name === "MessageAbortedError"}>
-                <span style={{ fg: theme.textMuted }}> · interrupted</span>
-              </Show>
-            </text>
-          </box>
-        </Match>
-      </Switch>
+      <Show when={props.message.error?.name === "MessageAbortedError"}>
+        <text paddingLeft={2} fg={theme.textMuted}>回答已停止</text>
+      </Show>
     </>
   )
 }
@@ -1392,6 +1270,7 @@ const PART_MAPPING = {
 const INTERNAL_ANALYSIS_MESSAGE_TOOLS = new Set([
   "data_import",
   "econometrics",
+  ...WORKFLOW_ANALYSIS_TOOL_IDS,
   "heterogeneity_runner",
   "research_brief",
   "paper_draft",
@@ -1506,35 +1385,37 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
   const sync = useSync()
   const renderer = useRenderer()
   const content = createMemo(() => {
-    return props.part.text.replace("[REDACTED]", "").trim()
+    const text = props.part.text.replace("[REDACTED]", "").trim()
+    return containsEngineInternalData(text) ? "" : text
   })
   const expanded = createMemo(() => ctx.reasoningExpanded(props.part.id))
   const shouldShow = createMemo(() => {
-    if (!content() || !ctx.showThinking()) return false
-    if (isAnalysisAssistantMessage(props.message, sync) && !ctx.showDetails()) return false
-    return !isAnalysisAssistantWaitingForAccess(props.message, sync)
+    return shouldShowReasoning({
+      hasContent: Boolean(content()),
+      showThinking: ctx.showThinking(),
+      isAnalysis: isAnalysisAssistantMessage(props.message, sync),
+      waitingForAccess: isAnalysisAssistantWaitingForAccess(props.message, sync),
+    })
   })
   return (
     <Show when={shouldShow()}>
       <box
         id={"text-" + props.part.id}
-        paddingLeft={2}
+        paddingLeft={1}
         marginTop={1}
         flexDirection="column"
         border={["left"]}
-        paddingTop={1}
-        paddingBottom={1}
+        paddingTop={0}
+        paddingBottom={0}
         customBorderChars={SplitBorder.customBorderChars}
-        borderColor={theme.backgroundElement}
-        backgroundColor={theme.backgroundPanel}
+        borderColor={theme.borderSubtle}
         onMouseUp={() => {
           if (renderer.getSelection()?.getSelectedText()) return
           ctx.toggleReasoningExpanded(props.part.id)
         }}
       >
         <text fg={theme.textMuted} paddingLeft={1}>
-          {expanded() ? "[-] Thinking" : "[+] Thinking"}
-          <span style={{ fg: theme.textMuted }}> {expanded() ? "click to collapse" : "click to expand"}</span>
+          {expanded() ? "收起分析过程" : "展开分析过程"}
         </text>
         <Show when={expanded()}>
           <code
@@ -1603,11 +1484,11 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
   })
   return (
     <Show when={content()}>
-      <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
+      <box id={"text-" + props.part.id} paddingLeft={2} marginTop={2} flexShrink={0}>
         <code
           filetype="markdown"
           drawUnstyledText={false}
-          streaming={true}
+          streaming={false}
           syntaxStyle={syntax()}
           content={content()}
           conceal={ctx.conceal()}
@@ -1623,31 +1504,47 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
 function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMessage }) {
   const ctx = use()
   const sync = useSync()
+  const { theme } = useTheme()
   const latestUserText = createMemo(() => latestUserTextForMessage(props.message, sync))
   const metadata = createMemo(() => (props.part.state.status === "pending" ? {} : (props.part.state.metadata ?? {})))
   const display = createMemo(() => readToolDisplay(metadata()))
   const waitingForAccess = createMemo(() => isAnalysisAssistantWaitingForAccess(props.message, sync))
-  const analysisToolErrorText = createMemo(() =>
-    analysisErrorDisplayText({
+  const showProgress = createMemo(
+    () =>
+      !ctx.showDetails() &&
+      props.part.state.status !== "error" &&
+      ([
+        "data_import",
+        "regression_table",
+        "heterogeneity_runner",
+        "research_brief",
+        "paper_draft",
+        "slide_generator",
+      ].includes(props.part.tool) || isWorkflowAnalysisTool(props.part.tool)),
+  )
+  const analysisToolErrorText = createMemo(() => {
+    if (props.part.state.status !== "error" || !isAnalysisAssistantMessage(props.message, sync)) return undefined
+    return analysisErrorDisplayText({
       text: props.part.state.status === "error" ? props.part.state.error : undefined,
-      isAnalysis: isAnalysisAssistantMessage(props.message, sync),
+      isAnalysis: true,
       showDetails: ctx.showDetails(),
       waitingForAccess: waitingForAccess(),
-    }),
-  )
+    })
+  })
 
   // Hide tool if showDetails is false and tool completed successfully
   const shouldHide = createMemo(() => {
-    if (ctx.showDetails()) return false
     if (analysisToolErrorText()) return false
+    const analysisTurn = isAnalysisTurn(assistantToolsForMessage(props.message, sync), latestUserText())
+    // 分析详情只允许展开可读说明；内部工具、路径和原始产物永不展示。
+    if (display()?.visibility === "internal_only") return true
+    if (analysisTurn && INTERNAL_ANALYSIS_MESSAGE_TOOLS.has(props.part.tool)) return true
+    if (ctx.showDetails()) return false
     if (waitingForAccess()) {
       if (props.part.state.status !== "completed") return true
-      if (display()?.visibility === "internal_only") return true
       return INTERNAL_ANALYSIS_MESSAGE_TOOLS.has(props.part.tool)
     }
-    if (display()?.visibility === "internal_only") return true
-    if (!isAnalysisTurn(assistantToolsForMessage(props.message, sync), latestUserText())) return false
-    return INTERNAL_ANALYSIS_MESSAGE_TOOLS.has(props.part.tool)
+    return false
   })
 
   const toolprops = {
@@ -1674,8 +1571,10 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
   }
 
   return (
-    <Show when={!shouldHide()}>
-      <Switch>
+    <Show when={!shouldHide()} fallback={<Show when={showProgress()}><AnalysisProgress part={props.part} /></Show>}>
+      <Show
+        when={analysisToolErrorText()}
+        fallback={<Switch>
         <Match when={props.part.tool === "bash" || props.part.tool === "shell"}>
           <Bash {...toolprops} />
         </Match>
@@ -1715,8 +1614,73 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={true}>
           <GenericTool {...toolprops} />
         </Match>
-      </Switch>
+      </Switch>}
+      >
+        <box marginTop={1} paddingLeft={2} flexDirection="row" gap={1} flexShrink={0}>
+          <text fg={theme.error}>×</text>
+          <text fg={theme.error}>{analysisToolErrorText()}</text>
+        </box>
+      </Show>
     </Show>
+  )
+}
+
+function analysisProgressLabel(part: ToolPart) {
+  const view = readToolAnalysisView(part.state.status === "pending" ? undefined : part.state.metadata)
+  const step = view?.step
+  const action = String(part.state.input?.action ?? "")
+
+  if (step === "data_import(import)" || action === "import") return "导入数据"
+  if (step === "data_import(qa)" || action === "qa") return "检查数据质量"
+  if (step === "data_import(preprocess)" || action === "preprocess") return "清洗数据"
+  if (step === "data_import(filter)" || action === "filter") return "筛选样本"
+  if (step === "data_import(describe)" || action === "describe") return "生成描述统计"
+  if (step === "data_import(correlation)" || action === "correlation") return "计算相关性"
+  if (part.tool === "data_import") return "处理数据"
+  if (part.tool === "econometrics_recommend") return "推荐计量方法"
+  if (part.tool === "hdfe_regression") return "进行高维固定效应回归"
+  if (part.tool === "did2s") return "进行两阶段双重差分"
+  if (part.tool === "did_event_study_saturated") return "进行现代事件研究"
+  if (isWorkflowEstimateTool(part.tool)) return "进行计量分析"
+  if (part.tool === "regression_table") return "整理回归结果表"
+  if (part.tool === "heterogeneity_runner") return "进行异质性分析"
+  if (part.tool === "research_brief") return "整理研究摘要"
+  if (part.tool === "paper_draft") return "生成论文草稿"
+  if (part.tool === "slide_generator") return "生成演示材料"
+  return "处理请求"
+}
+
+function AnalysisProgress(props: { part: ToolPart }) {
+  const { theme } = useTheme()
+  const completed = createMemo(() => props.part.state.status === "completed")
+  const label = createMemo(() => analysisProgressLabel(props.part))
+
+  return (
+    <box marginTop={1} paddingLeft={2} flexDirection="row" gap={1} flexShrink={0}>
+      <text fg={completed() ? theme.success : theme.primary}>{completed() ? "✓" : "·"}</text>
+      <text fg={theme.textMuted}>{completed() ? `已完成：${label()}` : `正在${label()}`}</text>
+      <Show when={!completed()}>
+        <ProgressDots />
+      </Show>
+    </box>
+  )
+}
+
+function ProgressDots() {
+  const { theme } = useTheme()
+  const [activeDot, setActiveDot] = createSignal(0)
+
+  onMount(() => {
+    const timer = setInterval(() => setActiveDot((current) => (current + 1) % 3), 350)
+    onCleanup(() => clearInterval(timer))
+  })
+
+  return (
+    <text flexShrink={0}>
+      <For each={[0, 1, 2]}>
+        {(dot) => <span style={{ fg: activeDot() === dot ? theme.primary : theme.border }}>.</span>}
+      </For>
+    </text>
   )
 }
 
@@ -1960,14 +1924,13 @@ function BlockTool(props: { title: string; children: JSX.Element; onClick?: () =
   return (
     <box
       border={["left"]}
-      paddingTop={1}
-      paddingBottom={1}
-      paddingLeft={2}
+      paddingTop={0}
+      paddingBottom={0}
+      paddingLeft={1}
       marginTop={1}
       gap={1}
-      backgroundColor={hover() ? theme.backgroundMenu : theme.backgroundPanel}
       customBorderChars={SplitBorder.customBorderChars}
-      borderColor={theme.background}
+      borderColor={theme.borderSubtle}
       onMouseOver={() => props.onClick && setHover(true)}
       onMouseOut={() => setHover(false)}
       onMouseUp={() => {
@@ -1975,7 +1938,7 @@ function BlockTool(props: { title: string; children: JSX.Element; onClick?: () =
         props.onClick?.()
       }}
     >
-      <text paddingLeft={3} fg={theme.textMuted}>
+      <text paddingLeft={1} fg={theme.textMuted}>
         {props.title}
       </text>
       {props.children}
@@ -2065,11 +2028,6 @@ function Write(props: ToolProps<typeof WriteTool>) {
     return props.input.content
   })
 
-  const diagnostics = createMemo(() => {
-    const filePath = Filesystem.normalizePath(props.input.filePath ?? "")
-    return props.metadata.diagnostics?.[filePath] ?? []
-  })
-
   // 默认只说写了哪个文件、多大，正文不铺给用户。
   const sizeSummary = createMemo(() => {
     const content = code()
@@ -2080,7 +2038,7 @@ function Write(props: ToolProps<typeof WriteTool>) {
 
   return (
     <Switch>
-      <Match when={ctx.showDetails() && props.metadata.diagnostics !== undefined}>
+      <Match when={ctx.showDetails()}>
         <BlockTool title={"# Wrote " + normalizePath(props.input.filePath!)} part={props.part}>
           <line_number fg={theme.textMuted} minWidth={3} paddingRight={1}>
             <code
@@ -2091,15 +2049,6 @@ function Write(props: ToolProps<typeof WriteTool>) {
               content={code()}
             />
           </line_number>
-          <Show when={diagnostics().length}>
-            <For each={diagnostics()}>
-              {(diagnostic) => (
-                <text fg={theme.error}>
-                  Error [{diagnostic.range.start.line}:{diagnostic.range.start.character}]: {diagnostic.message}
-                </text>
-              )}
-            </For>
-          </Show>
         </BlockTool>
       </Match>
       <Match when={true}>
@@ -2239,12 +2188,6 @@ function Edit(props: ToolProps<typeof EditTool>) {
 
   const diffContent = createMemo(() => props.metadata.diff)
 
-  const diagnostics = createMemo(() => {
-    const filePath = Filesystem.normalizePath(props.input.filePath ?? "")
-    const arr = props.metadata.diagnostics?.[filePath] ?? []
-    return arr.filter((x) => x.severity === 1).slice(0, 3)
-  })
-
   // 默认不铺 diff，只报告改动规模（+N -M），完整 diff 留给 /details。
   const changeSummary = createMemo(() => {
     const diff = diffContent()
@@ -2284,18 +2227,6 @@ function Edit(props: ToolProps<typeof EditTool>) {
               removedLineNumberBg={theme.diffRemovedLineNumberBg}
             />
           </box>
-          <Show when={diagnostics().length}>
-            <box>
-              <For each={diagnostics()}>
-                {(diagnostic) => (
-                  <text fg={theme.error}>
-                    Error [{diagnostic.range.start.line + 1}:{diagnostic.range.start.character + 1}]{" "}
-                    {diagnostic.message}
-                  </text>
-                )}
-              </For>
-            </box>
-          </Show>
         </BlockTool>
       </Match>
       <Match when={true}>

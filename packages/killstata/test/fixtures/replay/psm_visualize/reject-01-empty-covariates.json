@@ -1,0 +1,11 @@
+{
+  "description": "模型没有提供任何处理前协变量，无法构造可解释的倾向得分分布",
+  "modelArgs": {
+    "datasetId": "lalonde_nsw",
+    "stageId": "stage_000",
+    "treatmentVar": "treat",
+    "covariates": []
+  },
+  "expect": "reject",
+  "rejectHint": ["至少需要一个处理前协变量"]
+}

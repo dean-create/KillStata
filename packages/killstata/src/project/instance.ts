@@ -51,12 +51,13 @@ export const Instance = {
    * Check if a path is within the project boundary.
    * Returns true if path is inside Instance.directory OR Instance.worktree.
    * Paths within the worktree but outside the working directory should not trigger external_directory permission.
+   *
+   * worktree 现在永远是一个真实的项目根目录（见 Project.fromDirectory）。此处过去需要一句
+   * `if (worktree === "/") return false` 的补丁，因为非 git 项目会把 worktree 设成 "/"，
+   * 那会让任何绝对路径都"落在项目内"，external_directory 权限形同虚设。根因已修，补丁已移除。
    */
   containsPath(filepath: string) {
     if (Filesystem.contains(Instance.directory, filepath)) return true
-    // Non-git projects set worktree to "/" which would match ANY absolute path.
-    // Skip worktree check in this case to preserve external_directory permissions.
-    if (Instance.worktree === "/") return false
     return Filesystem.contains(Instance.worktree, filepath)
   },
   state<S>(init: () => S, dispose?: (state: Awaited<S>) => Promise<void>): () => S {

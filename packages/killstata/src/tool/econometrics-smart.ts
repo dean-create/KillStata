@@ -40,12 +40,7 @@ export type SmartDatasetProfile = {
 
 export type SmartRecommendation = {
   dataStructure: DataStructureKind
-  recommendedMethod:
-    | "ols_regression"
-    | "panel_fe_regression"
-    | "did_static"
-    | "iv_2sls"
-    | "psm_double_robust"
+  recommendedMethod: "ols_regression" | "panel_fe_regression"
   covariance: CovarianceStrategy
   preferredEntityVar?: string
   preferredTimeVar?: string
@@ -176,17 +171,17 @@ export function recommendEconometricsPlan(profile: SmartDatasetProfile): SmartRe
     covariance = "cluster"
     confidence = preferredEntityVar && preferredTimeVar ? "high" : "medium"
     reasons.push("Detected repeated observations across entity and time dimensions, so a panel baseline is appropriate.")
-    nextBestMethods.push("did_static", "iv_2sls", "ols_regression")
+    nextBestMethods.push("ols_regression")
 
     if (preferredTreatmentVar && /did/i.test(preferredTreatmentVar)) {
-      reasons.push("The treatment variable name looks like a DID indicator, so DID-family models are plausible robustness extensions.")
-      nextBestMethods.unshift("did_static")
+      warnings.push(
+        "A DID-like treatment name was detected, but a column name is not an identification strategy; confirm timing and treatment design before choosing DID.",
+      )
     }
 
     if ((profile.entityCount ?? 0) < 10) {
-      covariance = "robust"
       warnings.push(`Only ${profile.entityCount ?? 0} clusters were detected; clustered standard errors may be unstable.`)
-      reasons.push("Because the cluster count is very low, robust standard errors are safer as the default baseline.")
+      reasons.push("The panel baseline keeps entity-clustered inference, while the low cluster count is reported as a limitation.")
     } else if ((profile.entityCount ?? 0) < 30) {
       warnings.push(`Cluster count is modest (${profile.entityCount}); report clustered SE with caution and compare against robust SE.`)
     }
@@ -207,22 +202,19 @@ export function recommendEconometricsPlan(profile: SmartDatasetProfile): SmartRe
     covariance = "robust"
     confidence = "medium"
     reasons.push("Detected repeated observations over time without a stable entity identifier, which fits repeated cross-section OLS as a baseline.")
-    nextBestMethods.push("psm_double_robust", "ols_regression")
+    nextBestMethods.push("ols_regression")
   } else {
     recommendedMethod = "ols_regression"
     covariance = "robust"
     confidence = "medium"
     reasons.push("No reliable panel structure was detected, so cross-sectional OLS is the safest baseline family.")
-    nextBestMethods.push("psm_double_robust", "iv_2sls")
+    nextBestMethods.push("ols_regression")
   }
 
   if (profile.candidateInstrumentVars.length > 0) {
-    warnings.push(`Instrument-like variables detected: ${profile.candidateInstrumentVars.join(", ")}.`)
-    nextBestMethods.unshift("iv_2sls")
-    if (profile.dataStructure !== "panel") {
-      recommendedMethod = "iv_2sls"
-      reasons.push("Instrument-like variable names were detected, so IV/2SLS should be considered for the primary specification.")
-    }
+    warnings.push(
+      `Instrument-like variables detected: ${profile.candidateInstrumentVars.join(", ")}; instrument validity must be confirmed by the user or research design.`,
+    )
   }
 
   if (profile.rowCount < 100) {
@@ -241,7 +233,7 @@ export function recommendEconometricsPlan(profile: SmartDatasetProfile): SmartRe
   postEstimationRules.push(
     "If heteroskedasticity tests fail, switch nonrobust inference to robust standard errors.",
     "If clustered SE are requested but the cluster count is too low, keep the warning and add a robust-SE comparison.",
-    "If panel keys are incomplete or duplicate entity-time rows remain unresolved, downgrade FE to pooled OLS and report the downgrade clearly.",
+    "If panel keys are incomplete or duplicate entity-time rows remain unresolved, block FE until the keys are repaired; do not change estimators automatically.",
     "If multicollinearity is severe, reduce overlapping controls before adding more robustness layers.",
   )
 

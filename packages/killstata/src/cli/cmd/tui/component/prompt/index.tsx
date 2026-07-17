@@ -1,7 +1,6 @@
 import path from "path"
 import { BoxRenderable, TextareaRenderable, MouseEvent, PasteEvent, t, dim, fg } from "@opentui/core"
-import { createEffect, createMemo, type JSX, onMount, createSignal, onCleanup, Show, Switch, Match, on } from "solid-js"
-import "opentui-spinner/solid"
+import { createEffect, createMemo, type JSX, onMount, createSignal, onCleanup, Show, on } from "solid-js"
 import { useLocal } from "@tui/context/local"
 import { useTheme } from "@tui/context/theme"
 import { EmptyBorder } from "@tui/component/border"
@@ -26,15 +25,14 @@ import { TuiEvent } from "../../event"
 import { iife } from "@/util/iife"
 import { Locale } from "@/util/locale"
 import { formatDuration } from "@/util/format"
-import { createColors, createFrames } from "../../ui/spinner.ts"
 import { useDialog } from "@tui/ui/dialog"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
 import { DialogAlert } from "../../ui/dialog-alert"
 import { useToast } from "../../ui/toast"
-import { useKV } from "../../context/kv"
 import { useTextareaKeybindings } from "../textarea-keybindings"
 import {
   attachmentLabel,
+  dataFileLabel,
   normalizePastedText,
   pastedTextLabel,
   resolvePastedFilePath,
@@ -66,12 +64,8 @@ export type PromptRef = {
   submit(): void
 }
 
-const PLACEHOLDERS = [
-  "导入 dta 并生成 canonical parquet",
-  "检查 panel key 和变量类型",
-  "做双向固定效应基准回归",
-]
-const SHELL_PLACEHOLDERS = ["bun x tsc -p packages/killstata/tsconfig.json --noEmit", "git status --short"]
+const PLACEHOLDERS = ["输入你的问题..."]
+const SHELL_PLACEHOLDERS = ["此模式仅供内部诊断使用"]
 
 let stashed: { prompt: PromptInfo; cursor: number } | undefined
 
@@ -104,7 +98,6 @@ export function Prompt(props: PromptProps) {
   const command = useCommandDialog()
   const renderer = useRenderer()
   const { theme, syntax } = useTheme()
-  const kv = useKV()
   const list = createMemo(() => props.placeholders?.normal ?? PLACEHOLDERS)
   const shell = createMemo(() => props.placeholders?.shell ?? SHELL_PLACEHOLDERS)
   const hasRightContent = createMemo(() => Boolean(props.right))
@@ -519,25 +512,27 @@ export function Prompt(props: PromptProps) {
   }
 
   command.register(() =>
-    sync.data.command.map((serverCommand) => ({
-      title: `/${serverCommand.name}`,
-      value: `server.command.${serverCommand.name}`,
-      category: serverCommand.workflowAware ? "数据与计量" : serverCommand.mcp ? "MCP 命令" : "命令",
-      description: commandCapabilityDescription(serverCommand),
-      suggested: Boolean(serverCommand.workflowAware && props.sessionID),
-      slash: {
-        name: serverCommand.name,
-      },
-      onSelect: (dialog) => {
-        const text = `/${serverCommand.name} `
-        input.extmarks.clear()
-        input.setText(text)
-        input.cursorOffset = Bun.stringWidth(text)
-        setStore("prompt", { input: text, parts: [] })
-        setStore("extmarkToPartIndex", new Map())
-        dialog.clear()
-      },
-    })),
+    sync.data.command
+      .filter((serverCommand) => !serverCommand.mcp)
+      .map((serverCommand) => ({
+        title: `/${serverCommand.name}`,
+        value: `server.command.${serverCommand.name}`,
+        category: serverCommand.workflowAware ? "数据与计量" : "命令",
+        description: commandCapabilityDescription(serverCommand),
+        suggested: Boolean(serverCommand.workflowAware && props.sessionID),
+        slash: {
+          name: serverCommand.name,
+        },
+        onSelect: (dialog) => {
+          const text = `/${serverCommand.name} `
+          input.extmarks.clear()
+          input.setText(text)
+          input.cursorOffset = Bun.stringWidth(text)
+          setStore("prompt", { input: text, parts: [] })
+          setStore("extmarkToPartIndex", new Map())
+          dialog.clear()
+        },
+      })),
   )
 
   command.register(() => [
@@ -744,7 +739,7 @@ export function Prompt(props: PromptProps) {
   }
   const exit = useExit()
 
-  // 选中数据文件后，输入框里显示一枚紧凑的附件标记（[数据文件 panel.xlsx]），
+  // 选中数据文件后，输入框里显示一枚完整底色的附件标签，
   // 真正发给模型的是完整路径 —— 由 pasteText 的 virtual/real 映射负责。
   //
   // 关键：这里传的是**路径**而不是文件内容。图片走的 pasteAttachment 会把 base64 正文
@@ -753,7 +748,7 @@ export function Prompt(props: PromptProps) {
   function insertDataFilePath(filePath: string) {
     const needsSpace = input.plainText.length > 0 && !input.plainText.endsWith(" ")
     if (needsSpace) input.insertText(" ")
-    pasteText(filePath, `[数据文件 ${path.basename(filePath)}]`)
+    pasteText(filePath, dataFileLabel(path.basename(filePath)))
     input.focus()
   }
 
@@ -838,42 +833,6 @@ export function Prompt(props: PromptProps) {
     return
   }
 
-  const highlight = createMemo(() => {
-    if (keybind.leader) return theme.border
-    if (store.mode === "shell") return theme.primary
-    const agent = local.agent.current()
-    if (!agent) return theme.border
-    return local.agent.color(agent.name)
-  })
-
-  const showVariant = createMemo(() => {
-    const variants = local.model.variant.list()
-    if (variants.length === 0) return false
-    const current = local.model.variant.current()
-    return !!current
-  })
-
-  const spinnerDef = createMemo(() => {
-    const agent = local.agent.current()
-    const color = agent ? local.agent.color(agent.name) : theme.border
-    return {
-      frames: createFrames({
-        color,
-        style: "pulse",
-        inactiveFactor: 0.3,
-        // enableFading: false,
-        minAlpha: 0.1,
-      }),
-      color: createColors({
-        color,
-        style: "pulse",
-        inactiveFactor: 0.3,
-        // enableFading: false,
-        minAlpha: 0.1,
-      }),
-    }
-  })
-
   return (
     <>
       <Autocomplete
@@ -896,25 +855,26 @@ export function Prompt(props: PromptProps) {
         agentStyleId={agentStyleId}
         promptPartTypeId={() => promptPartTypeId}
       />
-      <box ref={(r) => (anchor = r)} visible={props.visible !== false}>
+      <box ref={(r) => (anchor = r)} visible={props.visible !== false} width="100%">
         <box
           border={["left"]}
-          borderColor={highlight()}
+          borderColor={theme.borderSubtle}
           customBorderChars={{
             ...EmptyBorder,
-            vertical: "┃",
-            bottomLeft: "╹",
+            vertical: "│",
+            bottomLeft: "│",
           }}
         >
           <box
-            paddingLeft={2}
-            paddingRight={2}
-            paddingTop={1}
+            paddingLeft={1}
+            paddingRight={1}
+            paddingTop={0}
             flexShrink={0}
-            backgroundColor={theme.backgroundElement}
+            backgroundColor={theme.background}
             flexGrow={1}
+            minWidth={0}
           >
-            <box flexDirection="row" gap={1}>
+            <box flexDirection="row" gap={1} alignItems="flex-start" width="100%" minWidth={0}>
               {/* 数据文件入口。终端没有真正的文件选择器，所以这个标志是「按 Ctrl+O 打开
                   数据文件浏览器」的可见提示 —— 否则用户根本不知道有这个功能。 */}
               <text
@@ -925,352 +885,289 @@ export function Prompt(props: PromptProps) {
                 📎
               </text>
               <textarea
-              placeholder={
-                props.showPlaceholder === false
-                  ? undefined
-                  : store.mode === "shell"
-                    ? `输入要运行的命令... "${shell()[store.placeholder % shell().length]}"`
-                    : props.sessionID
-                      ? undefined
-                    : `输入你的问题... "${list()[store.placeholder % list().length]}"`
-              }
-              textColor={keybind.leader ? theme.textMuted : theme.text}
-              focusedTextColor={keybind.leader ? theme.textMuted : theme.text}
-              minHeight={1}
-              maxHeight={6}
-              onContentChange={() => {
-                const value = input.plainText
-                setStore("prompt", "input", value)
-                autocomplete.onInput(value)
-                syncExtmarksWithPromptParts()
-              }}
-              keyBindings={textareaKeybindings()}
-              onKeyDown={async (e) => {
-                if (props.disabled) {
-                  e.preventDefault()
-                  return
+                placeholder={
+                  props.showPlaceholder === false
+                    ? undefined
+                    : store.mode === "shell"
+                      ? shell()[store.placeholder % shell().length]
+                      : props.sessionID
+                        ? undefined
+                        : list()[store.placeholder % list().length]
                 }
-                // Handle clipboard paste (Ctrl+V) - check for images first on Windows
-                // This is needed because Windows terminal doesn't properly send image data
-                // through bracketed paste, so we need to intercept the keypress and
-                // directly read from clipboard before the terminal handles it
-                if (keybind.match("input_paste", e)) {
-                  const content = await Clipboard.read()
-                  if (content?.mime.startsWith("image/")) {
-                    e.preventDefault()
-                    await pasteAttachment({
-                      filename: "clipboard",
-                      mime: content.mime,
-                      content: content.data,
-                    })
-                    return
-                  }
-                  // If no image, let the default paste behavior continue
-                }
-                if (keybind.match("data_file_picker", e)) {
-                  dialog.replace(() => <DialogDataFile onPick={insertDataFilePath} />)
-                  return
-                }
-                if (keybind.match("input_clear", e) && store.prompt.input !== "") {
-                  input.clear()
-                  input.extmarks.clear()
-                  setStore("prompt", {
-                    input: "",
-                    parts: [],
-                  })
-                  setStore("extmarkToPartIndex", new Map())
-                  return
-                }
-                if (keybind.match("app_exit", e)) {
-                  if (store.prompt.input === "") {
-                    await exit()
-                    // Don't preventDefault - let textarea potentially handle the event
+                textColor={keybind.leader ? theme.textMuted : theme.text}
+                focusedTextColor={keybind.leader ? theme.textMuted : theme.text}
+                minHeight={1}
+                maxHeight={6}
+                onContentChange={() => {
+                  const value = input.plainText
+                  setStore("prompt", "input", value)
+                  autocomplete.onInput(value)
+                  syncExtmarksWithPromptParts()
+                }}
+                keyBindings={textareaKeybindings()}
+                onKeyDown={async (e) => {
+                  if (props.disabled) {
                     e.preventDefault()
                     return
                   }
-                }
-                if (e.name === "!" && input.visualCursor.offset === 0) {
-                  setStore("placeholder", Math.floor(Math.random() * shell().length))
-                  setStore("mode", "shell")
-                  e.preventDefault()
-                  return
-                }
-                if (store.mode === "shell") {
-                  if ((e.name === "backspace" && input.visualCursor.offset === 0) || e.name === "escape") {
-                    setStore("mode", "normal")
-                    e.preventDefault()
-                    return
-                  }
-                }
-                if (store.mode === "normal") autocomplete.onKeyDown(e)
-                if (!autocomplete.visible) {
-                  if (
-                    (keybind.match("history_previous", e) && input.cursorOffset === 0) ||
-                    (keybind.match("history_next", e) && input.cursorOffset === input.plainText.length)
-                  ) {
-                    const direction = keybind.match("history_previous", e) ? -1 : 1
-                    const item = history.move(direction, input.plainText)
-
-                    if (item) {
-                      input.setText(item.input)
-                      setStore("prompt", item)
-                      setStore("mode", item.mode ?? "normal")
-                      restoreExtmarksFromParts(item.parts)
+                  // Handle clipboard paste (Ctrl+V) - check for images first on Windows
+                  // This is needed because Windows terminal doesn't properly send image data
+                  // through bracketed paste, so we need to intercept the keypress and
+                  // directly read from clipboard before the terminal handles it
+                  if (keybind.match("input_paste", e)) {
+                    const content = await Clipboard.read()
+                    if (content?.mime.startsWith("image/")) {
                       e.preventDefault()
-                      if (direction === -1) input.cursorOffset = 0
-                      if (direction === 1) input.cursorOffset = input.plainText.length
+                      await pasteAttachment({
+                        filename: "clipboard",
+                        mime: content.mime,
+                        content: content.data,
+                      })
+                      return
                     }
+                    // If no image, let the default paste behavior continue
+                  }
+                  if (keybind.match("data_file_picker", e)) {
+                    dialog.replace(() => <DialogDataFile onPick={insertDataFilePath} />)
+                    return
+                  }
+                  if (keybind.match("input_clear", e) && store.prompt.input !== "") {
+                    input.clear()
+                    input.extmarks.clear()
+                    setStore("prompt", {
+                      input: "",
+                      parts: [],
+                    })
+                    setStore("extmarkToPartIndex", new Map())
+                    return
+                  }
+                  if (keybind.match("app_exit", e)) {
+                    if (store.prompt.input === "") {
+                      await exit()
+                      // Don't preventDefault - let textarea potentially handle the event
+                      e.preventDefault()
+                      return
+                    }
+                  }
+                  if (e.name === "!" && input.visualCursor.offset === 0) {
+                    setStore("placeholder", Math.floor(Math.random() * shell().length))
+                    setStore("mode", "shell")
+                    e.preventDefault()
+                    return
+                  }
+                  if (store.mode === "shell") {
+                    if ((e.name === "backspace" && input.visualCursor.offset === 0) || e.name === "escape") {
+                      setStore("mode", "normal")
+                      e.preventDefault()
+                      return
+                    }
+                  }
+                  if (store.mode === "normal") autocomplete.onKeyDown(e)
+                  if (!autocomplete.visible) {
+                    if (
+                      (keybind.match("history_previous", e) && input.cursorOffset === 0) ||
+                      (keybind.match("history_next", e) && input.cursorOffset === input.plainText.length)
+                    ) {
+                      const direction = keybind.match("history_previous", e) ? -1 : 1
+                      const item = history.move(direction, input.plainText)
+
+                      if (item) {
+                        input.setText(item.input)
+                        setStore("prompt", item)
+                        setStore("mode", item.mode ?? "normal")
+                        restoreExtmarksFromParts(item.parts)
+                        e.preventDefault()
+                        if (direction === -1) input.cursorOffset = 0
+                        if (direction === 1) input.cursorOffset = input.plainText.length
+                      }
+                      return
+                    }
+
+                    if (keybind.match("history_previous", e) && input.visualCursor.visualRow === 0)
+                      input.cursorOffset = 0
+                    if (keybind.match("history_next", e) && input.visualCursor.visualRow === input.height - 1)
+                      input.cursorOffset = input.plainText.length
+                  }
+                }}
+                onSubmit={() => {
+                  setTimeout(() => setTimeout(() => void submit(), 0), 0)
+                }}
+                onPaste={async (event: PasteEvent) => {
+                  if (props.disabled) {
+                    event.preventDefault()
                     return
                   }
 
-                  if (keybind.match("history_previous", e) && input.visualCursor.visualRow === 0) input.cursorOffset = 0
-                  if (keybind.match("history_next", e) && input.visualCursor.visualRow === input.height - 1)
-                    input.cursorOffset = input.plainText.length
-                }
-              }}
-              onSubmit={() => {
-                setTimeout(() => setTimeout(() => void submit(), 0), 0)
-              }}
-              onPaste={async (event: PasteEvent) => {
-                if (props.disabled) {
+                  const normalizedText = normalizePastedText(event as PasteEvent & { bytes?: Uint8Array })
+                  const pastedContent = normalizedText.trim()
+                  if (!pastedContent) {
+                    command.trigger("prompt.paste")
+                    return
+                  }
                   event.preventDefault()
-                  return
-                }
 
-                const normalizedText = normalizePastedText(event as PasteEvent & { bytes?: Uint8Array })
-                const pastedContent = normalizedText.trim()
-                if (!pastedContent) {
-                  command.trigger("prompt.paste")
-                  return
-                }
-                event.preventDefault()
-
-                const filepath = resolvePastedFilePath(pastedContent)
-                const isUrl = /^(https?):\/\//.test(filepath)
-                if (!isUrl) {
-                  try {
-                    const file = Bun.file(filepath)
-                    const filename = filepath.split(/[\\/]/).at(-1) ?? file.name
-                    const lower = filepath.toLowerCase()
-                    const mime =
-                      file.type ||
-                      (lower.endsWith(".pdf") ? "application/pdf" : lower.endsWith(".svg") ? "image/svg+xml" : "")
-                    // Handle SVG as raw text content, not as base64 image
-                    if (mime === "image/svg+xml") {
-                      const content = await file.text().catch(() => {})
-                      if (content) {
-                        pasteText(content, `[SVG: ${filename ?? "image"}]`)
-                        return
+                  const filepath = resolvePastedFilePath(pastedContent)
+                  const isUrl = /^(https?):\/\//.test(filepath)
+                  if (!isUrl) {
+                    try {
+                      const file = Bun.file(filepath)
+                      const filename = filepath.split(/[\\/]/).at(-1) ?? file.name
+                      const lower = filepath.toLowerCase()
+                      const mime =
+                        file.type ||
+                        (lower.endsWith(".pdf") ? "application/pdf" : lower.endsWith(".svg") ? "image/svg+xml" : "")
+                      // Handle SVG as raw text content, not as base64 image
+                      if (mime === "image/svg+xml") {
+                        const content = await file.text().catch(() => {})
+                        if (content) {
+                          pasteText(content, `[SVG: ${filename ?? "image"}]`)
+                          return
+                        }
                       }
-                    }
-                    if (mime.startsWith("image/") || mime === "application/pdf") {
-                      const content = await file
-                        .arrayBuffer()
-                        .then((buffer) => Buffer.from(buffer).toString("base64"))
-                        .catch(() => {})
-                      if (content) {
-                        await pasteAttachment({
-                          filename,
-                          filepath,
-                          mime,
-                          content,
-                        })
-                        return
+                      if (mime.startsWith("image/") || mime === "application/pdf") {
+                        const content = await file
+                          .arrayBuffer()
+                          .then((buffer) => Buffer.from(buffer).toString("base64"))
+                          .catch(() => {})
+                        if (content) {
+                          await pasteAttachment({
+                            filename,
+                            filepath,
+                            mime,
+                            content,
+                          })
+                          return
+                        }
                       }
-                    }
-                  } catch {}
-                }
+                    } catch {}
+                  }
 
-                if (shouldSummarizePaste(pastedContent, sync.data.config.experimental?.disable_paste_summary)) {
-                  pasteText(pastedContent, pastedTextLabel(pastedContent))
-                  return
-                }
+                  if (shouldSummarizePaste(pastedContent, sync.data.config.experimental?.disable_paste_summary)) {
+                    pasteText(pastedContent, pastedTextLabel(pastedContent))
+                    return
+                  }
 
-                input.insertText(normalizedText)
+                  input.insertText(normalizedText)
 
-                // Force layout update and render for the pasted content
-                setTimeout(() => {
-                  if (!input || input.isDestroyed) return
-                  input.getLayoutNode().markDirty()
-                  renderer.requestRender()
-                }, 0)
-              }}
-              ref={(r: TextareaRenderable) => {
-                input = r
-                if (promptPartTypeId === 0) {
-                  promptPartTypeId = input.extmarks.registerType("prompt-part")
-                }
-                props.ref?.(ref)
-                setTimeout(() => {
-                  if (!input || input.isDestroyed) return
-                  input.cursorColor = theme.text
-                }, 0)
-              }}
-              onMouseDown={(r: MouseEvent) => r.target?.focus()}
-              focusedBackgroundColor={theme.backgroundElement}
-              cursorColor={theme.text}
-              syntaxStyle={syntax()}
-              flexGrow={1}
-            />
-            </box>
-            <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
-              <text fg={highlight()}>
-                {store.mode === "shell" ? "Shell" : Locale.titlecase(local.agent.current()?.name ?? "agent")}{" "}
-              </text>
-              <Show when={store.mode === "normal"}>
-                <box flexDirection="row" gap={1}>
-                  <text flexShrink={0} fg={keybind.leader ? theme.textMuted : theme.text}>
-                    {local.model.parsed().model}
-                  </text>
-                  <text fg={theme.textMuted}>{local.model.parsed().provider}</text>
-                  <Show when={showVariant()}>
-                    <text fg={theme.textMuted}>·</text>
-                    <text>
-                      <span style={{ fg: theme.warning, bold: true }}>{local.model.variant.current()}</span>
-                    </text>
-                  </Show>
-                </box>
-              </Show>
+                  // Force layout update and render for the pasted content
+                  setTimeout(() => {
+                    if (!input || input.isDestroyed) return
+                    input.getLayoutNode().markDirty()
+                    renderer.requestRender()
+                  }, 0)
+                }}
+                ref={(r: TextareaRenderable) => {
+                  input = r
+                  if (promptPartTypeId === 0) {
+                    promptPartTypeId = input.extmarks.registerType("prompt-part")
+                  }
+                  props.ref?.(ref)
+                  setTimeout(() => {
+                    if (!input || input.isDestroyed) return
+                    input.cursorColor = theme.text
+                  }, 0)
+                }}
+                onMouseDown={(r: MouseEvent) => r.target?.focus()}
+                focusedBackgroundColor={theme.background}
+                cursorColor={theme.text}
+                cursorStyle={{ style: "line", blinking: true }}
+                syntaxStyle={syntax()}
+                flexGrow={1}
+                flexShrink={1}
+                minWidth={0}
+              />
               <Show when={hasRightContent()}>
-                <box flexDirection="row" gap={1}>
+                <box flexDirection="row" flexShrink={0} gap={1}>
                   {props.right}
                 </box>
+              </Show>
+              <Show when={store.mode === "normal"}>
+                <text flexShrink={0} fg={theme.textMuted}>
+                  {keybind.print("command_list")} <span style={{ fg: theme.textMuted }}>命令</span>
+                </text>
               </Show>
             </box>
           </box>
         </box>
-        <box
-          height={1}
-          border={["left"]}
-          borderColor={highlight()}
-          customBorderChars={{
-            ...EmptyBorder,
-            vertical: theme.backgroundElement.a !== 0 ? "╹" : " ",
-          }}
-        >
-          <box
-            height={1}
-            border={["bottom"]}
-            borderColor={theme.backgroundElement}
-            customBorderChars={
-              theme.backgroundElement.a !== 0
-                ? {
-                    ...EmptyBorder,
-                    horizontal: "▀",
-                  }
-                : {
-                    ...EmptyBorder,
-                    horizontal: " ",
-                  }
-            }
-          />
-        </box>
-        <box flexDirection="row" justifyContent="space-between">
-          <Show when={status().type !== "idle"} fallback={props.hint ?? <text />}>
-            <box
-              flexDirection="row"
-              gap={1}
-              flexGrow={1}
-              justifyContent={status().type === "retry" ? "space-between" : "flex-start"}
-            >
+        <Show when={status().type === "retry" || props.hint}>
+          <box flexDirection="row">
+            <Show when={status().type === "retry"} fallback={props.hint ?? <text />}>
+              <box
+                flexDirection="row"
+                gap={1}
+                flexGrow={1}
+                justifyContent={status().type === "retry" ? "space-between" : "flex-start"}
+              >
               <box flexShrink={0} flexDirection="row" gap={1}>
-                <box marginLeft={1}>
-                  <Show when={kv.get("animations_enabled", true)} fallback={<text fg={theme.textMuted}>[⋯]</text>}>
-                    <spinner color={spinnerDef().color} frames={spinnerDef().frames} interval={40} />
-                  </Show>
-                </box>
                 <box flexDirection="row" gap={1} flexShrink={0}>
                   {(() => {
-                    const retry = createMemo(() => {
-                      const s = status()
-                      if (s.type !== "retry") return
-                      return s
-                    })
-                    const message = createMemo(() => {
-                      const r = retry()
-                      if (!r) return
-                      if (r.message.includes("exceeded your current quota") && r.message.includes("gemini"))
-                        return "gemini is way too hot right now"
-                      if (r.message.length > 80) return r.message.slice(0, 80) + "..."
-                      return r.message
-                    })
-                    const isTruncated = createMemo(() => {
-                      const r = retry()
-                      if (!r) return false
-                      return r.message.length > 120
-                    })
-                    const [seconds, setSeconds] = createSignal(0)
-                    onMount(() => {
-                      const timer = setInterval(() => {
-                        const next = retry()?.next
-                        if (next) setSeconds(Math.round((next - Date.now()) / 1000))
-                      }, 1000)
-
-                      onCleanup(() => {
-                        clearInterval(timer)
+                      const retry = createMemo(() => {
+                        const s = status()
+                        if (s.type !== "retry") return
+                        return s
                       })
-                    })
-                    const handleMessageClick = () => {
-                      const r = retry()
-                      if (!r) return
-                      if (isTruncated()) {
-                        DialogAlert.show(dialog, "Retry Error", r.message)
+                      const message = createMemo(() => {
+                        const r = retry()
+                        if (!r) return
+                        if (r.message.includes("exceeded your current quota") && r.message.includes("gemini"))
+                          return "gemini is way too hot right now"
+                        if (r.message.length > 80) return r.message.slice(0, 80) + "..."
+                        return r.message
+                      })
+                      const isTruncated = createMemo(() => {
+                        const r = retry()
+                        if (!r) return false
+                        return r.message.length > 120
+                      })
+                      const [seconds, setSeconds] = createSignal(0)
+                      onMount(() => {
+                        const timer = setInterval(() => {
+                          const next = retry()?.next
+                          if (next) setSeconds(Math.round((next - Date.now()) / 1000))
+                        }, 1000)
+
+                        onCleanup(() => {
+                          clearInterval(timer)
+                        })
+                      })
+                      const handleMessageClick = () => {
+                        const r = retry()
+                        if (!r) return
+                        if (isTruncated()) {
+                          DialogAlert.show(dialog, "Retry Error", r.message)
+                        }
                       }
-                    }
 
-                    const retryText = () => {
-                      const r = retry()
-                      if (!r) return ""
-                      const baseMessage = message()
-                      const truncatedHint = isTruncated() ? " (click to expand)" : ""
-                      const duration = formatDuration(seconds())
-                      const retryInfo = ` [retrying ${duration ? `in ${duration} ` : ""}attempt #${r.attempt}]`
-                      return baseMessage + truncatedHint + retryInfo
-                    }
+                      const retryText = () => {
+                        const r = retry()
+                        if (!r) return ""
+                        const baseMessage = message()
+                        const truncatedHint = isTruncated() ? " (click to expand)" : ""
+                        const duration = formatDuration(seconds())
+                        const retryInfo = ` [retrying ${duration ? `in ${duration} ` : ""}attempt #${r.attempt}]`
+                        return baseMessage + truncatedHint + retryInfo
+                      }
 
-                    return (
-                      <Show when={retry()}>
-                        <box onMouseUp={handleMessageClick}>
-                          <text fg={theme.error}>{retryText()}</text>
-                        </box>
-                      </Show>
-                    )
-                  })()}
+                      return (
+                        <Show when={retry()}>
+                          <box onMouseUp={handleMessageClick}>
+                            <text fg={theme.error}>{retryText()}</text>
+                          </box>
+                        </Show>
+                      )
+                    })()}
+                  </box>
                 </box>
+                <text fg={store.interrupt > 0 ? theme.primary : theme.text}>
+                  esc{" "}
+                  <span style={{ fg: store.interrupt > 0 ? theme.primary : theme.textMuted }}>
+                    {store.interrupt > 0 ? "again to interrupt" : "interrupt"}
+                  </span>
+                </text>
               </box>
-              <text fg={store.interrupt > 0 ? theme.primary : theme.text}>
-                esc{" "}
-                <span style={{ fg: store.interrupt > 0 ? theme.primary : theme.textMuted }}>
-                  {store.interrupt > 0 ? "again to interrupt" : "interrupt"}
-                </span>
-              </text>
-            </box>
-          </Show>
-          <Show when={status().type !== "retry"}>
-            <box gap={2} flexDirection="row">
-              <Switch>
-                <Match when={store.mode === "normal"}>
-                  <Show when={local.model.variant.list().length > 0}>
-                    <text fg={theme.text}>
-                      {keybind.print("variant_cycle")} <span style={{ fg: theme.textMuted }}>variants</span>
-                    </text>
-                  </Show>
-                  <text fg={theme.text}>
-                    {keybind.print("agent_cycle")} <span style={{ fg: theme.textMuted }}>智能体</span>
-                  </text>
-                  <text fg={theme.text}>
-                    {keybind.print("command_list")} <span style={{ fg: theme.textMuted }}>命令</span>
-                  </text>
-                </Match>
-                <Match when={store.mode === "shell"}>
-                  <text fg={theme.text}>
-                    esc <span style={{ fg: theme.textMuted }}>exit shell mode</span>
-                  </text>
-                </Match>
-              </Switch>
-            </box>
-          </Show>
-        </box>
+            </Show>
+          </box>
+        </Show>
       </box>
     </>
   )

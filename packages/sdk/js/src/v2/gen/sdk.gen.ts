@@ -29,14 +29,11 @@ import type {
   FileReadResponses,
   FileStatusResponses,
   FindFilesResponses,
-  FindSymbolsResponses,
   FindTextResponses,
-  FormatterStatusResponses,
   GlobalDisposeResponses,
   GlobalEventResponses,
   GlobalHealthResponses,
   InstanceDisposeResponses,
-  LspStatusResponses,
   McpAddErrors,
   McpAddResponses,
   McpAuthAuthenticateErrors,
@@ -90,7 +87,6 @@ import type {
   SessionCreateResponses,
   SessionDeleteErrors,
   SessionDeleteResponses,
-  SessionDiffResponses,
   SessionForkResponses,
   SessionGetErrors,
   SessionGetResponses,
@@ -851,38 +847,6 @@ export class Session extends HeyApiClient {
   }
 
   /**
-   * Get message diff
-   *
-   * Get the file changes (diff) that resulted from a specific user message in the session.
-   */
-  public diff<ThrowOnError extends boolean = false>(
-    parameters: {
-      sessionID: string
-      directory?: string
-      messageID?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "sessionID" },
-            { in: "query", key: "directory" },
-            { in: "query", key: "messageID" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).get<SessionDiffResponses, unknown, ThrowOnError>({
-      url: "/session/{sessionID}/diff",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
    * Summarize session
    *
    * Generate a concise summary of the session using AI compaction to preserve key information.
@@ -981,7 +945,7 @@ export class Session extends HeyApiClient {
       queueMetadata?: {
         [key: string]: unknown
       }
-      intent?: "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
+      intent?: "conversation" | "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
@@ -1079,7 +1043,7 @@ export class Session extends HeyApiClient {
       queueMetadata?: {
         [key: string]: unknown
       }
-      intent?: "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
+      intent?: "conversation" | "status" | "repair" | "verify" | "report" | "analysis" | "ingest"
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
@@ -1744,36 +1708,6 @@ export class Find extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<FindFilesResponses, unknown, ThrowOnError>({
       url: "/find/file",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
-   * Find symbols
-   *
-   * Search for workspace symbols like functions, classes, and variables using LSP.
-   */
-  public symbols<ThrowOnError extends boolean = false>(
-    parameters: {
-      directory?: string
-      query: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "query", key: "directory" },
-            { in: "query", key: "query" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).get<FindSymbolsResponses, unknown, ThrowOnError>({
-      url: "/find/symbol",
       ...options,
       ...params,
     })
@@ -2616,48 +2550,6 @@ export class App extends HeyApiClient {
   }
 }
 
-export class Lsp extends HeyApiClient {
-  /**
-   * Get LSP status
-   *
-   * Get LSP server status
-   */
-  public status<ThrowOnError extends boolean = false>(
-    parameters?: {
-      directory?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "directory" }] }])
-    return (options?.client ?? this.client).get<LspStatusResponses, unknown, ThrowOnError>({
-      url: "/lsp",
-      ...options,
-      ...params,
-    })
-  }
-}
-
-export class Formatter extends HeyApiClient {
-  /**
-   * Get formatter status
-   *
-   * Get formatter status
-   */
-  public status<ThrowOnError extends boolean = false>(
-    parameters?: {
-      directory?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "directory" }] }])
-    return (options?.client ?? this.client).get<FormatterStatusResponses, unknown, ThrowOnError>({
-      url: "/formatter",
-      ...options,
-      ...params,
-    })
-  }
-}
-
 export class Auth2 extends HeyApiClient {
   /**
    * Set auth credentials
@@ -2819,16 +2711,6 @@ export class KillstataClient extends HeyApiClient {
   private _app?: App
   get app(): App {
     return (this._app ??= new App({ client: this.client }))
-  }
-
-  private _lsp?: Lsp
-  get lsp(): Lsp {
-    return (this._lsp ??= new Lsp({ client: this.client }))
-  }
-
-  private _formatter?: Formatter
-  get formatter(): Formatter {
-    return (this._formatter ??= new Formatter({ client: this.client }))
   }
 
   private _auth?: Auth2

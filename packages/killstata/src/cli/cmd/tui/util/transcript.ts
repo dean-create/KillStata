@@ -7,6 +7,7 @@ import {
   type AnalysisToolPartLike,
 } from "@/runtime/analysis-text-sanitizer"
 import { isAnalysisTurn, maybeBuildAnalysisUserViewText } from "@/runtime/analysis-user-view"
+import { WORKFLOW_ANALYSIS_TOOL_IDS, isWorkflowAnalysisTool } from "@/runtime/tool-catalog"
 
 export type TranscriptOptions = {
   thinking: boolean
@@ -33,6 +34,7 @@ const INTERNAL_ANALYSIS_TRANSCRIPT_TOOLS = new Set([
   "data_import",
   "data_batch",
   "econometrics",
+  ...WORKFLOW_ANALYSIS_TOOL_IDS,
   "regression_table",
   "heterogeneity_runner",
   "research_brief",
@@ -106,7 +108,7 @@ export function formatMessage(
     }
     if (msg.role === "assistant" && part.type === "reasoning") {
       if (analysisTurn) {
-        if (!(options.thinking && options.toolDetails)) continue
+        continue
       } else if (assistantTools.length > 0) {
         continue
       }
@@ -126,14 +128,18 @@ export function formatMessage(
       renderedBody = true
       continue
     }
-    if (msg.role === "assistant" && part.type === "tool" && analysisTurn && !options.toolDetails) {
+    if (msg.role === "assistant" && part.type === "tool" && analysisTurn) {
       const friendlyError = transcriptErrorDisplayText({
         text: part.state.status === "error" ? part.state.error : undefined,
         isAnalysis: analysisTurn,
-        showDetails: options.toolDetails,
+        showDetails: false,
         waitingForAccess,
       })
-      if (INTERNAL_ANALYSIS_TRANSCRIPT_TOOLS.has(part.tool) && !friendlyError) {
+      if (INTERNAL_ANALYSIS_TRANSCRIPT_TOOLS.has(part.tool)) {
+        if (friendlyError) {
+          result += `${friendlyError}\n\n`
+          renderedBody = true
+        }
         continue
       }
     }
@@ -211,7 +217,17 @@ export function formatPart(
   }
 
   if (part.type === "tool") {
-    const suppressAnalysisDetails = part.tool === "data_import" || part.tool === "econometrics"
+    const suppressAnalysisDetails = part.tool === "data_import" || isWorkflowAnalysisTool(part.tool)
+    if (suppressAnalysisDetails) {
+      if (part.state.status !== "error") return ""
+      const visibleError = transcriptErrorDisplayText({
+        text: part.state.error,
+        isAnalysis: true,
+        showDetails: false,
+        waitingForAccess: context?.waitingForAccess,
+      })
+      return visibleError ? `${visibleError}\n\n` : ""
+    }
     const toolMetadata = "metadata" in part.state ? part.state.metadata : undefined
     const summary =
       renderToolDisplay(part.state.status === "pending" ? undefined : toolMetadata, {
@@ -251,9 +267,7 @@ export function formatPart(
 
 function collectAssistantTools(parts: Part[]): AnalysisToolPartLike[] {
   return parts
-    .filter(
-      (part): part is Extract<Part, { type: "tool" }> => part.type === "tool" && part.state.status === "completed",
-    )
+    .filter((part): part is Extract<Part, { type: "tool" }> => part.type === "tool")
     .map((part) => ({
       tool: part.tool,
       state: {
@@ -272,7 +286,7 @@ function transcriptErrorDisplayText(input: {
 }) {
   const message = input.text?.trim()
   if (!message) return undefined
-  if (!input.isAnalysis || input.showDetails) return message
+  if (!input.isAnalysis) return message
   if (input.waitingForAccess) return undefined
   return userFacingAnalysisErrorText(message) ?? (isInternalAnalysisErrorText(message) ? undefined : message)
 }

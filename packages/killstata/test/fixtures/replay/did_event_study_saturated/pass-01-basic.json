@@ -1,0 +1,12 @@
+{
+  "description": "现代交错处理事件研究：首次处理年份作为 cohort 变量，与个体、时间变量互不相同",
+  "modelArgs": {
+    "datasetId": "staggered_adoption",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "cohortVar": "first_treat_year",
+    "entityVar": "firm",
+    "timeVar": "year"
+  },
+  "expect": "pass"
+}
