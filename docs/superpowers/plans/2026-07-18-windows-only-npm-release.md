@@ -14,6 +14,7 @@
 - 只发两个 tarball：`killstata-windows-x64` 在前，`killstata` 在后。
 - 不改变用户本地源码开发能力；本次只收缩 npm 原生二进制分发面。
 - 同一个 `name@version` 不可覆盖；0.1.26 尚未发布时才可用该版本重新打包。
+- npm 上传后必须等待 registry 可见；真实 registry 传播超过 5 秒时不得把已成功上传的 native 包误判为失败。
 
 ---
 

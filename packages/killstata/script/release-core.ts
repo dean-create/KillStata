@@ -55,6 +55,7 @@ export interface NpmCommandResult {
 export type NpmCommandRunner = (args: string[]) => Promise<NpmCommandResult>
 
 const STABLE_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
+const DEFAULT_VERIFICATION_ATTEMPTS = 45
 
 export async function fileIntegrity(filepath: string) {
   const hash = createHash("sha512")
@@ -220,7 +221,7 @@ export async function publishRelease(
   registry: ReleaseRegistry,
   options: PublishReleaseOptions = {},
 ) {
-  const verificationAttempts = options.verificationAttempts ?? 5
+  const verificationAttempts = options.verificationAttempts ?? DEFAULT_VERIFICATION_ATTEMPTS
   const verificationDelayMs = options.verificationDelayMs ?? 1_000
   if (options.verifyArtifact) {
     for (const artifact of artifacts) await options.verifyArtifact(artifact)

@@ -53,7 +53,7 @@ launcher 最后发布很关键：只要 launcher 的 `latest` 尚未切换，普
 - native package 名单必须精确等于 `killstata-windows-x64`；
 - launcher 的 `optionalDependencies` 不多不少，恰好覆盖该 native package；
 - 每个 tarball 的 SHA-512 SRI 完整性，并在 registry 预检前和每次上传前重新计算；
-- registry 已存在的同版本内容是否与本地一致。
+- registry 已存在的同版本内容是否与本地一致；上传后最多等待约 44 秒让 npm registry 传播，再确认完整性。
 
 所有 npm 查询、发布和 dist-tag 操作都显式固定到 `https://registry.npmjs.org/`，避免本机自定义
 registry 把发布悄悄导向私有镜像。

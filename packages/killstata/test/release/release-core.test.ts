@@ -314,6 +314,17 @@ describe("npm release protocol", () => {
     expect(result.map((item) => item.action)).toEqual(["publish", "publish"])
   })
 
+  test("allows normal npm propagation beyond the initial five verification reads", async () => {
+    const windows = native("killstata-windows-x64")
+    const cli = launcher({ [windows.name]: VERSION })
+    const registry = new MemoryRegistry()
+    registry.visibilityDelayReads = 5
+
+    const result = await publishRelease([windows, cli], registry, { verificationDelayMs: 0 })
+
+    expect(result.map((item) => item.action)).toEqual(["publish", "publish"])
+  })
+
   test("repairs the latest tag when every immutable artifact already exists", async () => {
     const windows = native("killstata-windows-x64")
     const cli = launcher({ [windows.name]: VERSION })
