@@ -348,7 +348,7 @@ export function pendingTaskLabel(input: { text?: string; files: PendingTaskFile[
   if (isNegatedWorkflowRequest(source) || isWorkflowConsultation(source)) return
 
   if (
-    /\b(regression|econometric|econometrics|panel_fe|smart_baseline|auto_recommend|did|ols|2sls|iv|psm|rdd)\b/.test(
+    /\b(regression|econometric|econometrics|panel_fe|auto_recommend|did|ols|2sls|iv|psm|rdd)\b/.test(
       source,
     ) ||
     /计量|回归|固定效应|面板|基准模型|双重差分|工具变量|倾向得分|控制变量|稳健性|再分析|重新回归|再估计/.test(source)

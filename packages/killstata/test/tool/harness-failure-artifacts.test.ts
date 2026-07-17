@@ -28,7 +28,9 @@ describe("Harness failure artifacts", () => {
     const definition = source.slice(source.indexOf("async function runAutoRecommend"), source.indexOf("function describeDataPath"))
     expect(definition).toContain("abort?: AbortSignal")
     expect(definition).toContain("abort: input.abort")
-    expect(source.match(/runAutoRecommend\(\{[\s\S]*?abort: ctx\.abort,[\s\S]*?\}\)/g)?.length).toBe(2)
+    // smart_baseline 被砍除前，auto_recommend 和 smart_baseline 各有一处调用（共 2 处）；
+    // 现在只剩 auto_recommend 自己这一处。
+    expect(source.match(/runAutoRecommend\(\{[\s\S]*?abort: ctx\.abort,[\s\S]*?\}\)/g)?.length).toBe(1)
   })
 
   test("creates concurrent failure bundles in distinct private directories", async () => {

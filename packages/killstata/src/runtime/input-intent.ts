@@ -1,5 +1,5 @@
 const WORKFLOW_TARGET_SOURCE =
-  String.raw`计量分析|数据分析|分析数据|分析|回归|估计|导入数据|处理数据|稳健性(?:检验)?|\b(?:regression|econometric|econometrics|panel_fe|smart_baseline|auto_recommend|did|ols|2sls|iv|psm|rdd)\b`
+  String.raw`计量分析|数据分析|分析数据|分析|回归|估计|导入数据|处理数据|稳健性(?:检验)?|\b(?:regression|econometric|econometrics|panel_fe|auto_recommend|did|ols|2sls|iv|psm|rdd)\b`
 const WORKFLOW_TARGET = new RegExp(WORKFLOW_TARGET_SOURCE, "i")
 const NEGATED_WORKFLOW_REQUEST = new RegExp(
   String.raw`(?:不要(?!只)|不用|不必|先别|别再|别|停止|取消)[^，。；！？!?.,;\n]{0,20}(?:${WORKFLOW_TARGET_SOURCE})`,

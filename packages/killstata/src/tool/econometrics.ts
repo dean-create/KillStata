@@ -179,10 +179,8 @@ async function runInlinePython(input: { command: string; script: string; cwd: st
 
 const SUPPORTED_METHODS = [
   "auto_recommend",
-  "smart_baseline",
   "ols_regression",
   "panel_fe_regression",
-  "baseline_regression",
   "psm_construction",
   "psm_matching",
   "psm_ipw",
@@ -219,7 +217,6 @@ const METHOD_REQUIRED_OPTIONS: Partial<Record<MethodName, string[]>> = {
 
 const METHOD_NEEDS_PANEL_KEYS = new Set<MethodName>([
   "panel_fe_regression",
-  "baseline_regression",
   "did_static",
   "did_staggered",
   "did_event_study",
@@ -227,10 +224,8 @@ const METHOD_NEEDS_PANEL_KEYS = new Set<MethodName>([
 ])
 
 const METHOD_NEEDS_TREATMENT = new Set<MethodName>([
-  "smart_baseline",
   "ols_regression",
   "panel_fe_regression",
-  "baseline_regression",
   "psm_construction",
   "psm_matching",
   "psm_ipw",
@@ -1600,81 +1595,6 @@ type SmartProfilePythonResult = {
   balanced_ratio?: number
 }
 
-type SmartBaselineMethodName = SmartRecommendation["recommendedMethod"]
-
-type SmartBaselinePlan = {
-  methodName: SmartBaselineMethodName
-  dependentVar: string
-  treatmentVar: string
-  covariates?: string[]
-  entityVar?: string
-  timeVar?: string
-  clusterVar?: string
-  options?: Record<string, unknown>
-  planningTrace: Array<{ kind: string; message: string }>
-}
-
-function covarianceForGeneralRegression(strategy: SmartRecommendation["covariance"]) {
-  if (strategy === "robust") return "HC1"
-  if (strategy === "hac") return { HAC: 1 }
-  return "nonrobust"
-}
-
-function buildSmartBaselinePlan(input: {
-  params: {
-    dependentVar?: string
-    treatmentVar?: string
-    covariates?: string[]
-    entityVar?: string
-    timeVar?: string
-    clusterVar?: string
-    options?: Record<string, unknown>
-  }
-  profile: SmartDatasetProfile
-  recommendation: SmartRecommendation
-}): SmartBaselinePlan {
-  if (!input.params.dependentVar || !input.params.treatmentVar) {
-    throw new Error("smart_baseline requires dependentVar and treatmentVar")
-  }
-
-  const planningTrace: Array<{ kind: string; message: string }> = []
-  const options = { ...(input.params.options ?? {}) }
-  const methodName = input.recommendation.recommendedMethod
-  const entityVar = input.params.entityVar ?? input.recommendation.preferredEntityVar
-  const timeVar = input.params.timeVar ?? input.recommendation.preferredTimeVar
-  const clusterVar = input.params.clusterVar ?? input.recommendation.preferredClusterVar ?? entityVar
-
-  if (methodName === "panel_fe_regression") {
-    if (!entityVar || !timeVar) {
-      throw new Error("panel_fe_regression requires explicit entity and time identifiers; estimator switching is disabled")
-    }
-    options.auto_downgrade = false
-  }
-
-  if (methodName === "ols_regression") {
-    options.cov_type = options.cov_type ?? covarianceForGeneralRegression(input.recommendation.covariance)
-  }
-
-  if (!planningTrace.length) {
-    planningTrace.push({
-      kind: "selection",
-      message: `Smart_baseline selected ${methodName} as the executable baseline implied by the recommendation layer.`,
-    })
-  }
-
-  return {
-    methodName,
-    dependentVar: input.params.dependentVar,
-    treatmentVar: input.params.treatmentVar,
-    covariates: input.params.covariates,
-    entityVar,
-    timeVar,
-    clusterVar,
-    options,
-    planningTrace,
-  }
-}
-
 function buildAutoRecommendPythonScript(payloadBase64: string) {
   return `
 import base64
@@ -1926,8 +1846,6 @@ function regressionTableTitle(methodName: MethodName) {
   switch (methodName) {
     case "panel_fe_regression":
       return "固定效应回归结果表"
-    case "baseline_regression":
-      return "回归结果表"
     case "ols_regression":
       return "OLS回归结果表"
     case "iv_2sls":
@@ -1955,8 +1873,6 @@ function regressionTableSubtitle(methodName: MethodName) {
   switch (methodName) {
     case "panel_fe_regression":
       return "固定效应回归"
-    case "baseline_regression":
-      return "基准回归"
     case "ols_regression":
       return "OLS"
     case "iv_2sls":
@@ -2243,134 +2159,6 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
         title: `Econometrics: ${params.methodName}`,
         output,
         metadata,
-      }
-    }
-
-    if (params.methodName === "smart_baseline") {
-      const autoResult = await runAutoRecommend({
-        dataPath,
-        outputDir,
-        pythonCommand,
-        params,
-        abort: ctx.abort,
-      })
-
-      const executionPlan = buildSmartBaselinePlan({
-        params,
-        profile: autoResult.profile,
-        recommendation: autoResult.recommendation,
-      })
-
-      const nestedTool = await EconometricsTool.init()
-      const nestedResult = await nestedTool.execute(
-        {
-          methodName: executionPlan.methodName,
-          dataPath,
-          datasetId: params.datasetId,
-          stageId: params.stageId,
-          runId,
-          branch,
-          dependentVar: executionPlan.dependentVar,
-          treatmentVar: executionPlan.treatmentVar,
-          covariates: executionPlan.covariates,
-          entityVar: executionPlan.entityVar,
-          timeVar: executionPlan.timeVar,
-          clusterVar: executionPlan.clusterVar,
-          options: executionPlan.options,
-          outputDir,
-        },
-        {
-          ...ctx,
-          agent: ctx.agent === "analyst" ? "econometrics" : ctx.agent,
-        },
-      )
-
-      const nestedMetadata = nestedResult.metadata as EconometricsToolMetadata
-      const nestedPublishedFiles = [...(nestedMetadata.publishedFiles ?? [])]
-
-      if (datasetManifest) {
-        appendArtifact(datasetManifest, {
-          artifactId: `${params.methodName}_${Date.now()}`,
-          runId,
-          stageId: params.stageId ?? sourceStage?.stageId,
-          branch,
-          action: params.methodName,
-          outputPath: (nestedMetadata.result?.output_path ?? autoResult.outputPath) as string,
-          summaryPath: autoResult.recommendationPath,
-          logPath: autoResult.narrativePath,
-          createdAt: new Date().toISOString(),
-          metadata: {
-            executable_method: executionPlan.methodName,
-            data_structure: autoResult.profile.dataStructure,
-            recommended_method: autoResult.recommendation.recommendedMethod,
-            effective_method: nestedMetadata.result?.effective_method ?? nestedMetadata.result?.method,
-            effective_covariance: nestedMetadata.result?.effective_covariance,
-          },
-        })
-
-        const publish = (key: string, label: string, sourcePath?: string) => {
-          if (!sourcePath) return
-          const visiblePath = publishVisibleOutput({
-            manifest: datasetManifest,
-            key,
-            label,
-            sourcePath,
-            runId,
-            branch: path.join("econometrics", params.methodName),
-            stageId: params.stageId ?? sourceStage?.stageId,
-          })
-          nestedPublishedFiles.push({
-            label,
-            relativePath: relativeWithinProject(visiblePath),
-          })
-        }
-
-        publish("smart_baseline_profile", "smart_baseline_profile", autoResult.profilePath)
-        publish("smart_baseline_recommendation", "smart_baseline_recommendation", autoResult.recommendationPath)
-        publish("smart_baseline_summary", "smart_baseline_summary", autoResult.narrativePath)
-      }
-
-      let output = `## Econometrics result - ${params.methodName}\n\n`
-      output += `Data file: ${relativeWithinProject(dataPath)}\n`
-      output += `Recommended method: ${autoResult.recommendation.recommendedMethod}\n`
-      output += `Executed method: ${executionPlan.methodName}\n`
-      output += `Suggested covariance: ${autoResult.recommendation.covariance}\n`
-      if (nestedMetadata.result?.effective_method) output += `Effective method: ${nestedMetadata.result.effective_method}\n`
-      if (nestedMetadata.result?.effective_covariance) output += `Effective covariance: ${nestedMetadata.result.effective_covariance}\n`
-      if (executionPlan.planningTrace.length) {
-        output += `Planning trace: ${executionPlan.planningTrace.map((item) => item.message).join(" | ")}\n`
-      }
-      output += `- Profile JSON: ${relativeWithinProject(autoResult.profilePath)}\n`
-      output += `- Recommendation JSON: ${relativeWithinProject(autoResult.recommendationPath)}\n`
-      output += `- Recommendation narrative: ${relativeWithinProject(autoResult.narrativePath)}\n`
-      output += `\n### Baseline Execution\n`
-      output += nestedResult.output
-
-      const mergedMetadata: EconometricsToolMetadata = {
-        ...(nestedMetadata ?? {}),
-        method: params.methodName,
-        profile: autoResult.profile,
-        recommendation: autoResult.recommendation,
-        datasetId: nestedMetadata.datasetId ?? datasetManifest?.datasetId ?? params.datasetId,
-        stageId: nestedMetadata.stageId ?? params.stageId ?? sourceStage?.stageId,
-        runId: nestedMetadata.runId ?? runId,
-        outputDir: nestedMetadata.outputDir ?? relativeWithinProject(outputDir),
-        deliveryBundleDir: nestedMetadata.deliveryBundleDir,
-        publishedFiles: nestedPublishedFiles,
-        finalOutputsPath: nestedMetadata.finalOutputsPath ?? nestedMetadata.internalFinalOutputsPath,
-        internalFinalOutputsPath: nestedMetadata.internalFinalOutputsPath,
-      }
-      if (mergedMetadata.result) {
-        mergedMetadata.result.decision_trace = [
-          ...executionPlan.planningTrace,
-          ...(mergedMetadata.result.decision_trace ?? []),
-        ]
-      }
-
-      return {
-        title: `Econometrics: ${params.methodName}`,
-        output,
-        metadata: mergedMetadata,
       }
     }
 
@@ -3020,7 +2808,7 @@ def persist_common_outputs(payload, result, qa, diagnostics, metadata, coefficie
 try:
     df = read_table(payload["data_path"])
 
-    if method in ["panel_fe_regression", "baseline_regression"]:
+    if method in ["panel_fe_regression"]:
         result = run_panel_fe(df, payload)
         emit(result)
         raise SystemExit(0)

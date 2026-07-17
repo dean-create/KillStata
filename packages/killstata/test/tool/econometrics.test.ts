@@ -256,40 +256,4 @@ describe("tool.econometrics", () => {
     })
   })
 
-  test("smart_baseline executes the recommended baseline and preserves planning trace", async () => {
-    if (!(await supportsEconometricsRuntime())) return
-    await withInstance(async (root) => {
-      const csvPath = path.join(root, "smart_panel.csv")
-      const rows = ["firm_id,year,did,y"]
-      for (let firm = 1; firm <= 8; firm += 1) {
-        for (let year = 2018; year <= 2021; year += 1) {
-          const did = year >= 2020 ? 1 : 0
-          const y = 1 + firm * 0.4 + year * 0.02 + did * 1.5
-          rows.push(`${firm},${year},${did},${y.toFixed(4)}`)
-        }
-      }
-      fs.writeFileSync(csvPath, rows.join("\n"), "utf-8")
-
-      const tool = await EconometricsTool.init()
-      const result = await tool.execute(
-        {
-          methodName: "smart_baseline",
-          dataPath: "smart_panel.csv",
-          dependentVar: "y",
-          treatmentVar: "did",
-          entityVar: "firm_id",
-          timeVar: "year",
-          outputDir: "outputs/smart_baseline_case",
-        },
-        ctx as any,
-      )
-
-      expect(result.metadata.recommendation).toBeDefined()
-      expect(result.metadata.recommendation!.recommendedMethod).toBe("panel_fe_regression")
-      expect(result.metadata.result?.effective_method).toBeDefined()
-      expect(result.metadata.result?.decision_trace?.length).toBeGreaterThan(0)
-      expect(result.output).toContain("Executed method:")
-      expect(result.output).toContain("Planning trace:")
-    })
-  })
 })
