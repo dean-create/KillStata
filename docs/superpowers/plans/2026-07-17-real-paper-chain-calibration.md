@@ -234,4 +234,3 @@ Confirm no test silently returns when Python/data/auth is missing; confirm real-
 - [ ] **Step 4: Record remaining capability gaps**
 
 At minimum classify: composite entity creation, cohort normalization/relative-time derivation, scientifically declared heterogeneity groups, and live DeepSeek variability. None may be advertised as completed until its corresponding test is green.
-
