@@ -78,6 +78,30 @@ const propensityScoreParameters = z
     validateColumnRoles(value, ctx, ["treatmentVar"])
   })
 
+const psmMatchingParameters = z
+  .object({
+    ...canonicalDataSourceFields,
+    dependentVar: columnName.describe("结果变量列名"),
+    treatmentVar: columnName.describe("严格以 0/1 编码的处理变量列名"),
+    covariates: z.array(columnName).min(1, "至少需要一个处理前协变量").describe("用于倾向得分和匹配后平衡检查的处理前协变量列名"),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    validateColumnRoles(value, ctx, ["dependentVar", "treatmentVar"])
+  })
+
+const psmIpwParameters = z
+  .object({
+    ...canonicalDataSourceFields,
+    dependentVar: columnName.describe("结果变量列名"),
+    treatmentVar: columnName.describe("严格以 0/1 编码的处理变量列名"),
+    covariates: z.array(columnName).min(1, "至少需要一个处理前协变量").describe("用于倾向得分和加权平衡检查的处理前协变量列名"),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    validateColumnRoles(value, ctx, ["dependentVar", "treatmentVar"])
+  })
+
 const olsParameters = z
   .object({
     ...canonicalDataSourceFields,
@@ -201,6 +225,77 @@ export const PropensityScoreConstructionTool = Tool.define("psm_construction", a
   },
 }))
 
+export const PropensityScoreVisualizationTool = Tool.define("psm_visualize", async () => ({
+  description:
+    "绘制处理组与对照组的倾向得分分布，检查重叠和共同支撑。只在用户要求查看分布或重叠诊断时调用；不估计因果效应，不输出 ATE、ATT 或显著性结论。",
+  parameters: propensityScoreParameters,
+  formatValidationError,
+  execute: async (params, ctx) => {
+    const legacyResult = await runPreparedEconometrics(
+      {
+        methodName: "psm_visualize",
+        datasetId: params.datasetId,
+        stageId: params.stageId,
+        treatmentVar: params.treatmentVar,
+        covariates: params.covariates,
+      },
+      ctx,
+    )
+    return {
+      ...legacyResult,
+      title: "倾向得分分布诊断",
+    }
+  },
+}))
+
+export const PsmMatchingTool = Tool.define("psm_matching", async () => ({
+  description:
+    "运行固定规则的 1:1 倾向得分最近邻匹配，估计已匹配处理组的 ATT。仅在用户明确要求匹配且已确认处理变量、结果变量和处理前协变量时调用；工具固定 caliper 与匹配规则，不接受自定义比例或阈值。只在匹配后协变量平衡达标时返回效应；不输出 p 值、置信区间或显著性结论。",
+  parameters: psmMatchingParameters,
+  formatValidationError,
+  execute: async (params, ctx) => {
+    const legacyResult = await runPreparedEconometrics(
+      {
+        methodName: "psm_matching",
+        datasetId: params.datasetId,
+        stageId: params.stageId,
+        dependentVar: params.dependentVar,
+        treatmentVar: params.treatmentVar,
+        covariates: params.covariates,
+      },
+      ctx,
+    )
+    return {
+      ...legacyResult,
+      title: "倾向得分最近邻匹配",
+    }
+  },
+}))
+
+export const PsmIpwTool = Tool.define("psm_ipw", async () => ({
+  description:
+    "运行固定规则的 Hájek 逆概率加权，估计 ATE。仅在用户明确要求 IPW/逆概率加权且已确认处理变量、结果变量和处理前协变量时调用；不接受自定义目标效应、截尾、裁剪或权重公式。只有所有倾向得分处于固定重叠区间、两组有效样本量均达标且加权协变量平衡达标时才返回效应；不输出 p 值、置信区间或显著性结论。",
+  parameters: psmIpwParameters,
+  formatValidationError,
+  execute: async (params, ctx) => {
+    const legacyResult = await runPreparedEconometrics(
+      {
+        methodName: "psm_ipw",
+        datasetId: params.datasetId,
+        stageId: params.stageId,
+        dependentVar: params.dependentVar,
+        treatmentVar: params.treatmentVar,
+        covariates: params.covariates,
+      },
+      ctx,
+    )
+    return {
+      ...legacyResult,
+      title: "逆概率加权（IPW）",
+    }
+  },
+}))
+
 export const OlsRegressionTool = Tool.define("ols_regression", async () => ({
   description:
     "运行 OLS 基础回归。仅在用户明确要求 OLS/线性回归，或数据画像支持普通线性基线时调用；结果默认是条件相关，不自动宣称因果。",
@@ -271,6 +366,9 @@ export const Iv2slsTool = Tool.define("iv_2sls", async () => ({
 export const ProductionEconometricsTools = [
   EconometricsRecommendTool,
   PropensityScoreConstructionTool,
+  PropensityScoreVisualizationTool,
+  PsmMatchingTool,
+  PsmIpwTool,
   OlsRegressionTool,
   PanelFeRegressionTool,
   Iv2slsTool,

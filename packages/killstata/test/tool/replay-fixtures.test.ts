@@ -5,6 +5,7 @@ import { Tool } from "@/tool/tool"
 import {
   EconometricsRecommendTool,
   PropensityScoreConstructionTool,
+  PropensityScoreVisualizationTool,
   OlsRegressionTool,
   PanelFeRegressionTool,
   Iv2slsTool,
@@ -39,6 +40,7 @@ const FIXTURES_ROOT = path.join(import.meta.dir, "..", "fixtures", "replay")
 const REPLAY_TOOLS: Record<string, Tool.Info> = {
   econometrics_recommend: EconometricsRecommendTool,
   psm_construction: PropensityScoreConstructionTool,
+  psm_visualize: PropensityScoreVisualizationTool,
   ols_regression: OlsRegressionTool,
   panel_fe_regression: PanelFeRegressionTool,
   iv_2sls: Iv2slsTool,

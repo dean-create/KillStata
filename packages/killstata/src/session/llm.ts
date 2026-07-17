@@ -162,6 +162,7 @@ export namespace LLM {
     )
 
     const tools = await resolveTools(input)
+    system.push(...SystemPrompt.toolCatalog(Object.keys(tools)))
 
     l.info("stream params ready", {
       messageCount: input.messages.length,

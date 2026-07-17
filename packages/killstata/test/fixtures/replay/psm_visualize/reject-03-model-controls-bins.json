@@ -1,0 +1,12 @@
+{
+  "description": "模型试图自行控制直方图分箱；分箱由 Harness 固定，不能成为自由参数",
+  "modelArgs": {
+    "datasetId": "lalonde_nsw",
+    "stageId": "stage_000",
+    "treatmentVar": "treat",
+    "covariates": ["age", "education"],
+    "bins": 100
+  },
+  "expect": "reject",
+  "rejectHint": ["bins"]
+}

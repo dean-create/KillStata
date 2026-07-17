@@ -3,7 +3,7 @@ import { execFileSync } from "child_process"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { schemaLooksLikeMojibake } from "../../src/tool/data-import"
+import { PreprocessOperationSchema, schemaLooksLikeMojibake } from "../../src/tool/data-import"
 import { resolveRuntimePythonCommand } from "../../src/killstata/runtime-config"
 
 async function supportsPandas() {
@@ -54,6 +54,33 @@ describe("tool.data_import", () => {
       expect(schemaLooksLikeMojibake(cleanPath)).toBe(false)
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test("combine_columns requires an explicit collision-checkable composite-key contract", () => {
+    expect(
+      PreprocessOperationSchema.parse({
+        type: "combine_columns",
+        variables: ["省份", "地区"],
+        params: { output_column: "省份_地区", separator: "_" },
+      }),
+    ).toEqual({
+      type: "combine_columns",
+      variables: ["省份", "地区"],
+      params: { output_column: "省份_地区", separator: "_" },
+    })
+
+    for (const invalid of [
+      { type: "combine_columns", variables: ["省份"], params: { output_column: "省份_地区" } },
+      { type: "combine_columns", variables: ["省份", "省份"], params: { output_column: "省份_地区" } },
+      { type: "combine_columns", variables: ["省份", "地区"], params: {} },
+      {
+        type: "combine_columns",
+        variables: ["省份", "地区"],
+        params: { output_column: "省份_地区", separator: "x".repeat(17) },
+      },
+    ]) {
+      expect(PreprocessOperationSchema.safeParse(invalid).success).toBe(false)
     }
   })
 

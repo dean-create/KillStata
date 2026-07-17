@@ -230,6 +230,8 @@ function displayStepLabel(step?: string) {
   if (step.startsWith("econometrics(")) return "计量回归"
   if (step === "econometrics_recommend") return "计量方法推荐"
   if (step === "psm_construction") return "倾向得分与共同支撑诊断"
+  if (step === "psm_visualize") return "倾向得分分布诊断"
+  if (step === "psm_matching") return "倾向得分最近邻匹配"
   if (step === "ols_regression") return "OLS 回归"
   if (step === "panel_fe_regression") return "面板固定效应回归"
   if (step === "iv_2sls") return "工具变量回归"
@@ -279,6 +281,8 @@ function inferNextStep(parts: AnalysisToolPartLike[]) {
 
   if (isWorkflowEstimateTool(latest.tool)) return "汇总结论、诊断信息和关键产物文件"
   if (latest.tool === "psm_construction") return "先检查共同支撑与协变量平衡，再决定是否进入匹配或加权"
+  if (latest.tool === "psm_visualize") return "结合分布图检查重叠，再决定是否进入匹配或加权"
+  if (latest.tool === "psm_matching") return "检查已匹配处理组的 ATT、样本丢失和协变量平衡"
   if (latest.tool === "regression_table") return "检查表格标题、列名、注释和导出格式是否可直接引用"
   if (latest.tool === "heterogeneity_runner") return "整理异质性、机制和稳健性扩展产物"
   if (latest.tool === "research_brief") return "整理研究摘要并输出关键信息"

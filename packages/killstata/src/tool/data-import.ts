@@ -105,9 +105,26 @@ export const PreprocessOperationSchema = z.object({
     "standardize",
     "winsorize",
     "create_dummies",
+    "combine_columns",
   ]),
   variables: z.array(z.string()).optional(),
   params: z.object({}).passthrough().optional(),
+}).superRefine((value, ctx) => {
+  if (value.type !== "combine_columns") return
+  const variables = value.variables ?? []
+  const params = (value.params ?? {}) as Record<string, unknown>
+  if (variables.length < 2) {
+    ctx.addIssue({ code: "custom", path: ["variables"], message: "combine_columns 至少需要两列" })
+  }
+  if (new Set(variables).size !== variables.length) {
+    ctx.addIssue({ code: "custom", path: ["variables"], message: "combine_columns 的来源列不能重复" })
+  }
+  if (typeof params.output_column !== "string" || !params.output_column.trim()) {
+    ctx.addIssue({ code: "custom", path: ["params", "output_column"], message: "必须提供非空 output_column" })
+  }
+  if (params.separator !== undefined && (typeof params.separator !== "string" || params.separator.length > 16)) {
+    ctx.addIssue({ code: "custom", path: ["params", "separator"], message: "separator 必须是长度不超过 16 的字符串" })
+  }
 })
 
 export const FilterRuleSchema = z.object({
@@ -558,6 +575,8 @@ function summarizePreprocessOperation(operation: z.infer<typeof PreprocessOperat
       return `缩尾处理${varSuffix}`
     case "create_dummies":
       return `生成虚拟变量${varSuffix}`
+    case "combine_columns":
+      return `组合生成${String(operation.params?.output_column ?? "新标识列")}`
     default:
       return `处理${varSuffix}`
   }
@@ -1466,6 +1485,38 @@ try:
                 target_vars = selected_columns(df, vars_in)
                 df, audit = safe_get_dummies(df, columns=target_vars, drop_first=bool(op_params.get("drop_first", True)))
                 log_entries.append(json.dumps(audit, ensure_ascii=False))
+            elif op_type == "combine_columns":
+                source_columns = selected_columns(df, vars_in)
+                if len(source_columns) < 2:
+                    raise ValueError("combine_columns requires at least two source columns")
+                output_column = op_params.get("output_column")
+                if not isinstance(output_column, str) or not output_column.strip():
+                    raise ValueError("combine_columns requires a non-empty output_column")
+                if output_column in df.columns:
+                    raise ValueError(f"combine_columns output column already exists: {output_column}")
+                separator = op_params.get("separator", "_")
+                if not isinstance(separator, str) or len(separator) > 16:
+                    raise ValueError("combine_columns separator must be a string with at most 16 characters")
+                components = df[source_columns]
+                if components.isna().any(axis=None):
+                    raise ValueError(f"combine_columns source columns contain missing values: {source_columns}")
+                string_components = components.astype("string")
+                if string_components.apply(lambda column: column.str.strip().eq("").any()).any():
+                    raise ValueError(f"combine_columns source columns contain empty values: {source_columns}")
+                combined = string_components.agg(separator.join, axis=1)
+                source_combinations = int(components.drop_duplicates().shape[0])
+                combined_values = int(combined.nunique(dropna=False))
+                if combined_values != source_combinations:
+                    raise ValueError("combine_columns separator produced identifier collisions; choose a collision-free separator")
+                df[output_column] = combined
+                log_entries.append(json.dumps({
+                    "operation": "combine_columns",
+                    "source_columns": source_columns,
+                    "output_column": output_column,
+                    "separator": separator,
+                    "rows": int(len(df)),
+                    "distinct_values": combined_values,
+                }, ensure_ascii=False))
             else:
                 raise ValueError(f"Unsupported preprocess operation: {op_type}")
 

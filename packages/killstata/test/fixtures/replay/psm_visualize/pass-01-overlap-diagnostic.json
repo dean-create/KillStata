@@ -1,0 +1,10 @@
+{
+  "description": "标准调用：用户要求查看处理组与对照组的倾向得分重叠",
+  "modelArgs": {
+    "datasetId": "card_1995",
+    "stageId": "stage_000",
+    "treatmentVar": "educ_binary",
+    "covariates": ["exper", "black", "south"]
+  },
+  "expect": "pass"
+}

@@ -47,3 +47,4 @@ trash/
 # 一次性 E2E 验证产物落点（渲染截图等）。真正的测试在 packages/killstata/test/；
 # 有长期价值的验证记录归档到 docs/verification/。
 /test/
+killstata_docx/

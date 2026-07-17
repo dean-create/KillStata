@@ -1,13 +1,14 @@
 # 当前进度
 
+- 2026-07-17：`psm_ipw` 已完成准入：固定 Hájek ATE、得分 `[0.05,0.95]`/两组 ESS≥20/加权最大绝对 SMD≤0.10；极端得分、低 ESS、失衡和分离均失败关闭且清理运行目录。Card 1995 全链路 B 级 smoke ATE=0.04153583；LaLonde A 级对标仍待 PSM 家族夹具完成。
 ## 准入路线图 v2 已定（Claude，2026-07-16）
 
-- 盘点结论（全部经代码核实）：9 工具已准入、旁路已封（老 `econometrics` 模型不可见）、提示词无 smart_baseline 残留；PLAN.md 顶部新增总路线图。
+- 盘点结论（全部经代码核实）：10 工具已准入（含 `psm_visualize`）、旁路已封（老 `econometrics` 模型不可见）、提示词无 smart_baseline 残留；PLAN.md 顶部总路线图已同步。
 - 三个缺口：①模型调用回放完全缺失（`test/fixtures/replay/`，每工具 ≥5 条，2 正 3 反）；②数值对标分 A/B/C 级，pyfixest 三工具目前是 C 级"自己对自己"，要补 A/B；③准入卡 `docs/methods/<tool>.md` 缺失。
-- 12 个待决方法处置已列表：PSM 家族 5 项准入（LaLonde A 级）、旧 TWFE 交错 DID **砍**（Goodman-Bacon 偏误，已有 did2s/saturated）、iv_test 并入 iv_2sls 诊断、RDD 2 项准入（Lee 2008）、rdd_fuzzy_global 倾向砍（Gelman-Imbens 2019）、smart_baseline 砍（用户已拍板）。
+- 11 个待决方法处置已列表：PSM 家族剩余 4 项准入（LaLonde A 级）、旧 TWFE 交错 DID **砍**（Goodman-Bacon 偏误，已有 did2s/saturated）、iv_test 并入 iv_2sls 诊断、RDD 2 项准入（Lee 2008）、rdd_fuzzy_global 倾向砍（Gelman-Imbens 2019）、smart_baseline 砍（用户已拍板）。
 - 分工：Codex 按清单逐项准入（加挂关⑥回放+关⑦分级）；Claude 做回放基建、对标补课、smart_baseline 砍除、准入卡回填。文件边界见 PLAN.md。
 - PLAN.md 超 300 行已归档：2026-07-15 已完成章节移至 `docs/plans/2026-07-15-econometrics-tool-core.md`。
-- ⚠️ 交接时全量测试 240 过/25 挂，挂点全在 econometric_algorithm.py 未提交手术的下游（Codex 进行中）；准入纪律：红着不开新项。
+- 最新共享工作树门禁：全量 357/357、1256 个断言；Python 编译、typecheck、全平台 build、diff check 全绿。准入纪律：红着不开新项。
 
 ---
 
@@ -22,7 +23,7 @@
 - legacy replay 与独立入口共用诊断语义，`groundingScope=diagnostic`，workflow 记录为 `describe_or_diagnostics`。
 - SciPy 独立优化逐行核对 80 个得分，并独立手算共同支撑区间与占比；尚未使用 R/Stata golden。
 - 最终验证：聚焦 20/20；全量 265/265、966 个断言；typecheck、Python py_compile、Linux/macOS/Windows build、diff check 全部通过。
-- 两轮独立审查已清零：Critical 0、Important 0。第 2 项 `psm_visualize` 仍隐藏，尚未开始。
+- 第 2 项 `psm_visualize` 已准入：严格参数、20 个公共分箱、分组内归一化、原子 PNG、统计/签名/尺寸校验和全失败路径零残留；只做共同支撑诊断，不冒充因果估计。Card 1995 真实数据为 B 级 wiring/smoke，下一项 `psm_matching` 将使用 LaLonde/NSW 做 A 级对标。独立复审 Critical 0、Important 0；聚焦 20/20、参数回放 81/81、全量 357/357、1256 个断言。
 
 ---
 

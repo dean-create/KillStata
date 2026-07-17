@@ -14,6 +14,17 @@ describe("session.system prompt contracts", () => {
     expect(source).not.toContain("rescue to smart_baseline")
   })
 
+  test("econometrics prompt never invents hidden tools or treats panel rows as independent PSM samples", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "session", "system.ts"), "utf-8")
+
+    expect(source).toContain("Only call a tool whose schema is exposed in the current request")
+    expect(source).toContain("never invent a call to a hidden tool")
+    expect(source).toContain("do not treat repeated entity-time rows as independent observations")
+    expect(source).toContain("analysis unit, pre-treatment period or aggregation rule, outcome horizon, and estimand")
+    expect(source).toContain("reuse the verified baseline estimator")
+    expect(source).toContain("explicit grouping variable or a reproducible grouping rule")
+  })
+
   test("routes a traditional two-by-two DID to the static DID tool without requiring panel keys", () => {
     const systemSource = fs.readFileSync(path.join(process.cwd(), "src", "session", "system.ts"), "utf-8")
     const deepseekSource = fs.readFileSync(path.join(process.cwd(), "src", "session", "prompt", "deepseek.txt"), "utf-8")
@@ -87,6 +98,18 @@ describe("session.system prompt contracts", () => {
     // Both still get the econometrics context appended.
     expect(deepseekPrompt).toHaveLength(2)
     expect(genericPrompt).toHaveLength(2)
+  })
+
+  test("injects only the tools exposed for the current request into the model prompt", async () => {
+    const { SystemPrompt } = await import("../../src/session/system")
+    const prompt = SystemPrompt.toolCatalog(["panel_fe_regression", "iv_2sls"]).join("\n")
+    const llmSource = fs.readFileSync(path.join(process.cwd(), "src", "session", "llm.ts"), "utf-8")
+
+    expect(prompt).toContain("panel_fe_regression")
+    expect(prompt).toContain("iv_2sls")
+    expect(prompt).not.toContain("data_import")
+    expect(prompt).toContain("Never emit a tool call for any other name")
+    expect(llmSource).toContain("SystemPrompt.toolCatalog(Object.keys(tools))")
   })
 
   test("anthropic spoof header is gone", () => {

@@ -9,6 +9,9 @@ import { recordWorkflowStageSuccess } from "@/runtime/workflow"
 const SAFE_ECONOMETRICS_TOOL_IDS = [
   "econometrics_recommend",
   "psm_construction",
+  "psm_visualize",
+  "psm_matching",
+  "psm_ipw",
   "ols_regression",
   "panel_fe_regression",
   "iv_2sls",
@@ -19,7 +22,7 @@ const SAFE_ECONOMETRICS_TOOL_IDS = [
 ] as const
 
 const ESTIMATOR_TOOL_IDS = SAFE_ECONOMETRICS_TOOL_IDS.filter(
-  (toolName) => toolName !== "econometrics_recommend" && toolName !== "psm_construction",
+  (toolName) => !(["econometrics_recommend", "psm_construction", "psm_visualize"] as string[]).includes(toolName),
 )
 
 async function withAnalysisTools<T>(fn: (tools: Awaited<ReturnType<typeof ToolRegistry.tools>>) => Promise<T>) {
@@ -132,53 +135,109 @@ describe("model-visible econometrics tools", () => {
     })
   })
 
-  test("exposes propensity-score construction as a strict diagnostic tool", async () => {
+  test("exposes propensity-score construction and visualization as strict diagnostic tools", async () => {
     await withAnalysisTools(async (tools) => {
-      const propensity = tools.find((tool) => tool.id === "psm_construction")
-      expect(propensity).toBeDefined()
-      if (!propensity) return
+      for (const toolID of ["psm_construction", "psm_visualize"]) {
+        const propensity = tools.find((tool) => tool.id === toolID)
+        expect(propensity).toBeDefined()
+        if (!propensity) continue
 
-      expect(
-        propensity.parameters.safeParse({
-          datasetId: "dataset_1",
-          stageId: "stage_001",
-          treatmentVar: "treated",
-          covariates: ["age", "income"],
-        }).success,
-      ).toBe(true)
+        expect(
+          propensity.parameters.safeParse({
+            datasetId: "dataset_1",
+            stageId: "stage_001",
+            treatmentVar: "treated",
+            covariates: ["age", "income"],
+          }).success,
+        ).toBe(true)
+        for (const invalid of [
+          {
+            datasetId: "dataset_1",
+            stageId: "stage_001",
+            treatmentVar: "treated",
+            covariates: [],
+          },
+          {
+            datasetId: "dataset_1",
+            stageId: "stage_001",
+            treatmentVar: "treated",
+            covariates: ["treated"],
+          },
+          {
+            datasetId: "dataset_1",
+            stageId: "stage_001",
+            treatmentVar: "treated",
+            covariates: ["age", "age"],
+          },
+          {
+            datasetId: "dataset_1",
+            stageId: "stage_001",
+            treatmentVar: "treated",
+            covariates: ["age"],
+            dependentVar: "outcome",
+          },
+          {
+            dataPath: "raw.xlsx",
+            treatmentVar: "treated",
+            covariates: ["age"],
+          },
+        ]) {
+          expect(propensity.parameters.safeParse(invalid).success).toBe(false)
+        }
+      }
+    })
+  })
+
+  test("exposes PSM matching as a strict ATT estimator without free matching controls", async () => {
+    await withAnalysisTools(async (tools) => {
+      const matching = tools.find((tool) => tool.id === "psm_matching")
+      expect(matching).toBeDefined()
+      if (!matching) return
+
+      const valid = {
+        datasetId: "dataset_1",
+        stageId: "stage_001",
+        dependentVar: "re78",
+        treatmentVar: "treat",
+        covariates: ["age", "education"],
+      }
+      expect(matching.parameters.safeParse(valid).success).toBe(true)
       for (const invalid of [
-        {
-          datasetId: "dataset_1",
-          stageId: "stage_001",
-          treatmentVar: "treated",
-          covariates: [],
-        },
-        {
-          datasetId: "dataset_1",
-          stageId: "stage_001",
-          treatmentVar: "treated",
-          covariates: ["treated"],
-        },
-        {
-          datasetId: "dataset_1",
-          stageId: "stage_001",
-          treatmentVar: "treated",
-          covariates: ["age", "age"],
-        },
-        {
-          datasetId: "dataset_1",
-          stageId: "stage_001",
-          treatmentVar: "treated",
-          covariates: ["age"],
-          dependentVar: "outcome",
-        },
-        {
-          dataPath: "raw.xlsx",
-          treatmentVar: "treated",
-          covariates: ["age"],
-        },
+        { ...valid, covariates: ["treat"] },
+        { ...valid, covariates: ["age", "age"] },
+        { ...valid, matchingRatio: 2 },
+        { ...valid, caliper: 0.5 },
+        { ...valid, targetType: "ATE" },
+        { ...valid, outputDir: "/tmp/model-owned" },
       ]) {
-        expect(propensity.parameters.safeParse(invalid).success).toBe(false)
+        expect(matching.parameters.safeParse(invalid).success).toBe(false)
+      }
+    })
+  })
+
+  test("exposes IPW as a strict fixed ATE estimator without weight tuning controls", async () => {
+    await withAnalysisTools(async (tools) => {
+      const ipw = tools.find((tool) => tool.id === "psm_ipw")
+      expect(ipw).toBeDefined()
+      if (!ipw) return
+
+      const valid = {
+        datasetId: "dataset_1",
+        stageId: "stage_001",
+        dependentVar: "re78",
+        treatmentVar: "treat",
+        covariates: ["age", "education"],
+      }
+      expect(ipw.parameters.safeParse(valid).success).toBe(true)
+      for (const invalid of [
+        { ...valid, covariates: ["treat"] },
+        { ...valid, covariates: ["age", "age"] },
+        { ...valid, targetType: "ATT" },
+        { ...valid, trim: 0.05 },
+        { ...valid, weightFormula: "stabilized" },
+        { ...valid, outputDir: "/tmp/model-owned" },
+      ]) {
+        expect(ipw.parameters.safeParse(invalid).success).toBe(false)
       }
     })
   })
@@ -267,19 +326,21 @@ describe("model-visible econometrics tools", () => {
     }
   })
 
-  test("records propensity-score construction as diagnostics, not as a completed estimate", async () => {
+  test("records propensity-score diagnostics as diagnostics, not as completed estimates", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "killstata-psm-workflow-"))
     try {
       await Instance.provide({
         directory: root,
         fn: async () => {
-          const { stage } = recordWorkflowStageSuccess({
-            sessionID: "workflow-psm-construction",
-            toolName: "psm_construction",
-            args: { datasetId: "dataset_1", stageId: "stage_001", treatmentVar: "treated" },
-            metadata: { datasetId: "dataset_1", stageId: "stage_001" },
-          })
-          expect(stage.kind).toBe("describe_or_diagnostics")
+          for (const toolName of ["psm_construction", "psm_visualize"] as const) {
+            const { stage } = recordWorkflowStageSuccess({
+              sessionID: `workflow-${toolName}`,
+              toolName,
+              args: { datasetId: "dataset_1", stageId: "stage_001", treatmentVar: "treated" },
+              metadata: { datasetId: "dataset_1", stageId: "stage_001" },
+            })
+            expect(stage.kind).toBe("describe_or_diagnostics")
+          }
         },
       })
     } finally {

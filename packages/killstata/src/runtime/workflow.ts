@@ -108,6 +108,7 @@ const WORKFLOW_ARTIFACT_EXTENSIONS = new Set([
   ".log",
   ".md",
   ".parquet",
+  ".png",
   ".tex",
   ".txt",
   ".xls",
@@ -1848,17 +1849,29 @@ async function loadWorkflowExecutableTool(toolName: string) {
       return EconometricsTool
     }
     case "econometrics_recommend":
+    case "psm_construction":
+    case "psm_visualize":
+    case "psm_matching":
+    case "psm_ipw":
     case "ols_regression":
     case "panel_fe_regression":
     case "iv_2sls": {
       const {
         EconometricsRecommendTool,
+        PropensityScoreConstructionTool,
+        PropensityScoreVisualizationTool,
+        PsmMatchingTool,
+        PsmIpwTool,
         OlsRegressionTool,
         PanelFeRegressionTool,
         Iv2slsTool,
       } = await import("@/tool/econometrics-method-tools")
       return {
         econometrics_recommend: EconometricsRecommendTool,
+        psm_construction: PropensityScoreConstructionTool,
+        psm_visualize: PropensityScoreVisualizationTool,
+        psm_matching: PsmMatchingTool,
+        psm_ipw: PsmIpwTool,
         ols_regression: OlsRegressionTool,
         panel_fe_regression: PanelFeRegressionTool,
         iv_2sls: Iv2slsTool,

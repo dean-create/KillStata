@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { WORKFLOW_ANALYSIS_TOOL_IDS } from "@/runtime/tool-catalog"
+import { isVerifierReadableArtifactRef, isWorkflowArtifactRef } from "@/runtime/workflow"
 import { isFinalAnalysisResultTool } from "@/runtime/turn-assembler"
 import { retryStageForToolFailure } from "@/tool/analysis-reflection"
 
@@ -11,7 +12,7 @@ describe("independent econometrics tool lifecycle", () => {
   })
 
   test("estimator failures retry the estimation stage instead of falling through to verification", () => {
-    for (const toolName of ["ols_regression", "panel_fe_regression", "iv_2sls"]) {
+    for (const toolName of ["ols_regression", "panel_fe_regression", "iv_2sls", "psm_matching", "psm_ipw"]) {
       expect(retryStageForToolFailure(toolName, "estimation_failure")).toBe("estimate")
     }
   })
@@ -21,8 +22,15 @@ describe("independent econometrics tool lifecycle", () => {
   })
 
   test("propensity-score diagnostic failures return to profile or QA instead of pretending estimation completed", () => {
-    expect(retryStageForToolFailure("psm_construction", "column_not_found")).toBe("profile")
-    expect(retryStageForToolFailure("psm_construction", "qa_gate_blocked")).toBe("qa")
-    expect(retryStageForToolFailure("psm_construction", "estimation_failure")).toBe("qa")
+    for (const toolName of ["psm_construction", "psm_visualize"]) {
+      expect(retryStageForToolFailure(toolName, "column_not_found")).toBe("profile")
+      expect(retryStageForToolFailure(toolName, "qa_gate_blocked")).toBe("qa")
+      expect(retryStageForToolFailure(toolName, "estimation_failure")).toBe("qa")
+    }
+  })
+
+  test("keeps PNG diagnostics as workflow artifacts without feeding binary files to the verifier", () => {
+    expect(isWorkflowArtifactRef("analysis/psm_visualize/ps_distribution.png", "plot_path")).toBe(true)
+    expect(isVerifierReadableArtifactRef("analysis/psm_visualize/ps_distribution.png")).toBe(false)
   })
 })

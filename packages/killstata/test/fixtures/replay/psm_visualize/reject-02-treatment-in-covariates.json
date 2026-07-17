@@ -1,0 +1,11 @@
+{
+  "description": "模型把处理变量本身误放进倾向得分协变量",
+  "modelArgs": {
+    "datasetId": "lalonde_nsw",
+    "stageId": "stage_000",
+    "treatmentVar": "treat",
+    "covariates": ["age", "treat"]
+  },
+  "expect": "reject",
+  "rejectHint": ["treat", "已被用作"]
+}

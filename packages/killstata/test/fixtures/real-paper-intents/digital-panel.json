@@ -1,0 +1,49 @@
+{
+  "dataset": "test_datasets.xlsx/Sheet1",
+  "cases": [
+    {
+      "id": "digital-profile-first",
+      "prompt": "先分析这张数字经济表的结构，数字普惠金融指数是结果变量，地区和年份是面板键。",
+      "decision": "call",
+      "expectedTool": "econometrics_recommend",
+      "expectedArgs": {
+        "datasetId": "digital_real",
+        "stageId": "stage_imported",
+        "dependentVar": "数字普惠金融指数",
+        "entityVar": "地区",
+        "timeVar": "年份"
+      },
+      "forbiddenTools": ["panel_fe_regression", "hdfe_regression"],
+      "riskTags": ["profile_before_estimation"],
+      "rationale": "先画像可发现地区重名，不能在 QA 之前直接估计。"
+    },
+    {
+      "id": "digital-ambiguous-region-key",
+      "prompt": "以地区和年份为固定效应直接回归数字普惠金融指数。",
+      "decision": "repair_data",
+      "forbiddenTools": ["panel_fe_regression", "hdfe_regression"],
+      "riskTags": ["ambiguous_panel_key"],
+      "requiredGuidance": ["先构造并验证省份与地区的复合键", "不能静默去重"],
+      "rationale": "地区=其他在 6 个省份重复，导致 115 行超额重复。"
+    },
+    {
+      "id": "digital-fe-after-composite-key",
+      "prompt": "复合地区键通过唯一性 QA 后，用四项数字基础设施指标解释数字普惠金融指数，控制地区和年份固定效应。",
+      "decision": "call_after_repair",
+      "expectedTool": "panel_fe_regression",
+      "expectedArgs": {
+        "datasetId": "digital_repaired",
+        "stageId": "stage_composite_key_qa_passed",
+        "dependentVar": "数字普惠金融指数",
+        "treatmentVar": "每百人互联网用户数",
+        "covariates": ["计算机服务和软件从业人员占比", "人均电信业务总量", "每百人移动电话用户数"],
+        "entityVar": "省份_地区",
+        "timeVar": "年份",
+        "clusterVar": "省份_地区"
+      },
+      "forbiddenTools": ["ols_regression"],
+      "riskTags": ["fixed_effects_requested", "requires_validated_repair"],
+      "rationale": "只有复合键真实创建并通过 QA 后才允许执行固定效应。"
+    }
+  ]
+}

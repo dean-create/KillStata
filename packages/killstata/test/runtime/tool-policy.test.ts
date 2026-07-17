@@ -80,8 +80,10 @@ describe("runtime tool policy", () => {
     expect(ready.directToolIDs).toContain("panel_fe_regression")
   })
 
-  test("exposes each PyFixest estimator as its own analysis tool", () => {
+  test("exposes each production estimator as its own analysis tool", () => {
     expect(WORKFLOW_ESTIMATE_TOOL_IDS).toEqual([
+      "psm_matching",
+      "psm_ipw",
       "ols_regression",
       "panel_fe_regression",
       "iv_2sls",

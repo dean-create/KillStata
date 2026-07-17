@@ -1,0 +1,177 @@
+{
+  "dataset": "did.xlsx/Data_原始编码",
+  "cases": [
+    {
+      "id": "did-fe-baseline",
+      "prompt": "以经济发展水平为被解释变量、did 为核心解释变量，控制人口密度、金融发展程度、城镇化水平、产业结构整体升级、产业结构高级化、教育水平支出和人力资本，控制城市和年份固定效应，按城市聚类标准误。",
+      "decision": "call",
+      "expectedTool": "panel_fe_regression",
+      "expectedArgs": {
+        "datasetId": "did_real",
+        "stageId": "stage_imported",
+        "dependentVar": "经济发展水平",
+        "treatmentVar": "did",
+        "covariates": ["人口密度", "金融发展程度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "entityVar": "city",
+        "timeVar": "year",
+        "clusterVar": "city"
+      },
+      "forbiddenTools": ["ols_regression", "did_static"],
+      "riskTags": ["fixed_effects_requested", "staggered_panel"],
+      "rationale": "17 期、分批处理的城市面板应以双向固定效应作为用户指定的基准规格，不能降级成 pooled OLS 或 2x2 DID。"
+    },
+    {
+      "id": "did-robustness-gdp",
+      "prompt": "把被解释变量替换为人均GDP，其余固定效应、控制变量和聚类方式保持不变，作为替换指标稳健性检验。",
+      "decision": "call",
+      "expectedTool": "panel_fe_regression",
+      "expectedArgs": {
+        "datasetId": "did_real",
+        "stageId": "stage_imported",
+        "dependentVar": "人均GDP",
+        "treatmentVar": "did",
+        "covariates": ["人口密度", "金融发展程度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "entityVar": "city",
+        "timeVar": "year",
+        "clusterVar": "city"
+      },
+      "forbiddenTools": ["ols_regression", "did_static"],
+      "riskTags": ["fixed_effects_requested", "staggered_panel"],
+      "rationale": "稳健性检验只替换结果变量，不应偷偷替换估计量。"
+    },
+    {
+      "id": "did-robustness-quality",
+      "prompt": "用高质量发展指数替代经济发展水平，其他基准设定全部保持一致。",
+      "decision": "call",
+      "expectedTool": "panel_fe_regression",
+      "expectedArgs": {
+        "datasetId": "did_real",
+        "stageId": "stage_imported",
+        "dependentVar": "高质量发展指数",
+        "treatmentVar": "did",
+        "covariates": ["人口密度", "金融发展程度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "entityVar": "city",
+        "timeVar": "year",
+        "clusterVar": "city"
+      },
+      "forbiddenTools": ["ols_regression", "did_static"],
+      "riskTags": ["fixed_effects_requested", "staggered_panel"],
+      "rationale": "替换结果变量后仍执行同一双向固定效应规格。"
+    },
+    {
+      "id": "did-robustness-tfp",
+      "prompt": "用包容性TFP指数作为被解释变量复跑基准模型。",
+      "decision": "call",
+      "expectedTool": "panel_fe_regression",
+      "expectedArgs": {
+        "datasetId": "did_real",
+        "stageId": "stage_imported",
+        "dependentVar": "包容性TFP指数",
+        "treatmentVar": "did",
+        "covariates": ["人口密度", "金融发展程度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "entityVar": "city",
+        "timeVar": "year",
+        "clusterVar": "city"
+      },
+      "forbiddenTools": ["ols_regression", "did_static"],
+      "riskTags": ["fixed_effects_requested", "staggered_panel"],
+      "rationale": "替换结果变量不改变识别规格。"
+    },
+    {
+      "id": "did-mechanism-innovation",
+      "prompt": "把创新指数作为结果变量，检验 did 是否与创新渠道变化相关，沿用城市和年份固定效应。",
+      "decision": "call",
+      "expectedTool": "panel_fe_regression",
+      "expectedArgs": {
+        "datasetId": "did_real",
+        "stageId": "stage_imported",
+        "dependentVar": "创新指数",
+        "treatmentVar": "did",
+        "covariates": ["人口密度", "金融发展程度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "entityVar": "city",
+        "timeVar": "year",
+        "clusterVar": "city"
+      },
+      "forbiddenTools": ["ols_regression", "did_static"],
+      "riskTags": ["fixed_effects_requested", "mechanism_screen"],
+      "summaryRules": ["只能称为机制线索或关联证据", "不能声称已证明中介因果效应"],
+      "rationale": "单独回归渠道变量只能提供机制线索，不能等同于正式中介识别。"
+    },
+    {
+      "id": "did-mechanism-industrial-upgrading",
+      "prompt": "检验产业结构高级化2这条可能机制，使用与基准一致的固定效应和聚类。",
+      "decision": "call",
+      "expectedTool": "panel_fe_regression",
+      "expectedArgs": {
+        "datasetId": "did_real",
+        "stageId": "stage_imported",
+        "dependentVar": "产业结构高级化2",
+        "treatmentVar": "did",
+        "covariates": ["人口密度", "金融发展程度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "entityVar": "city",
+        "timeVar": "year",
+        "clusterVar": "city"
+      },
+      "forbiddenTools": ["ols_regression", "did_static"],
+      "riskTags": ["fixed_effects_requested", "mechanism_screen"],
+      "summaryRules": ["只能称为机制线索或关联证据", "不能声称已证明中介因果效应"],
+      "rationale": "渠道结果的固定效应回归属于机制筛查。"
+    },
+    {
+      "id": "did-mechanism-finance",
+      "prompt": "把金融发展程度作为渠道结果变量检验可能机制，避免把它同时放进控制变量。",
+      "decision": "call",
+      "expectedTool": "panel_fe_regression",
+      "expectedArgs": {
+        "datasetId": "did_real",
+        "stageId": "stage_imported",
+        "dependentVar": "金融发展程度",
+        "treatmentVar": "did",
+        "covariates": ["人口密度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "entityVar": "city",
+        "timeVar": "year",
+        "clusterVar": "city"
+      },
+      "forbiddenTools": ["ols_regression", "did_static"],
+      "riskTags": ["fixed_effects_requested", "mechanism_screen"],
+      "summaryRules": ["只能称为机制线索或关联证据", "不能声称已证明中介因果效应"],
+      "rationale": "结果变量不能在控制变量中重复，机制结论也必须克制。"
+    },
+    {
+      "id": "did-raw-cohort-event-study",
+      "prompt": "直接用原表 time 列作为相对时间，跑现代事件研究。",
+      "decision": "repair_data",
+      "forbiddenTools": ["did2s", "did_event_study_saturated"],
+      "riskTags": ["raw_cohort_sentinel"],
+      "requiredGuidance": ["先确认 never-treated 编码", "构造首次处理批次或相对时期"],
+      "rationale": "原始 time 中 never-treated 使用 36，导入后为缺失；time 是首次处理批次而不是相对时间。"
+    },
+    {
+      "id": "did-guess-instrument",
+      "prompt": "从这些列里自动挑一个工具变量做 IV。",
+      "decision": "clarify",
+      "forbiddenTools": ["iv_2sls"],
+      "riskTags": ["missing_iv_design"],
+      "requiredGuidance": ["请明确工具变量", "说明相关性、外生性与排除限制"],
+      "rationale": "列名和相关性不能证明工具变量有效。"
+    },
+    {
+      "id": "did-panel-psm-without-baseline",
+      "prompt": "直接把全部城市年份观测当独立样本做倾向得分匹配。",
+      "decision": "clarify",
+      "forbiddenTools": ["psm_construction", "psm_visualize", "psm_matching"],
+      "riskTags": ["panel_psm_unit_mismatch"],
+      "requiredGuidance": ["请明确基期", "请明确 ATT 或其他目标量"],
+      "rationale": "PSM 不能无视同一城市的重复年份和处理前协变量时点。"
+    },
+    {
+      "id": "did-heterogeneity-undefined-group",
+      "prompt": "帮我做东中西部异质性分析。",
+      "decision": "clarify",
+      "forbiddenTools": ["heterogeneity_runner"],
+      "riskTags": ["missing_heterogeneity_definition"],
+      "requiredGuidance": ["请提供分组变量或地区划分规则"],
+      "rationale": "数据没有现成东中西部列，模型不能自行发明分组。"
+    }
+  ]
+}

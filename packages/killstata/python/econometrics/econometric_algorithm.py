@@ -169,25 +169,50 @@ def propensity_score_construction(treatment_variable, covariate_variables):
 
 def propensity_score_visualize_propensity_score_distribution(treatment_variable, propensity_score):
     from matplotlib import pyplot as plt
-    
-    '''
-    VISUALIZE propensity score distribution for treatment group and control group and compare their distributions.
-    The ideal result is that treatment group and control group should distribute similarly across propensity score. One common scenario is
-    treatment group has most sample with propensity score close to 1 and control group has most sample with propensity score close to 0.
-    In this scenario, the best solution is to trim samples with extreme propensity scores and obtain a subsample with similarly distributed propensity score.
-    
-    Args:
-        treatment_variable (pd.Series): Target treatment variable, which should be a binary variable (1 for treatment, 0 for control).
-        propensity_score (pd.Series): Propensity score for each sample to receive treatment, which should not contain nan value.
-    '''
-    
-    # Obtain treatment group propensity score and control group propensity score respectively
-    treatment_group_propensity = propensity_score.loc[treatment_variable[treatment_variable == 1].index]
-    control_group_propensity = propensity_score.loc[treatment_variable[treatment_variable == 0].index]
-    
-    # Visualize the distribution using histogram
-    plt.hist(control_group_propensity, bins = 40, facecolor = "blue", edgecolor = "black", alpha = 0.7, label = "control")
-    plt.hist(treatment_group_propensity, bins = 40, facecolor = "red", edgecolor = "black", alpha = 0.7, label = "treatment")
+
+    """Return a deterministic overlap diagnostic for treated and control scores."""
+    treatment = pd.to_numeric(pd.Series(treatment_variable), errors="coerce")
+    scores = pd.to_numeric(pd.Series(propensity_score), errors="coerce")
+    if not treatment.index.equals(scores.index):
+        raise ValueError("Treatment and propensity-score indexes must match")
+    if treatment.isna().any() or scores.isna().any():
+        raise ValueError("Treatment and propensity scores must not contain missing values")
+    if not np.isfinite(treatment.to_numpy(dtype=float)).all() or not np.isfinite(scores.to_numpy(dtype=float)).all():
+        raise ValueError("Treatment and propensity scores must contain only finite values")
+    if set(treatment.unique().tolist()) != {0, 1}:
+        raise ValueError("Treatment variable must contain both 0 and 1")
+    if ((scores <= 0.0) | (scores >= 1.0)).any():
+        raise ValueError("Propensity scores must lie strictly between 0 and 1")
+
+    treated_scores = scores[treatment == 1].to_numpy(dtype=float)
+    control_scores = scores[treatment == 0].to_numpy(dtype=float)
+    bins = np.linspace(0.0, 1.0, 21)
+    figure, axis = plt.subplots(figsize=(8, 5))
+    # 两组统一分箱并各自归一化为组内占比，避免样本量差异被误读为分布差异。
+    axis.hist(
+        control_scores,
+        bins=bins,
+        weights=np.full(control_scores.size, 1.0 / control_scores.size),
+        color="#4C78A8",
+        edgecolor="white",
+        alpha=0.65,
+        label="Control",
+    )
+    axis.hist(
+        treated_scores,
+        bins=bins,
+        weights=np.full(treated_scores.size, 1.0 / treated_scores.size),
+        color="#E45756",
+        edgecolor="white",
+        alpha=0.65,
+        label="Treated",
+    )
+    axis.set(xlim=(0.0, 1.0), xlabel="Propensity score", ylabel="Share within group")
+    axis.set_title("Propensity-score distribution by treatment group")
+    axis.grid(axis="y", alpha=0.2)
+    axis.legend(frameon=False)
+    figure.tight_layout()
+    return figure
 
 def propensity_score_matching(dependent_variable, treatment_variable, propensity_score, matched_num = 1, target_type = "ATE"):
     
@@ -262,6 +287,243 @@ def propensity_score_matching(dependent_variable, treatment_variable, propensity
         treatment_group_dependent_variable_series = dependent_variable.loc[treatment_group_propensity_score_series.index]
         ATT = treatment_group_dependent_variable_series.mean() - matched_dependent_variable_series.mean()
         return ATT
+
+def propensity_score_nearest_neighbor_att(dependent_variable, treatment_variable, propensity_score, covariate_variables):
+    """Estimate ATT for matched treated observations under KillStata's fixed PSM contract.
+
+    This deliberately is not a configurable general-purpose matcher: the model-facing tool
+    fixes 1:1 nearest-neighbour matching with replacement on the logit propensity score and
+    a 0.2-SD caliper. Exact nearest-distance ties share equal control weight, so a row order
+    can never change the estimate. The function rejects the run before publication when
+    post-match absolute SMD exceeds 0.10; it intentionally does not compute SE, p-values,
+    confidence intervals, or a bootstrap inference shortcut.
+    """
+    outcome = pd.Series(dependent_variable, copy=True)
+    treatment = pd.Series(treatment_variable, copy=True)
+    scores = pd.Series(propensity_score, copy=True)
+    covariates = pd.DataFrame(covariate_variables).copy()
+
+    if covariates.shape[1] == 0:
+        raise ValueError("PSM matching requires at least one pre-treatment covariate")
+    if not (outcome.index.equals(treatment.index) and outcome.index.equals(scores.index) and outcome.index.equals(covariates.index)):
+        raise ValueError("Outcome, treatment, propensity scores, and covariates must use the same row index")
+    if outcome.isna().any() or treatment.isna().any() or scores.isna().any() or covariates.isna().any().any():
+        raise ValueError("PSM matching does not accept missing values; preprocess the canonical stage first")
+
+    try:
+        outcome = pd.to_numeric(outcome, errors="raise").astype(float)
+        treatment = pd.to_numeric(treatment, errors="raise").astype(float)
+        scores = pd.to_numeric(scores, errors="raise").astype(float)
+        covariates = covariates.apply(pd.to_numeric, errors="raise").astype(float)
+    except Exception as exc:
+        raise ValueError(f"PSM matching requires numeric outcome, treatment, scores, and covariates: {exc}") from exc
+
+    if not (
+        np.isfinite(outcome.to_numpy()).all()
+        and np.isfinite(treatment.to_numpy()).all()
+        and np.isfinite(scores.to_numpy()).all()
+        and np.isfinite(covariates.to_numpy()).all()
+    ):
+        raise ValueError("PSM matching does not accept non-finite values")
+    treatment_values = set(treatment.unique().tolist())
+    if treatment_values != {0.0, 1.0}:
+        raise ValueError("PSM matching requires treatment coded exactly as 0 and 1 with both groups present")
+    if (scores <= 0).any() or (scores >= 1).any():
+        raise ValueError("PSM matching requires propensity scores strictly inside (0, 1)")
+
+    logit_scores = np.log(scores / (1.0 - scores))
+    logit_sd = float(np.std(logit_scores.to_numpy(), ddof=1))
+    if not np.isfinite(logit_sd) or logit_sd <= 0:
+        raise ValueError("PSM matching requires non-constant logit propensity scores to define its fixed caliper")
+    caliper = 0.2 * logit_sd
+
+    treated_index = treatment.index[treatment == 1]
+    control_index = treatment.index[treatment == 0]
+    control_logits = logit_scores.loc[control_index]
+    control_weights = pd.Series(0.0, index=control_index)
+    matched_treated_index = []
+    matched_effects = []
+    match_distances = []
+
+    for row_index in treated_index:
+        distances = (control_logits - logit_scores.loc[row_index]).abs()
+        nearest_distance = float(distances.min())
+        if nearest_distance > caliper:
+            continue
+        # Floating-point arithmetic may make mathematically equal distances differ by a few ULPs.
+        # This tight tolerance preserves exact-tie averaging without quietly admitting near matches.
+        nearest_controls = distances.index[np.isclose(distances.to_numpy(), nearest_distance, rtol=0.0, atol=1e-12)]
+        matched_control_outcome = float(outcome.loc[nearest_controls].mean())
+        control_weights.loc[nearest_controls] += 1.0 / len(nearest_controls)
+        matched_treated_index.append(row_index)
+        matched_effects.append(float(outcome.loc[row_index] - matched_control_outcome))
+        match_distances.append(nearest_distance)
+
+    if not matched_treated_index:
+        raise ValueError("PSM matching found no treated observation with a control inside the fixed caliper")
+
+    def standardized_mean_difference(treated_values, control_values, pooled_sd, control_weight=None):
+        treated_values = np.asarray(treated_values, dtype=float)
+        control_values = np.asarray(control_values, dtype=float)
+        treated_mean = float(np.mean(treated_values))
+        if control_weight is None:
+            control_mean = float(np.mean(control_values))
+        else:
+            control_weight = np.asarray(control_weight, dtype=float)
+            control_mean = float(np.average(control_values, weights=control_weight))
+        if pooled_sd == 0:
+            if np.isclose(treated_mean, control_mean, rtol=0.0, atol=1e-12):
+                return 0.0
+            raise ValueError("PSM matching cannot standardize a covariate with zero pooled variance and unequal means")
+        return (treated_mean - control_mean) / pooled_sd
+
+    pre_match_smd = {}
+    post_match_smd = {}
+    for column in covariates.columns:
+        values = covariates[column]
+        pre_treated_values = values.loc[treated_index].to_numpy(dtype=float)
+        pre_control_values = values.loc[control_index].to_numpy(dtype=float)
+        # The unmatched groups define one fixed denominator for pre/post SMD.  It remains
+        # well-defined when the caliper leaves a single matched treated observation.
+        treated_variance = np.var(pre_treated_values, ddof=1) if len(pre_treated_values) > 1 else 0.0
+        control_variance = np.var(pre_control_values, ddof=1) if len(pre_control_values) > 1 else 0.0
+        pooled_sd = float(np.sqrt((treated_variance + control_variance) / 2.0))
+        pre_match_smd[str(column)] = float(
+            standardized_mean_difference(pre_treated_values, pre_control_values, pooled_sd)
+        )
+        post_match_smd[str(column)] = float(
+            standardized_mean_difference(
+                values.loc[matched_treated_index],
+                values.loc[control_index],
+                pooled_sd,
+                control_weights.to_numpy(),
+            )
+        )
+
+    post_match_max_abs_smd = max(abs(value) for value in post_match_smd.values())
+    if post_match_max_abs_smd > 0.10:
+        raise ValueError(
+            f"PSM matching failed post-match balance: max absolute SMD={post_match_max_abs_smd:.4f} exceeds 0.10"
+        )
+
+    return {
+        "att": float(np.mean(matched_effects)),
+        "caliper": float(caliper),
+        "treated_count": int(len(treated_index)),
+        "control_count": int(len(control_index)),
+        "matched_treated_count": int(len(matched_treated_index)),
+        "unmatched_treated_count": int(len(treated_index) - len(matched_treated_index)),
+        "reused_control_count": int((control_weights > 1.0).sum()),
+        "max_match_distance": float(max(match_distances)),
+        "pre_match_smd": pre_match_smd,
+        "post_match_smd": post_match_smd,
+        "pre_match_max_abs_smd": float(max(abs(value) for value in pre_match_smd.values())),
+        "post_match_max_abs_smd": float(post_match_max_abs_smd),
+    }
+
+def propensity_score_hajek_ipw_ate(dependent_variable, treatment_variable, propensity_score, covariate_variables):
+    """Estimate a fixed Hájek IPW ATE under KillStata's model-facing contract.
+
+    The caller cannot select ATT, trimming, clipping, or a weight formula.  Scores outside
+    the declared overlap interval cause an explicit failure rather than silent clipping;
+    both group effective sample sizes and every supplied covariate's weighted SMD must pass
+    before an estimate is returned.  Inference is deliberately absent because this narrow
+    estimator has not yet admitted a validated variance procedure.
+    """
+    outcome = pd.Series(dependent_variable, copy=True)
+    treatment = pd.Series(treatment_variable, copy=True)
+    scores = pd.Series(propensity_score, copy=True)
+    covariates = pd.DataFrame(covariate_variables).copy()
+
+    if covariates.shape[1] == 0:
+        raise ValueError("IPW requires at least one pre-treatment covariate")
+    if not (outcome.index.equals(treatment.index) and outcome.index.equals(scores.index) and outcome.index.equals(covariates.index)):
+        raise ValueError("Outcome, treatment, propensity scores, and covariates must use the same row index")
+    if outcome.isna().any() or treatment.isna().any() or scores.isna().any() or covariates.isna().any().any():
+        raise ValueError("IPW does not accept missing values; preprocess the canonical stage first")
+
+    try:
+        outcome = pd.to_numeric(outcome, errors="raise").astype(float)
+        treatment = pd.to_numeric(treatment, errors="raise").astype(float)
+        scores = pd.to_numeric(scores, errors="raise").astype(float)
+        covariates = covariates.apply(pd.to_numeric, errors="raise").astype(float)
+    except Exception as exc:
+        raise ValueError(f"IPW requires numeric outcome, treatment, scores, and covariates: {exc}") from exc
+
+    if not (
+        np.isfinite(outcome.to_numpy()).all()
+        and np.isfinite(treatment.to_numpy()).all()
+        and np.isfinite(scores.to_numpy()).all()
+        and np.isfinite(covariates.to_numpy()).all()
+    ):
+        raise ValueError("IPW does not accept non-finite values")
+    if set(treatment.unique().tolist()) != {0.0, 1.0}:
+        raise ValueError("IPW requires treatment coded exactly as 0 and 1 with both groups present")
+    if (scores <= 0).any() or (scores >= 1).any():
+        raise ValueError("IPW requires propensity scores strictly inside (0, 1)")
+
+    overlap_lower, overlap_upper = 0.05, 0.95
+    if (scores < overlap_lower).any() or (scores > overlap_upper).any():
+        raise ValueError(
+            "IPW overlap failure: every propensity score must remain inside the fixed [0.05, 0.95] interval; weights are never clipped"
+        )
+
+    treated_index = treatment.index[treatment == 1]
+    control_index = treatment.index[treatment == 0]
+    treatment_weights = 1.0 / scores.loc[treated_index]
+    control_weights = 1.0 / (1.0 - scores.loc[control_index])
+
+    def effective_sample_size(weights):
+        values = np.asarray(weights, dtype=float)
+        return float(np.square(values.sum()) / np.square(values).sum())
+
+    treatment_ess = effective_sample_size(treatment_weights)
+    control_ess = effective_sample_size(control_weights)
+    if treatment_ess < 20.0 or control_ess < 20.0:
+        raise ValueError(
+            f"IPW effective sample size failure: treated ESS={treatment_ess:.2f}, control ESS={control_ess:.2f}; each must be at least 20"
+        )
+
+    # Keep one unmatched-sample pooled SD denominator for pre/post comparison.  The means
+    # below are Hájek-normalized within group, so the reported ATE cannot be altered by
+    # multiplying every group weight by the same constant.
+    weighted_smd = {}
+    for column in covariates.columns:
+        values = covariates[column]
+        treated_values = values.loc[treated_index].to_numpy(dtype=float)
+        control_values = values.loc[control_index].to_numpy(dtype=float)
+        treated_variance = np.var(treated_values, ddof=1) if len(treated_values) > 1 else 0.0
+        control_variance = np.var(control_values, ddof=1) if len(control_values) > 1 else 0.0
+        pooled_sd = float(np.sqrt((treated_variance + control_variance) / 2.0))
+        treated_mean = float(np.average(treated_values, weights=treatment_weights.to_numpy()))
+        control_mean = float(np.average(control_values, weights=control_weights.to_numpy()))
+        if pooled_sd == 0:
+            if np.isclose(treated_mean, control_mean, rtol=0.0, atol=1e-12):
+                weighted_smd[str(column)] = 0.0
+                continue
+            raise ValueError("IPW cannot standardize a covariate with zero pooled variance and unequal weighted means")
+        weighted_smd[str(column)] = float((treated_mean - control_mean) / pooled_sd)
+
+    weighted_max_abs_smd = max(abs(value) for value in weighted_smd.values())
+    if weighted_max_abs_smd > 0.10:
+        raise ValueError(
+            f"IPW failed weighted balance: max absolute SMD={weighted_max_abs_smd:.4f} exceeds 0.10"
+        )
+
+    treated_mean = float(np.average(outcome.loc[treated_index], weights=treatment_weights.to_numpy()))
+    control_mean = float(np.average(outcome.loc[control_index], weights=control_weights.to_numpy()))
+    return {
+        "ate": float(treated_mean - control_mean),
+        "treated_count": int(len(treated_index)),
+        "control_count": int(len(control_index)),
+        "treatment_ess": float(treatment_ess),
+        "control_ess": float(control_ess),
+        "min_propensity_score": float(scores.min()),
+        "max_propensity_score": float(scores.max()),
+        "max_weight": float(max(treatment_weights.max(), control_weights.max())),
+        "weighted_smd": weighted_smd,
+        "weighted_max_abs_smd": float(weighted_max_abs_smd),
+    }
 
 def propensity_score_inverse_probability_weighting(dependent_variable, treatment_variable, propensity_score, target_type = "ATE"):
     

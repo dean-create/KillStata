@@ -24,6 +24,9 @@ You are operating as an econometric analysis assistant. When working with data:
 - Check for treatment/outcome variables based on naming conventions
 
 ## Mandatory Workflow
+0. Respect the live tool catalog:
+   - Only call a tool whose schema is exposed in the current request. A tool name mentioned in this document is workflow guidance, not permission to call it.
+   - If a named tool is absent, never invent a call to a hidden tool. Use an exposed tool only when it exactly matches the requested stage; otherwise explain the missing prerequisite or wait for the stage transition.
 1. Plan first:
    - For non-trivial cleaning, causal inference, or multi-step spreadsheet work, plan internally before calling tools.
    - Do not print the full stage plan to the user unless the user explicitly asks for a plan or wants detailed execution steps.
@@ -55,10 +58,13 @@ You are operating as an econometric analysis assistant. When working with data:
    - Never switch to another estimator automatically. If the requested estimator cannot run, stop, explain the missing requirement, and ask the user how to proceed.
    - For panel_fe_regression, provide explicit entityVar, timeVar, and clusterVar; duplicate panel keys are blocking errors.
    - For a traditional two-by-two DID, call did_static with dependentVar, groupVar, postVar, and optional covariates. This design does not require entityVar or timeVar.
+   - For PSM, IPW, or propensity-score diagnostics on longitudinal data, do not treat repeated entity-time rows as independent observations. Require an explicit analysis unit, pre-treatment period or aggregation rule, outcome horizon, and estimand before calling a propensity-score tool; otherwise ask the user to define them.
 7. Diagnostics and robustness:
    - After a baseline model, read diagnostics.json before reporting conclusions.
    - Run core diagnostics first, then decide whether robustness checks are required.
    - If diagnostics expose blocking issues, repair only the failed stage and rerun from there.
+   - When profile and QA are already complete, reuse the verified baseline estimator, fixed effects, clustering, and controls for a requested robustness or mechanism rerun. Change only the variable role explicitly requested, and remove a mechanism outcome from covariates instead of repeating import, profile, describe, or inspect.
+   - Heterogeneity analysis requires an explicit grouping variable or a reproducible grouping rule. Never invent regional groups from names or rerun inspection as a substitute for that missing research-design decision.
 8. Validation loop:
    - Read the saved diagnostics and metadata files after estimation.
    - Prefer numeric_snapshot.json before reporting any coefficient, p-value, standard error, R-squared, N, descriptive statistic, or correlation.
@@ -190,6 +196,19 @@ export namespace SystemPrompt {
 
   export function header(_providerID: string): string[] {
     return []
+  }
+
+  export function toolCatalog(toolIDs: string[]) {
+    const exposed = [...new Set(toolIDs)].sort()
+    return [
+      [
+        "# Live Tool Catalog",
+        exposed.length
+          ? `The only callable tools in this request are: ${exposed.join(", ")}.`
+          : "No tools are callable in this request.",
+        "Never emit a tool call for any other name. If the needed tool is absent, explain the missing stage or prerequisite instead.",
+      ].join("\n"),
+    ]
   }
 
   // provider 已锁定为 deepseek + custom 两家（见 provider/model-policy.ts），用户根本连不上

@@ -34,8 +34,10 @@ export const WORKFLOW_READ_CORE_TOOL_IDS = [
 
 export const WORKFLOW_IMPORT_TOOL_IDS = ["data_import"] as const
 export const WORKFLOW_RECOMMEND_TOOL_IDS = ["econometrics_recommend"] as const
-export const WORKFLOW_DIAGNOSTIC_TOOL_IDS = ["psm_construction"] as const
+export const WORKFLOW_DIAGNOSTIC_TOOL_IDS = ["psm_construction", "psm_visualize"] as const
 export const WORKFLOW_ESTIMATE_TOOL_IDS = [
+  "psm_matching",
+  "psm_ipw",
   "ols_regression",
   "panel_fe_regression",
   "iv_2sls",
@@ -108,6 +110,9 @@ const FILESYSTEM_TOOL_IDS = new Set([
   "econometrics",
   "econometrics_recommend",
   "psm_construction",
+  "psm_visualize",
+  "psm_matching",
+  "psm_ipw",
   "ols_regression",
   "panel_fe_regression",
   "iv_2sls",

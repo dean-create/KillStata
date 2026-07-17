@@ -201,6 +201,18 @@ const SUPPORTED_METHODS = [
 
 type MethodName = (typeof SUPPORTED_METHODS)[number]
 
+const PROPENSITY_SCORE_DIAGNOSTIC_METHODS = new Set<MethodName>(["psm_construction", "psm_visualize"])
+const PROPENSITY_SCORE_TRANSACTIONAL_METHODS = new Set<MethodName>([
+  ...PROPENSITY_SCORE_DIAGNOSTIC_METHODS,
+  "psm_matching",
+  "psm_ipw",
+])
+const PROPENSITY_SCORE_NO_INFERENCE_METHODS = new Set<MethodName>([
+  ...PROPENSITY_SCORE_DIAGNOSTIC_METHODS,
+  "psm_matching",
+  "psm_ipw",
+])
+
 const MethodSchema = z.enum(SUPPORTED_METHODS)
 
 const METHOD_REQUIRED_OPTIONS: Partial<Record<MethodName, string[]>> = {
@@ -278,6 +290,24 @@ type PythonResult = {
   support_lower?: number
   support_upper?: number
   share_in_support?: number
+  treated_count?: number
+  control_count?: number
+  matched_treated_count?: number
+  unmatched_treated_count?: number
+  reused_control_count?: number
+  caliper?: number
+  max_match_distance?: number
+  pre_match_max_abs_smd?: number
+  post_match_max_abs_smd?: number
+  pre_match_smd?: Record<string, number>
+  post_match_smd?: Record<string, number>
+  treatment_ess?: number
+  control_ess?: number
+  min_propensity_score?: number
+  max_propensity_score?: number
+  max_weight?: number
+  weighted_smd?: Record<string, number>
+  weighted_max_abs_smd?: number
   cluster_var?: string
   test_results?: unknown
   dataset_id?: string
@@ -367,6 +397,169 @@ function validatePropensityScoreConstructionResult(result: PythonResult, outputD
   }
 }
 
+function validatePropensityScoreVisualizationResult(result: PythonResult, outputDir: string) {
+  for (const [name, value] of [
+    ["score_min", result.score_min],
+    ["score_max", result.score_max],
+    ["mean_treated", result.mean_treated],
+    ["mean_control", result.mean_control],
+    ["support_lower", result.support_lower],
+    ["support_upper", result.support_upper],
+  ] as const) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value >= 1) {
+      throw new Error(`倾向得分分布后端返回无效的 ${name}，未发布诊断图`)
+    }
+  }
+  if (
+    typeof result.share_in_support !== "number" ||
+    !Number.isFinite(result.share_in_support) ||
+    result.share_in_support < 0 ||
+    result.share_in_support > 1
+  ) {
+    throw new Error("倾向得分分布后端返回无效的共同支撑占比，未发布诊断图")
+  }
+  if (
+    typeof result.extreme_score_share !== "number" ||
+    !Number.isFinite(result.extreme_score_share) ||
+    result.extreme_score_share < 0 ||
+    result.extreme_score_share > 1 ||
+    result.score_min! > result.score_max!
+  ) {
+    throw new Error("倾向得分分布后端返回无效的得分摘要，未发布诊断图")
+  }
+  if (
+    !Number.isInteger(result.rows_used) ||
+    !Number.isInteger(result.treated_count) ||
+    !Number.isInteger(result.control_count) ||
+    (result.treated_count ?? 0) <= 0 ||
+    (result.control_count ?? 0) <= 0 ||
+    result.treated_count! + result.control_count! !== result.rows_used
+  ) {
+    throw new Error("倾向得分分布后端返回无效的分组样本量，未发布诊断图")
+  }
+
+  const plotPath = result.plot_path
+  if (
+    typeof plotPath !== "string" ||
+    path.basename(plotPath) !== "ps_distribution.png" ||
+    !isPathInside(outputDir, plotPath) ||
+    !fs.existsSync(plotPath) ||
+    !fs.statSync(plotPath).isFile()
+  ) {
+    throw new Error("倾向得分分布图缺失或路径越界，未发布诊断图")
+  }
+  const descriptor = fs.openSync(plotPath, "r")
+  try {
+    const header = Buffer.alloc(24)
+    const bytesRead = fs.readSync(descriptor, header, 0, header.length, 0)
+    const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+    if (
+      bytesRead < 24 ||
+      !header.subarray(0, 8).equals(signature) ||
+      header.readUInt32BE(16) <= 0 ||
+      header.readUInt32BE(20) <= 0
+    ) {
+      throw new Error("倾向得分分布图不是有效的 PNG，未发布诊断图")
+    }
+  } finally {
+    fs.closeSync(descriptor)
+  }
+}
+
+function validatePropensityScoreMatchingResult(result: PythonResult) {
+  for (const [name, value] of [
+    ["att", result.att],
+    ["caliper", result.caliper],
+    ["max_match_distance", result.max_match_distance],
+    ["pre_match_max_abs_smd", result.pre_match_max_abs_smd],
+    ["post_match_max_abs_smd", result.post_match_max_abs_smd],
+  ] as const) {
+    if (typeof value !== "number" || !Number.isFinite(value) || (name === "caliper" && value <= 0)) {
+      throw new Error(`倾向得分匹配后端返回无效的 ${name}，未发布匹配结果`)
+    }
+  }
+  for (const [name, value] of [
+    ["treated_count", result.treated_count],
+    ["control_count", result.control_count],
+    ["matched_treated_count", result.matched_treated_count],
+    ["unmatched_treated_count", result.unmatched_treated_count],
+    ["reused_control_count", result.reused_control_count],
+  ] as const) {
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+      throw new Error(`倾向得分匹配后端返回无效的 ${name}，未发布匹配结果`)
+    }
+  }
+  if (
+    (result.treated_count ?? 0) <= 0 ||
+    (result.control_count ?? 0) <= 0 ||
+    (result.matched_treated_count ?? 0) <= 0 ||
+    result.treated_count !== (result.matched_treated_count ?? 0) + (result.unmatched_treated_count ?? 0) ||
+    (result.max_match_distance ?? 0) > (result.caliper ?? 0) + 1e-12 ||
+    (result.post_match_max_abs_smd ?? Infinity) > 0.1 + 1e-12 ||
+    !result.pre_match_smd ||
+    !result.post_match_smd ||
+    Object.keys(result.pre_match_smd).length === 0 ||
+    Object.keys(result.pre_match_smd).length !== Object.keys(result.post_match_smd).length
+  ) {
+    throw new Error("倾向得分匹配诊断不完整或未达到固定平衡阈值，未发布匹配结果")
+  }
+  const preKeys = Object.keys(result.pre_match_smd).sort()
+  const postKeys = Object.keys(result.post_match_smd).sort()
+  if (
+    preKeys.some((key, index) => key !== postKeys[index]) ||
+    [...Object.values(result.pre_match_smd), ...Object.values(result.post_match_smd)].some(
+      (value) => !Number.isFinite(value),
+    ) ||
+    Math.abs(Math.max(...Object.values(result.pre_match_smd).map(Math.abs)) - result.pre_match_max_abs_smd!) > 1e-12 ||
+    Math.abs(Math.max(...Object.values(result.post_match_smd).map(Math.abs)) - result.post_match_max_abs_smd!) > 1e-12
+  ) {
+    throw new Error("倾向得分匹配 SMD 诊断不一致，未发布匹配结果")
+  }
+}
+
+function validatePropensityScoreIpwResult(result: PythonResult) {
+  for (const [name, value] of [
+    ["ate", result.ate],
+    ["treatment_ess", result.treatment_ess],
+    ["control_ess", result.control_ess],
+    ["min_propensity_score", result.min_propensity_score],
+    ["max_propensity_score", result.max_propensity_score],
+    ["max_weight", result.max_weight],
+    ["weighted_max_abs_smd", result.weighted_max_abs_smd],
+  ] as const) {
+    if (typeof value !== "number" || !Number.isFinite(value) || (name === "max_weight" && value <= 0)) {
+      throw new Error(`逆概率加权后端返回无效的 ${name}，未发布加权结果`)
+    }
+  }
+  for (const [name, value] of [
+    ["treated_count", result.treated_count],
+    ["control_count", result.control_count],
+  ] as const) {
+    if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+      throw new Error(`逆概率加权后端返回无效的 ${name}，未发布加权结果`)
+    }
+  }
+  if (
+    (result.treatment_ess ?? 0) < 20 ||
+    (result.control_ess ?? 0) < 20 ||
+    (result.min_propensity_score ?? 0) < 0.05 - 1e-12 ||
+    (result.max_propensity_score ?? 1) > 0.95 + 1e-12 ||
+    result.min_propensity_score! > result.max_propensity_score! ||
+    (result.weighted_max_abs_smd ?? Infinity) > 0.1 + 1e-12 ||
+    !result.weighted_smd ||
+    Object.keys(result.weighted_smd).length === 0
+  ) {
+    throw new Error("逆概率加权诊断不完整或未达到固定重叠、有效样本量与平衡阈值，未发布加权结果")
+  }
+  const smdValues = Object.values(result.weighted_smd)
+  if (
+    smdValues.some((value) => !Number.isFinite(value)) ||
+    Math.abs(Math.max(...smdValues.map(Math.abs)) - result.weighted_max_abs_smd!) > 1e-12
+  ) {
+    throw new Error("逆概率加权 SMD 诊断不一致，未发布加权结果")
+  }
+}
+
 export function buildPropensityScoreDiagnosticOutput(result: PythonResult) {
   if (
     result.rows_used === undefined ||
@@ -398,6 +591,70 @@ export function buildPropensityScoreDiagnosticOutput(result: PythonResult) {
       : undefined,
     "",
     "这只是处理分配与重叠情况的诊断，不是因果效应估计；是否继续匹配或加权，要先根据共同支撑和平衡情况决定。",
+    result.warnings?.length ? `注意：${result.warnings.join("；")}` : undefined,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n")
+}
+
+export function buildPropensityScoreVisualizationOutput(result: PythonResult) {
+  if (
+    result.rows_used === undefined ||
+    result.treated_count === undefined ||
+    result.control_count === undefined ||
+    result.score_min === undefined ||
+    result.score_max === undefined ||
+    result.share_in_support === undefined
+  ) {
+    throw new Error("倾向得分分布后端返回结果不完整，未发布诊断图")
+  }
+  return [
+    "## 倾向得分分布诊断",
+    "",
+    `- 样本量：${result.rows_used}（处理组 ${result.treated_count}，对照组 ${result.control_count}）`,
+    `- 得分范围：${result.score_min.toFixed(4)} 至 ${result.score_max.toFixed(4)}`,
+    `- 共同支撑样本占比：${(result.share_in_support * 100).toFixed(1)}%`,
+    "",
+    "分布图用于检查处理组与对照组的重叠情况，不是因果效应估计；是否继续匹配或加权，要结合共同支撑与协变量平衡决定。",
+    result.warnings?.length ? `注意：${result.warnings.join("；")}` : undefined,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n")
+}
+
+export function buildPropensityScoreMatchingOutput(result: PythonResult) {
+  validatePropensityScoreMatchingResult(result)
+  return [
+    "## 倾向得分最近邻匹配",
+    "",
+    `- ATT（已匹配处理组）：${result.att!.toFixed(4)}`,
+    `- 处理组：${result.treated_count}；其中已匹配 ${result.matched_treated_count}，因固定 caliper 未匹配 ${result.unmatched_treated_count}`,
+    `- 对照组：${result.control_count}；被重复使用的对照组：${result.reused_control_count}`,
+    `- 固定 caliper：${result.caliper!.toFixed(4)}（logit 倾向得分标准差的 0.2 倍）`,
+    `- 最大匹配距离：${result.max_match_distance!.toFixed(4)}`,
+    `- 匹配前最大绝对 SMD：${result.pre_match_max_abs_smd!.toFixed(4)}`,
+    `- 匹配后最大绝对 SMD：${result.post_match_max_abs_smd!.toFixed(4)}（阈值 ≤ 0.1000）`,
+    "",
+    "本结果固定为允许重复使用对照组的 1:1 最近邻匹配，并只描述已匹配处理组的 ATT；未输出标准误、p 值、置信区间或显著性结论。",
+    result.warnings?.length ? `注意：${result.warnings.join("；")}` : undefined,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n")
+}
+
+export function buildPropensityScoreIpwOutput(result: PythonResult) {
+  validatePropensityScoreIpwResult(result)
+  return [
+    "## 逆概率加权（IPW）",
+    "",
+    `- ATE：${result.ate!.toFixed(4)}`,
+    `- 样本量：处理组 ${result.treated_count}；对照组 ${result.control_count}`,
+    `- 倾向得分范围：${result.min_propensity_score!.toFixed(4)} 至 ${result.max_propensity_score!.toFixed(4)}（固定要求 [0.0500, 0.9500]）`,
+    `- 有效样本量：处理组 ${result.treatment_ess!.toFixed(2)}；对照组 ${result.control_ess!.toFixed(2)}（每组阈值 ≥ 20）`,
+    `- 最大权重：${result.max_weight!.toFixed(4)}`,
+    `- 加权后最大绝对 SMD：${result.weighted_max_abs_smd!.toFixed(4)}（阈值 ≤ 0.1000）`,
+    "",
+    "本结果固定为 Hájek 归一化 ATE；不会静默截尾或裁剪权重。当前未输出标准误、p 值、置信区间或显著性结论。",
     result.warnings?.length ? `注意：${result.warnings.join("；")}` : undefined,
   ]
     .filter((line): line is string => Boolean(line))
@@ -453,7 +710,11 @@ function validateMethodOptions(params: {
   entityVar?: string
   timeVar?: string
 }) {
-  if (!new Set<MethodName>(["auto_recommend", "psm_construction"]).has(params.methodName) && !params.dependentVar) {
+  if (
+    params.methodName !== "auto_recommend" &&
+    !PROPENSITY_SCORE_DIAGNOSTIC_METHODS.has(params.methodName) &&
+    !params.dependentVar
+  ) {
     throw new Error(`Method ${params.methodName} requires dependentVar`)
   }
 
@@ -614,7 +875,7 @@ export function evaluatePrincipleChecks(input: {
     else diagnosticsStatus = mergePrincipleStatus(diagnosticsStatus, status)
   }
 
-  if (!input.hasNumericSnapshot && input.methodName !== "psm_construction") {
+  if (!input.hasNumericSnapshot && !PROPENSITY_SCORE_NO_INFERENCE_METHODS.has(input.methodName)) {
     addFinding("block", "缺少 numeric_snapshot，当前结果不能输出系数、p 值或显著性结论。", "prereq")
   }
 
@@ -681,7 +942,7 @@ export function evaluatePrincipleChecks(input: {
     }
   }
 
-  if (input.methodName === "psm_construction") {
+  if (PROPENSITY_SCORE_DIAGNOSTIC_METHODS.has(input.methodName)) {
     addFinding("warn", "倾向得分构造只是处理分配与共同支撑诊断，不是因果效应估计。", "prereq")
   }
 
@@ -964,8 +1225,14 @@ export function buildConciseResultMarkdown(params: {
   treatmentLabel?: string
   principleChecks?: PrincipleChecks
 }) {
-  if (params.methodName === "psm_construction") {
-    const lines = ["倾向得分诊断"]
+  if (params.methodName === "psm_matching") {
+    return buildPropensityScoreMatchingOutput(params.result) + "\n"
+  }
+  if (params.methodName === "psm_ipw") {
+    return buildPropensityScoreIpwOutput(params.result) + "\n"
+  }
+  if (PROPENSITY_SCORE_DIAGNOSTIC_METHODS.has(params.methodName)) {
+    const lines = [params.methodName === "psm_visualize" ? "倾向得分分布诊断" : "倾向得分诊断"]
     if (params.result.rows_used !== undefined) lines.push(`- N：${params.result.rows_used}`)
     if (params.result.score_min !== undefined && params.result.score_max !== undefined) {
       lines.push(`- 得分范围：${params.result.score_min.toFixed(4)} 至 ${params.result.score_max.toFixed(4)}`)
@@ -1929,8 +2196,8 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
       entityVar: params.entityVar,
       timeVar: params.timeVar,
     })
-    if (params.methodName === "psm_construction" && params.outputDir !== undefined) {
-      throw new Error("psm_construction 不接受调用方指定 outputDir；输出目录由 Harness 隔离管理")
+    if (PROPENSITY_SCORE_TRANSACTIONAL_METHODS.has(params.methodName) && params.outputDir !== undefined) {
+      throw new Error(`${params.methodName} 不接受调用方指定 outputDir；输出目录由 Harness 隔离管理`)
     }
 
     // 参数校验必须先于审批弹窗：没有数据来源的调用根本跑不起来（resolveArtifactInput
@@ -2052,8 +2319,6 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
           stamp: outputStamp,
         }).replace(/\.json$/, "")
       : path.join(Instance.directory, "analysis", params.methodName)
-    fs.mkdirSync(outputDir, { recursive: true })
-
     await ctx.ask({
       permission: "bash",
       patterns: [`${pythonCommand} *econometrics*`],
@@ -2062,6 +2327,15 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
         description: `Run econometric method: ${params.methodName}`,
       },
     })
+    fs.mkdirSync(outputDir, { recursive: true })
+    let diagnosticOutputPublished = false
+    using _diagnosticOutputCleanup = {
+      [Symbol.dispose]() {
+        if (PROPENSITY_SCORE_TRANSACTIONAL_METHODS.has(params.methodName) && !diagnosticOutputPublished) {
+          cleanupFailedPropensityScoreRun(outputDir)
+        }
+      },
+    }
 
     if (params.methodName === "auto_recommend") {
       const autoResult = await runAutoRecommend({
@@ -2778,14 +3052,17 @@ def persist_common_outputs(payload, result, qa, diagnostics, metadata, coefficie
     output_path = output_dir / "results.json"
     summary_path = output_dir / "model_summary.txt"
 
-    coefficients = coefficients if coefficients is not None else empty_coefficient_table()
-    coefficients.to_csv(coefficients_path, index=False, encoding="utf-8-sig")
-    with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
-        coefficients.to_excel(writer, sheet_name="coefficients", index=False)
+    # 分布诊断没有回归系数，避免生成两个空表冒充可解释产物。
+    if payload.get("method") != "psm_visualize":
+        coefficients = coefficients if coefficients is not None else empty_coefficient_table()
+        coefficients.to_csv(coefficients_path, index=False, encoding="utf-8-sig")
+        with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
+            coefficients.to_excel(writer, sheet_name="coefficients", index=False)
 
     result["output_path"] = str(output_path)
-    result["coefficients_path"] = str(coefficients_path)
-    result["workbook_path"] = str(workbook_path)
+    if payload.get("method") != "psm_visualize":
+        result["coefficients_path"] = str(coefficients_path)
+        result["workbook_path"] = str(workbook_path)
     result["diagnostics_path"] = str(diagnostics_path)
     result["metadata_path"] = str(metadata_path)
     result["narrative_path"] = str(narrative_path)
@@ -2873,6 +3150,7 @@ try:
     degraded_from = None
     iv_diagnostic = None
     parallel_trends_report = None
+    matching_diagnostics = None
 
     if method == "ols_regression":
         assert_ols_design_full_rank(df, payload["dependent_var"], treatment_name, covariate_names)
@@ -2923,41 +3201,93 @@ try:
     elif method == "psm_matching":
         ps = propensity_score_construction(treatment_var, covariates)
         propensity_score_series = ps
-        target_type = options.get("target_type", "ATE")
-        value = propensity_score_matching(
+        matching = propensity_score_nearest_neighbor_att(
             dependent_var,
             treatment_var,
             ps,
-            matched_num=options.get("matched_num", 1),
-            target_type=target_type,
+            covariates,
         )
-        metric_term = "ATE" if target_type == "ATE" else "ATT"
+        matched_share = matching["matched_treated_count"] / matching["treated_count"]
+        matching_diagnostics = {
+            "common_support": {
+                "passed": True,
+                "matched_share": float(matched_share),
+            },
+            "balance": {
+                "threshold": 0.10,
+                "pre_match_smd": matching["pre_match_smd"],
+                "post_match_smd": matching["post_match_smd"],
+                "pre_match_max_abs_smd": matching["pre_match_max_abs_smd"],
+                "post_match_max_abs_smd": matching["post_match_max_abs_smd"],
+            },
+        }
+        if matching["unmatched_treated_count"] > 0:
+            qa["warnings"].append(
+                f"固定 caliper 未匹配 {matching['unmatched_treated_count']} 个处理组样本；当前效应仅对应已匹配处理组"
+            )
         result = {
             "success": True,
-            "ate": float(value) if target_type == "ATE" else None,
-            "att": float(value) if target_type == "ATT" else None,
-            "method": "PSM",
+            "att": float(matching["att"]),
+            "caliper": float(matching["caliper"]),
+            "treated_count": int(matching["treated_count"]),
+            "control_count": int(matching["control_count"]),
+            "matched_treated_count": int(matching["matched_treated_count"]),
+            "unmatched_treated_count": int(matching["unmatched_treated_count"]),
+            "reused_control_count": int(matching["reused_control_count"]),
+            "max_match_distance": float(matching["max_match_distance"]),
+            "pre_match_smd": matching["pre_match_smd"],
+            "post_match_smd": matching["post_match_smd"],
+            "pre_match_max_abs_smd": float(matching["pre_match_max_abs_smd"]),
+            "post_match_max_abs_smd": float(matching["post_match_max_abs_smd"]),
+            "method": "PSM nearest-neighbor ATT (matched treated)",
         }
-        coefficients = scalar_coefficient_table(metric_term, coefficient=value)
-        result["table_variables"] = [metric_term]
+        coefficients = scalar_coefficient_table("ATT_matched_treated", coefficient=matching["att"])
+        result["table_variables"] = ["ATT_matched_treated"]
         output_kind = "estimator"
-        primary_term = metric_term
+        primary_term = "ATT_matched_treated"
 
     elif method == "psm_ipw":
         ps = propensity_score_construction(treatment_var, covariates)
         propensity_score_series = ps
-        ate = propensity_score_inverse_probability_weighting(
+        ipw = propensity_score_hajek_ipw_ate(
             dependent_var,
             treatment_var,
             ps,
-            target_type=options.get("target_type", "ATE"),
+            covariates,
         )
+        matching_diagnostics = {
+            "common_support": {
+                "passed": True,
+                "score_lower_bound": 0.05,
+                "score_upper_bound": 0.95,
+            },
+            "weighting": {
+                "estimator": "hajek_ate",
+                "treatment_ess": ipw["treatment_ess"],
+                "control_ess": ipw["control_ess"],
+                "max_weight": ipw["max_weight"],
+            },
+            "balance": {
+                "threshold": 0.10,
+                "weighted_smd": ipw["weighted_smd"],
+                "weighted_max_abs_smd": ipw["weighted_max_abs_smd"],
+            },
+        }
         result = {
             "success": True,
-            "ate": float(ate),
-            "method": "IPW",
+            "ate": float(ipw["ate"]),
+            "treated_count": int(ipw["treated_count"]),
+            "control_count": int(ipw["control_count"]),
+            "treatment_ess": float(ipw["treatment_ess"]),
+            "control_ess": float(ipw["control_ess"]),
+            "min_propensity_score": float(ipw["min_propensity_score"]),
+            "max_propensity_score": float(ipw["max_propensity_score"]),
+            "max_weight": float(ipw["max_weight"]),
+            "weighted_smd": ipw["weighted_smd"],
+            "weighted_max_abs_smd": float(ipw["weighted_max_abs_smd"]),
+            "method": "Hájek IPW ATE",
         }
-        coefficients = scalar_coefficient_table("ATE", coefficient=ate)
+        coefficients = scalar_coefficient_table("ATE", coefficient=ipw["ate"])
         result["table_variables"] = ["ATE"]
         output_kind = "estimator"
         primary_term = "ATE"
@@ -3218,13 +3548,34 @@ try:
         plt = load_matplotlib_pyplot()
         ps = propensity_score_construction(treatment_var, covariates)
         propensity_score_series = ps
+        support = common_support_report(treatment_var, ps)
         output_path = Path(payload["output_dir"]) / "ps_distribution.png"
-        propensity_score_visualize_propensity_score_distribution(treatment_var, ps)
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
-        plt.close()
+        output_temp_path = Path(payload["output_dir"]) / "ps_distribution.tmp.png"
+        figure = propensity_score_visualize_propensity_score_distribution(treatment_var, ps)
+        try:
+            figure.savefig(output_temp_path, dpi=160, bbox_inches="tight", format="png")
+            output_temp_path.replace(output_path)
+        finally:
+            output_temp_path.unlink(missing_ok=True)
+            plt.close(figure)
+        share_in_support = support.get("share_in_support") if isinstance(support, dict) else None
+        if isinstance(share_in_support, (int, float)) and share_in_support < 1:
+            qa["warnings"].append(
+                f"只有 {share_in_support:.1%} 的样本位于经验共同支撑区间，估计效应前必须先处理重叠问题"
+            )
         result = {
             "success": True,
             "plot_path": str(output_path),
+            "score_min": float(ps.min()),
+            "score_max": float(ps.max()),
+            "mean_treated": float(ps[treatment_var == 1].mean()),
+            "mean_control": float(ps[treatment_var == 0].mean()),
+            "extreme_score_share": float(((ps <= 0.01) | (ps >= 0.99)).mean()),
+            "support_lower": support.get("lower_bound") if isinstance(support, dict) else None,
+            "support_upper": support.get("upper_bound") if isinstance(support, dict) else None,
+            "share_in_support": share_in_support,
+            "treated_count": int((treatment_var == 1).sum()),
+            "control_count": int((treatment_var == 0).sum()),
             "method": "PS distribution",
         }
         coefficients = empty_coefficient_table()
@@ -3374,6 +3725,9 @@ try:
             "alternative_specification": {"status": "skipped", "reason": "no fitted model available"},
         }
 
+    if matching_diagnostics is not None:
+        diagnostics["matching"] = matching_diagnostics
+
     if iv_diagnostic is not None:
         diagnostics["identification"] = {"weak_iv": iv_diagnostic}
     if parallel_trends_report is not None:
@@ -3446,7 +3800,7 @@ try:
     }
     summary_text = coefficients.to_string(index=False) if not coefficients.empty else json.dumps(result, ensure_ascii=False, indent=2)
     narrative_lines = [
-        "# Propensity Score Diagnostic" if method == "psm_construction" else "# Econometric Analysis Summary",
+        "# Propensity Score Diagnostic" if method in ["psm_construction", "psm_visualize"] else "# Econometric Analysis Summary",
         "",
         f"- Method: {result.get('method', method)}",
         f"- Output kind: {output_kind}",
@@ -3473,7 +3827,7 @@ try:
         narrative_lines.append(f"- Degraded from: {degraded_from}")
     if decision_trace:
         narrative_lines.append(f"- Decision trace: {decision_trace}")
-    if method == "psm_construction":
+    if method in ["psm_construction", "psm_visualize"]:
         narrative_lines.append("- Interpretation boundary: treatment-assignment and overlap diagnostic only; this is not a causal effect estimate.")
     narrative_lines.append(f"- QA status: {'fail' if qa['blocking_errors'] else 'warn' if qa['warnings'] else 'pass'}")
     if qa["warnings"]:
@@ -3515,7 +3869,7 @@ except Exception as e:
     const { code, stdout, stderr } = execution
 
     if (code !== 0) {
-      if (params.methodName === "psm_construction") cleanupFailedPropensityScoreRun(outputDir)
+      if (PROPENSITY_SCORE_TRANSACTIONAL_METHODS.has(params.methodName)) cleanupFailedPropensityScoreRun(outputDir)
       log.error("python failed", { code, stderr: summarizeToolError(stderr) })
       const failureArtifacts = persistPythonFailureArtifacts({
         label: `${params.methodName}_nonzero_exit`,
@@ -3544,7 +3898,7 @@ except Exception as e:
     try {
       result = parsePythonResult<PythonResult>(stdout)
     } catch (error) {
-      if (params.methodName === "psm_construction") cleanupFailedPropensityScoreRun(outputDir)
+      if (PROPENSITY_SCORE_TRANSACTIONAL_METHODS.has(params.methodName)) cleanupFailedPropensityScoreRun(outputDir)
       const failureArtifacts = persistPythonFailureArtifacts({
         label: `${params.methodName}_parse_failure`,
         command: pythonCommand,
@@ -3577,7 +3931,7 @@ except Exception as e:
     result.run_id = effectiveRunId
 
     if (!result.success) {
-      if (params.methodName === "psm_construction") cleanupFailedPropensityScoreRun(outputDir)
+      if (PROPENSITY_SCORE_TRANSACTIONAL_METHODS.has(params.methodName)) cleanupFailedPropensityScoreRun(outputDir)
       const reflection = classifyToolFailure({
         toolName: "econometrics",
         error: result.error ?? "unknown error",
@@ -3609,6 +3963,30 @@ except Exception as e:
     if (params.methodName === "psm_construction") {
       try {
         validatePropensityScoreConstructionResult(result, outputDir)
+      } catch (error) {
+        cleanupFailedPropensityScoreRun(outputDir)
+        throw error
+      }
+    }
+    if (params.methodName === "psm_visualize") {
+      try {
+        validatePropensityScoreVisualizationResult(result, outputDir)
+      } catch (error) {
+        cleanupFailedPropensityScoreRun(outputDir)
+        throw error
+      }
+    }
+    if (params.methodName === "psm_matching") {
+      try {
+        validatePropensityScoreMatchingResult(result)
+      } catch (error) {
+        cleanupFailedPropensityScoreRun(outputDir)
+        throw error
+      }
+    }
+    if (params.methodName === "psm_ipw") {
+      try {
+        validatePropensityScoreIpwResult(result)
       } catch (error) {
         cleanupFailedPropensityScoreRun(outputDir)
         throw error
@@ -3658,6 +4036,7 @@ except Exception as e:
     })
 
     if (qaGate.reflection) {
+      if (PROPENSITY_SCORE_TRANSACTIONAL_METHODS.has(params.methodName)) cleanupFailedPropensityScoreRun(outputDir)
       const reflectionPath = persistToolReflection(qaGate.reflection)
       await ctx.metadata({
         metadata: {
@@ -3676,7 +4055,7 @@ except Exception as e:
     const deliveryBundlePath: string | undefined = undefined
 
     let numericSnapshot: NumericSnapshotDocument | undefined
-    if (result.output_path && params.methodName !== "psm_construction") {
+    if (result.output_path && !PROPENSITY_SCORE_NO_INFERENCE_METHODS.has(params.methodName)) {
       numericSnapshot = createEconometricsNumericSnapshot({
         outputDir,
         methodName: params.methodName,
@@ -3770,7 +4149,10 @@ except Exception as e:
       fs.writeFileSync(result.output_path, JSON.stringify(result, null, 2), "utf-8")
     }
 
-    const isPropensityScoreDiagnostic = params.methodName === "psm_construction"
+    const isPropensityScoreDiagnostic = PROPENSITY_SCORE_DIAGNOSTIC_METHODS.has(params.methodName)
+    const isPropensityScoreVisualization = params.methodName === "psm_visualize"
+    const isPropensityScoreMatching = params.methodName === "psm_matching"
+    const isPropensityScoreIpw = params.methodName === "psm_ipw"
     let output = `## Econometrics result - ${params.methodName}\n\n`
     if (datasetManifest?.datasetId ?? result.dataset_id) output += `Dataset: ${datasetManifest?.datasetId ?? result.dataset_id}\n`
     output += `Run ID: ${effectiveRunId}\n`
@@ -3838,7 +4220,10 @@ except Exception as e:
       for (const item of publishedFiles) output += `- ${item.relativePath}\n`
     }
     output += `\nResults directory: ${relativeWithinProject(outputDir)}/\n`
-    if (isPropensityScoreDiagnostic) output = buildPropensityScoreDiagnosticOutput(result)
+    if (params.methodName === "psm_construction") output = buildPropensityScoreDiagnosticOutput(result)
+    if (isPropensityScoreVisualization) output = buildPropensityScoreVisualizationOutput(result)
+    if (isPropensityScoreMatching) output = buildPropensityScoreMatchingOutput(result)
+    if (isPropensityScoreIpw) output = buildPropensityScoreIpwOutput(result)
 
     const metadata: EconometricsToolMetadata = {
       method: params.methodName,
@@ -3849,14 +4234,14 @@ except Exception as e:
       runId: effectiveRunId,
       numericSnapshotPath: result.numeric_snapshot_path ? relativeWithinProject(result.numeric_snapshot_path) : undefined,
       numericSnapshotPreview: numericSnapshotPreview(numericSnapshot),
-      groundingScope: isPropensityScoreDiagnostic ? "diagnostic" : "regression",
+      groundingScope: isPropensityScoreDiagnostic ? "diagnostic" : isPropensityScoreMatching ? "matching" : isPropensityScoreIpw ? "weighting" : "regression",
       qaGateStatus: qaGate.qaGateStatus,
       qaGateReason: qaGate.qaGateReason,
       qaSource: qaGate.qaSource,
       outputDir: relativeWithinProject(outputDir),
       deliveryBundleDir: deliveryBundlePath ? relativeWithinProject(deliveryBundlePath) : undefined,
       publishedFiles,
-      presentation: isPropensityScoreDiagnostic
+      presentation: isPropensityScoreDiagnostic || isPropensityScoreMatching || isPropensityScoreIpw
         ? undefined
         : buildEconometricsPresentation({
             params,
@@ -3870,7 +4255,7 @@ except Exception as e:
       analysisView: isPropensityScoreDiagnostic
         ? createToolAnalysisView({
             kind: "econometrics",
-            step: "psm_construction",
+            step: params.methodName,
             datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
             stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
             results: [
@@ -3878,15 +4263,64 @@ except Exception as e:
               analysisMetric("得分范围", `${result.score_min!.toFixed(4)}–${result.score_max!.toFixed(4)}`),
               analysisMetric("共同支撑占比", `${(result.share_in_support! * 100).toFixed(1)}%`),
             ],
-            artifacts: [
-              analysisArtifact(
-                result.propensity_scores_path ? relativeWithinProject(result.propensity_scores_path) : undefined,
-                { label: "逐行倾向得分", visibility: "user_collapsed" },
-              ),
-            ],
+            artifacts: isPropensityScoreVisualization
+              ? [
+                  analysisArtifact(result.plot_path ? relativeWithinProject(result.plot_path) : undefined, {
+                    label: "倾向得分分布图",
+                    visibility: "user_default",
+                  }),
+                ]
+              : [
+                  analysisArtifact(
+                    result.propensity_scores_path ? relativeWithinProject(result.propensity_scores_path) : undefined,
+                    { label: "逐行倾向得分", visibility: "user_collapsed" },
+                  ),
+                ],
             warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
             conclusion: "已完成处理分配与共同支撑诊断；本步骤不是因果效应估计。",
           })
+        : isPropensityScoreMatching
+          ? createToolAnalysisView({
+              kind: "econometrics",
+              step: "psm_matching",
+              datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
+              stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
+              results: [
+                analysisMetric("ATT（已匹配处理组）", result.att !== undefined ? result.att.toFixed(4) : undefined),
+                analysisMetric("已匹配处理组", result.matched_treated_count),
+                analysisMetric("未匹配处理组", result.unmatched_treated_count),
+                analysisMetric("匹配后最大绝对 SMD", result.post_match_max_abs_smd?.toFixed(4)),
+              ],
+              artifacts: [
+                analysisArtifact(result.output_path ? relativeWithinProject(result.output_path) : undefined, {
+                  label: "匹配结果",
+                  visibility: "user_collapsed",
+                }),
+              ],
+              warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
+              conclusion: "固定规则的最近邻匹配已通过协变量平衡阈值；该结果只对应已匹配处理组，且不包含显著性推断。",
+            })
+        : isPropensityScoreIpw
+          ? createToolAnalysisView({
+              kind: "econometrics",
+              step: "psm_ipw",
+              datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
+              stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
+              results: [
+                analysisMetric("ATE", result.ate !== undefined ? result.ate.toFixed(4) : undefined),
+                analysisMetric("处理组有效样本量", result.treatment_ess?.toFixed(2)),
+                analysisMetric("对照组有效样本量", result.control_ess?.toFixed(2)),
+                analysisMetric("加权后最大绝对 SMD", result.weighted_max_abs_smd?.toFixed(4)),
+              ],
+              artifacts: [
+                analysisArtifact(result.output_path ? relativeWithinProject(result.output_path) : undefined, {
+                  label: "加权结果",
+                  visibility: "user_collapsed",
+                }),
+              ],
+              warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
+              conclusion: "固定 Hájek 逆概率加权已通过重叠、有效样本量与协变量平衡阈值；当前不包含显著性推断。",
+            })
         : createToolAnalysisView({
             kind: "econometrics",
             step: `econometrics(${params.methodName})`,
@@ -3942,16 +4376,46 @@ except Exception as e:
               `得分范围：${result.score_min!.toFixed(4)} 至 ${result.score_max!.toFixed(4)}`,
               "本步骤不是因果效应估计。",
             ],
-            artifacts: result.propensity_scores_path
-              ? [
-                  {
-                    label: "逐行倾向得分",
-                    path: relativeWithinProject(result.propensity_scores_path),
-                    visibility: "user_collapsed" as const,
-                  },
-                ]
-              : [],
+            artifacts: isPropensityScoreVisualization
+              ? result.plot_path
+                ? [
+                    {
+                      label: "倾向得分分布图",
+                      path: relativeWithinProject(result.plot_path),
+                      visibility: "user_default" as const,
+                    },
+                  ]
+                : []
+              : result.propensity_scores_path
+                ? [
+                    {
+                      label: "逐行倾向得分",
+                      path: relativeWithinProject(result.propensity_scores_path),
+                      visibility: "user_collapsed" as const,
+                    },
+                  ]
+                : [],
           })
+        : isPropensityScoreMatching
+          ? createToolDisplay({
+              summary: `倾向得分匹配完成：ATT（已匹配处理组）${result.att!.toFixed(4)}`,
+              details: [
+                `已匹配处理组：${result.matched_treated_count}/${result.treated_count}`,
+                `匹配后最大绝对 SMD：${result.post_match_max_abs_smd!.toFixed(4)}（阈值 ≤ 0.1000）`,
+                "未输出标准误、p 值、置信区间或显著性结论。",
+              ],
+              artifacts: [],
+            })
+        : isPropensityScoreIpw
+          ? createToolDisplay({
+              summary: `逆概率加权完成：ATE ${result.ate!.toFixed(4)}`,
+              details: [
+                `有效样本量：处理组 ${result.treatment_ess!.toFixed(2)}；对照组 ${result.control_ess!.toFixed(2)}（每组阈值 ≥ 20）`,
+                `加权后最大绝对 SMD：${result.weighted_max_abs_smd!.toFixed(4)}（阈值 ≤ 0.1000）`,
+                "未输出标准误、p 值、置信区间或显著性结论。",
+              ],
+              artifacts: [],
+            })
         : createToolDisplay({
             summary:
               result.numeric_snapshot_path && result.coefficient !== undefined && result.p_value !== undefined
@@ -3995,6 +4459,7 @@ except Exception as e:
           }),
     }
 
+    diagnosticOutputPublished = true
     return {
       title: `Econometrics: ${params.methodName}`,
       output,
