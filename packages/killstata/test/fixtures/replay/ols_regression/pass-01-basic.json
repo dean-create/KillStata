@@ -1,0 +1,11 @@
+{
+  "description": "标准 OLS：结果变量、核心解释变量、两个控制变量",
+  "modelArgs": {
+    "datasetId": "wage_survey",
+    "stageId": "stage_000",
+    "dependentVar": "wage",
+    "treatmentVar": "education",
+    "covariates": ["experience", "age"]
+  },
+  "expect": "pass"
+}

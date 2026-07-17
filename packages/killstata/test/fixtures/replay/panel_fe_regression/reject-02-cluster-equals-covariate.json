@@ -1,0 +1,15 @@
+{
+  "description": "聚类变量和某个控制变量填成了同一列",
+  "modelArgs": {
+    "datasetId": "grunfeld_08bce7a7",
+    "stageId": "stage_000",
+    "dependentVar": "invest",
+    "treatmentVar": "value",
+    "covariates": ["capital"],
+    "entityVar": "firm",
+    "timeVar": "year",
+    "clusterVar": "capital"
+  },
+  "expect": "reject",
+  "rejectHint": ["clusterVar", "聚类列不能同时作为"]
+}

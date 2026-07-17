@@ -1,0 +1,15 @@
+{
+  "description": "显式指定参考期为 -2，并按州聚类",
+  "modelArgs": {
+    "datasetId": "staggered_adoption",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "relativeTimeVar": "rel_time",
+    "entityVar": "firm",
+    "timeVar": "year",
+    "clusterVar": "state",
+    "referencePeriod": -2
+  },
+  "expect": "pass"
+}

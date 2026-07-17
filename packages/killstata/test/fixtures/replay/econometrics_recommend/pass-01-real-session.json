@@ -1,0 +1,10 @@
+{
+  "description": "真实会话种子（ses_099e80fa8ffep6r4Q5XhbBGyQV）：模型在 Card-Krueger 数据集上先确认结构再选方法",
+  "modelArgs": {
+    "datasetId": "DID_8f6c9020",
+    "stageId": "stage_000",
+    "dependentVar": "fte",
+    "treatmentVar": "treated"
+  },
+  "expect": "pass"
+}

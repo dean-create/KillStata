@@ -1,0 +1,5 @@
+{
+  "description": "模型把整个参数对象序列化成 JSON 字符串（已知模型失败模式），normalizeToolArgs 应当把它解回对象",
+  "modelArgs": "{\"datasetId\":\"grunfeld_08bce7a7\",\"stageId\":\"stage_000\"}",
+  "expect": "pass"
+}

@@ -1,0 +1,12 @@
+{
+  "description": "模型把 iv_2sls 的协方差取值（robust/nonrobust）搬到了 ols_regression 上；OLS 用的是 HC1/HC2/HC3/nonrobust 词表",
+  "modelArgs": {
+    "datasetId": "wage_survey",
+    "stageId": "stage_000",
+    "dependentVar": "wage",
+    "treatmentVar": "education",
+    "covariance": "robust"
+  },
+  "expect": "reject",
+  "rejectHint": ["covariance", "HC1"]
+}

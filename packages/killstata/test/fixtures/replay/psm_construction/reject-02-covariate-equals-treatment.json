@@ -1,0 +1,11 @@
+{
+  "description": "模型把处理变量自己也塞进协变量列表",
+  "modelArgs": {
+    "datasetId": "lalonde_nsw",
+    "stageId": "stage_000",
+    "treatmentVar": "treat",
+    "covariates": ["age", "treat"]
+  },
+  "expect": "reject",
+  "rejectHint": ["treat", "已被用作"]
+}

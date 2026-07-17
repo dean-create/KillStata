@@ -40,9 +40,12 @@ const HdfeInputSchema = z.object({
   branch: z.string().trim().min(1).optional(),
   dependentVar: ColumnName,
   treatmentVar: ColumnName,
-  covariates: z.array(ColumnName).max(100).default([]),
-  fixedEffects: z.array(ColumnName).min(1).max(8),
-  clusterVars: z.array(ColumnName).max(2).default([]),
+  covariates: z.array(ColumnName).max(100, "控制变量最多 100 个").default([]),
+  fixedEffects: z
+    .array(ColumnName)
+    .min(1, "至少需要一个固定效应维度")
+    .max(8, "固定效应维度最多 8 个，请合并或删减"),
+  clusterVars: z.array(ColumnName).max(2, "聚类维度最多 2 个").default([]),
   covariance: z.enum(["HC1", "CRV1", "CRV3"]).optional(),
 }).strict().superRefine((value, ctx) => {
   uniqueColumns(value.covariates, ["covariates"], ctx)
@@ -90,8 +93,8 @@ const Did2sInputSchema = z.object({
   entityVar: ColumnName,
   timeVar: ColumnName,
   clusterVar: ColumnName.optional(),
-  covariates: z.array(ColumnName).max(100).default([]),
-  referencePeriod: z.number().finite().default(-1),
+  covariates: z.array(ColumnName).max(100, "控制变量最多 100 个").default([]),
+  referencePeriod: z.number().finite("参考期必须是有限数值").default(-1),
 }).strict().superRefine((value, ctx) => {
   uniqueColumns(value.covariates, ["covariates"], ctx)
   const designColumns = [
@@ -123,7 +126,7 @@ const DidStaticInputSchema = z.object({
   dependentVar: ColumnName,
   groupVar: ColumnName,
   postVar: ColumnName,
-  covariates: z.array(ColumnName).max(100).default([]),
+  covariates: z.array(ColumnName).max(100, "控制变量最多 100 个").default([]),
   covariance: z.literal("HC1").default("HC1"),
 }).strict().superRefine((value, ctx) => {
   uniqueColumns(value.covariates, ["covariates"], ctx)

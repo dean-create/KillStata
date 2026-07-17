@@ -1,0 +1,12 @@
+{
+  "description": "Card (1995) 式识别依据：到大学的地理距离影响是否上大学，但不直接影响工资水平",
+  "modelArgs": {
+    "datasetId": "card1995",
+    "stageId": "stage_000",
+    "dependentVar": "log_wage",
+    "endogenousVar": "education",
+    "instrumentVar": "near_college",
+    "instrumentJustification": "到最近大学的地理距离影响个体是否选择上大学（相关性），但控制家庭背景后不直接影响工资水平（外生性与排除限制），参见 Card (1995) 的研究设计。"
+  },
+  "expect": "pass"
+}

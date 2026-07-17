@@ -1,0 +1,13 @@
+{
+  "description": "模型把首次处理时期变量和运行时间变量混淆成了同一列",
+  "modelArgs": {
+    "datasetId": "staggered_adoption",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "cohortVar": "year",
+    "entityVar": "firm",
+    "timeVar": "year"
+  },
+  "expect": "reject",
+  "rejectHint": ["彼此不同"]
+}

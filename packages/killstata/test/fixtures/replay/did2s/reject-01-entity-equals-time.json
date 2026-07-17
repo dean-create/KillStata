@@ -1,0 +1,14 @@
+{
+  "description": "个体变量和时间变量填成了同一列",
+  "modelArgs": {
+    "datasetId": "staggered_adoption",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "relativeTimeVar": "rel_time",
+    "entityVar": "year",
+    "timeVar": "year"
+  },
+  "expect": "reject",
+  "rejectHint": ["彼此不同"]
+}

@@ -1,0 +1,12 @@
+{
+  "description": "结果变量和处理组变量填成了同一列",
+  "modelArgs": {
+    "datasetId": "DID_8f6c9020",
+    "stageId": "stage_000",
+    "dependentVar": "treated",
+    "groupVar": "treated",
+    "postVar": "t"
+  },
+  "expect": "reject",
+  "rejectHint": ["彼此不同"]
+}

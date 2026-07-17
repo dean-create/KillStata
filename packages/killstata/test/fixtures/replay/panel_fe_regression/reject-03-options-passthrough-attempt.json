@@ -1,0 +1,14 @@
+{
+  "description": "模型试图从旧万能入口搬一个 options.auto_downgrade 过来，想在键不唯一时静默退回 pooled OLS；新工具是 .strict()，且后端已固定 auto_downgrade=false，不接受这个字段",
+  "modelArgs": {
+    "datasetId": "grunfeld_08bce7a7",
+    "stageId": "stage_000",
+    "dependentVar": "invest",
+    "treatmentVar": "value",
+    "entityVar": "firm",
+    "timeVar": "year",
+    "options": { "auto_downgrade": true }
+  },
+  "expect": "reject",
+  "rejectHint": ["options"]
+}

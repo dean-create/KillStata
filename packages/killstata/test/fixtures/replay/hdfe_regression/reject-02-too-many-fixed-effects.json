@@ -1,0 +1,12 @@
+{
+  "description": "模型把每一个类别列都塞成固定效应，超过 8 个上限",
+  "modelArgs": {
+    "datasetId": "firm_panel",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "fixedEffects": ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9"]
+  },
+  "expect": "reject",
+  "rejectHint": ["fixedEffects", "固定效应维度最多 8 个"]
+}

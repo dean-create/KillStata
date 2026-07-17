@@ -1,0 +1,11 @@
+{
+  "description": "结果变量和核心解释变量填了同一列",
+  "modelArgs": {
+    "datasetId": "wage_survey",
+    "stageId": "stage_000",
+    "dependentVar": "wage",
+    "treatmentVar": "wage"
+  },
+  "expect": "reject",
+  "rejectHint": ["treatmentVar", "不能与"]
+}

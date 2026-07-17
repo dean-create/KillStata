@@ -1,0 +1,14 @@
+{
+  "description": "带外生控制变量，显式选择 nonrobust 协方差",
+  "modelArgs": {
+    "datasetId": "card1995",
+    "stageId": "stage_000",
+    "dependentVar": "log_wage",
+    "endogenousVar": "education",
+    "instrumentVar": "near_college",
+    "instrumentJustification": "地理距离满足相关性、外生性与排除限制，控制家庭背景和地区固定效应后依然成立。",
+    "covariates": ["experience", "black", "south"],
+    "covariance": "nonrobust"
+  },
+  "expect": "pass"
+}

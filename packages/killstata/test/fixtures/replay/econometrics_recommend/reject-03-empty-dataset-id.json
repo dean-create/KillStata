@@ -1,0 +1,9 @@
+{
+  "description": "模型把 datasetId 传成空字符串（占位符没有被真实值替换）",
+  "modelArgs": {
+    "datasetId": "   ",
+    "stageId": "stage_000"
+  },
+  "expect": "reject",
+  "rejectHint": ["datasetId", "不能为空"]
+}

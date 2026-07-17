@@ -1,0 +1,11 @@
+{
+  "description": "最简调用：只给因变量、处理组变量、政策后变量，不带控制变量、runId 或 branch",
+  "modelArgs": {
+    "datasetId": "DID_8f6c9020",
+    "stageId": "stage_000",
+    "dependentVar": "fte",
+    "groupVar": "treated",
+    "postVar": "t"
+  },
+  "expect": "pass"
+}

@@ -1,0 +1,13 @@
+{
+  "description": "控制变量列表里混入了政策后变量本身",
+  "modelArgs": {
+    "datasetId": "DID_8f6c9020",
+    "stageId": "stage_000",
+    "dependentVar": "fte",
+    "groupVar": "treated",
+    "postVar": "t",
+    "covariates": ["t", "bk"]
+  },
+  "expect": "reject",
+  "rejectHint": ["covariates", "控制变量不能与传统 DID 设计变量重复"]
+}

@@ -1,0 +1,11 @@
+{
+  "description": "模型没给任何协变量就想估计倾向得分",
+  "modelArgs": {
+    "datasetId": "lalonde_nsw",
+    "stageId": "stage_000",
+    "treatmentVar": "treat",
+    "covariates": []
+  },
+  "expect": "reject",
+  "rejectHint": ["至少需要一个处理前协变量"]
+}

@@ -1,0 +1,10 @@
+{
+  "description": "标准调用：0/1 处理变量 + 两个处理前协变量",
+  "modelArgs": {
+    "datasetId": "lalonde_nsw",
+    "stageId": "stage_000",
+    "treatmentVar": "treat",
+    "covariates": ["age", "education"]
+  },
+  "expect": "pass"
+}

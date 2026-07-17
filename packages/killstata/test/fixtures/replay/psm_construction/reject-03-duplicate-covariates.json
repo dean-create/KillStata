@@ -1,0 +1,11 @@
+{
+  "description": "协变量列表里同一列重复出现两次",
+  "modelArgs": {
+    "datasetId": "lalonde_nsw",
+    "stageId": "stage_000",
+    "treatmentVar": "treat",
+    "covariates": ["age", "age", "education"]
+  },
+  "expect": "reject",
+  "rejectHint": ["控制变量不能重复"]
+}

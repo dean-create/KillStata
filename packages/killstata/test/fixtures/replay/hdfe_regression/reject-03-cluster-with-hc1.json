@@ -1,0 +1,14 @@
+{
+  "description": "提供了聚类变量，却仍然要求 HC1（HC1 是非聚类稳健标准误，和聚类推断互斥）",
+  "modelArgs": {
+    "datasetId": "firm_panel",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "fixedEffects": ["firm", "year"],
+    "clusterVars": ["firm"],
+    "covariance": "HC1"
+  },
+  "expect": "reject",
+  "rejectHint": ["covariance", "提供聚类变量时协方差方法必须为 CRV1 或 CRV3"]
+}

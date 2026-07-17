@@ -1,0 +1,13 @@
+{
+  "description": "模型只写了敷衍的两个字当识别依据，触发反滥用的最短长度门槛",
+  "modelArgs": {
+    "datasetId": "card1995",
+    "stageId": "stage_000",
+    "dependentVar": "log_wage",
+    "endogenousVar": "education",
+    "instrumentVar": "near_college",
+    "instrumentJustification": "相关"
+  },
+  "expect": "reject",
+  "rejectHint": ["必须说明工具变量的相关性、外生性与排除限制依据"]
+}

@@ -1,0 +1,13 @@
+{
+  "description": "显式指定聚类变量为一个更粗的分组（省级），不同于个体变量（企业级）",
+  "modelArgs": {
+    "datasetId": "grunfeld_08bce7a7",
+    "stageId": "stage_000",
+    "dependentVar": "invest",
+    "treatmentVar": "value",
+    "entityVar": "firm",
+    "timeVar": "year",
+    "clusterVar": "province"
+  },
+  "expect": "pass"
+}

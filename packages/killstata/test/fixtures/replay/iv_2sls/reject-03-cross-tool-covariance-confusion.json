@@ -1,0 +1,14 @@
+{
+  "description": "模型把 ols_regression/panel_fe_regression 的协方差词表（HC1）搬到了 iv_2sls 上；IV 只接受 robust/nonrobust",
+  "modelArgs": {
+    "datasetId": "card1995",
+    "stageId": "stage_000",
+    "dependentVar": "log_wage",
+    "endogenousVar": "education",
+    "instrumentVar": "near_college",
+    "instrumentJustification": "地理距离满足相关性、外生性与排除限制，是标准的 Card (1995) 识别策略。",
+    "covariance": "HC1"
+  },
+  "expect": "reject",
+  "rejectHint": ["covariance", "robust"]
+}

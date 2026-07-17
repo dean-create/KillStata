@@ -1,0 +1,10 @@
+{
+  "description": "模型把旧万能入口的 methodName 字段带了过来（新工具是 .strict()，不接受多余字段）",
+  "modelArgs": {
+    "datasetId": "grunfeld_08bce7a7",
+    "stageId": "stage_000",
+    "methodName": "auto_recommend"
+  },
+  "expect": "reject",
+  "rejectHint": ["methodName"]
+}

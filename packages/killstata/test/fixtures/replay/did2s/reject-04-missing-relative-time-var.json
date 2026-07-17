@@ -1,0 +1,13 @@
+{
+  "description": "模型把 did2s 当成 did_static 来调用，漏了 Gardner 两阶段法特有的相对时期变量",
+  "modelArgs": {
+    "datasetId": "staggered_adoption",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "entityVar": "firm",
+    "timeVar": "year"
+  },
+  "expect": "reject",
+  "rejectHint": ["relativeTimeVar"]
+}

@@ -1,0 +1,13 @@
+{
+  "description": "Gardner 两阶段 DID：5 个设计变量互不相同",
+  "modelArgs": {
+    "datasetId": "staggered_adoption",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "relativeTimeVar": "rel_time",
+    "entityVar": "firm",
+    "timeVar": "year"
+  },
+  "expect": "pass"
+}

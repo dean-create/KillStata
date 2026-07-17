@@ -1,0 +1,13 @@
+{
+  "description": "要求 CRV1 聚类推断，却没有提供任何聚类变量",
+  "modelArgs": {
+    "datasetId": "firm_panel",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "fixedEffects": ["firm", "year"],
+    "covariance": "CRV1"
+  },
+  "expect": "reject",
+  "rejectHint": ["covariance", "CRV1/CRV3 必须同时提供聚类变量"]
+}

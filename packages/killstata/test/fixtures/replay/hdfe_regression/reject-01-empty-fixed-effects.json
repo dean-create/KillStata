@@ -1,0 +1,12 @@
+{
+  "description": "一个固定效应维度都没给，等于没用高维固定效应",
+  "modelArgs": {
+    "datasetId": "firm_panel",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "treatmentVar": "treat",
+    "fixedEffects": []
+  },
+  "expect": "reject",
+  "rejectHint": ["fixedEffects", "至少需要一个固定效应维度"]
+}

@@ -1,0 +1,13 @@
+{
+  "description": "显式按企业聚类",
+  "modelArgs": {
+    "datasetId": "staggered_adoption",
+    "stageId": "stage_000",
+    "dependentVar": "y",
+    "cohortVar": "first_treat_year",
+    "entityVar": "firm",
+    "timeVar": "year",
+    "clusterVar": "firm"
+  },
+  "expect": "pass"
+}

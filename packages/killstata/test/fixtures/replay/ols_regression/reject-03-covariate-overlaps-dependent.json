@@ -1,0 +1,12 @@
+{
+  "description": "控制变量列表里混入了结果变量本身",
+  "modelArgs": {
+    "datasetId": "wage_survey",
+    "stageId": "stage_000",
+    "dependentVar": "wage",
+    "treatmentVar": "education",
+    "covariates": ["wage", "age"]
+  },
+  "expect": "reject",
+  "rejectHint": ["covariates", "已被用作"]
+}
