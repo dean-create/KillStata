@@ -27,11 +27,13 @@
 - 验证：发布协议 16/16；typecheck、`node --check script/postinstall.mjs`、两包真实 pack、生成 manifest/launcher 元数据断言、registry dry-run、`git diff --check` 均通过。dry-run 仅计划 `killstata-windows-x64@0.1.26`、`killstata@0.1.26`，没有上传。
 - 不再需要 `deangeek` owner：Windows-only 后两个包都由 `deangeeker` 持有；待 main 同步后以该账号恢复发布。
 
-## npm 发布恢复：registry 传播延迟（2026-07-18，进行中）
+## npm 发布恢复：registry 传播延迟（2026-07-18，已完成）
 
 - 真实发布时 `killstata-windows-x64@0.1.26` 的 npm PUT 返回 200，但 registry 在默认 5 次、每秒一次的完整性复核内尚未可见，脚本停止在 launcher 前；这不是权限失败。
 - 随后独立 registry 查询确认 Windows 原生包已发布，SHA-512 与本地 tarball 相同；`killstata@0.1.26` 仍为 E404，普通用户尚不可安装到半套发布。
-- 已以 RED/GREEN 补回归测试：5 次不可见后正常传播必须通过；默认完整性复核扩展为 45 次（约 44 秒），将提交、推送后用同一版本恢复发布。脚本会跳过已存在且完整性相同的原生包，只上传 launcher。
+- 已以 RED/GREEN 补回归测试：5 次不可见后正常传播必须通过；默认完整性复核扩展为 45 次（约 44 秒）。
+- 0.1.26 的 Windows 原生包已被占用，但并行合入后的新二进制完整性不同，npm 不允许覆盖；脚本正确阻止了 launcher 半发布。正式统一版本改为 `0.1.27`。
+- 最终外部 registry 验证：`killstata-windows-x64@0.1.27` 与 `killstata@0.1.27` 均可见且 SRI 与本地 tarball 相同；`killstata@latest = 0.1.27`。用户在 Windows x64 上可执行 `npm i -g killstata@latest`。
 
 ## 计量工具并行任务（延续 2026-07-17）
 

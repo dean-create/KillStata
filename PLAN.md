@@ -1,10 +1,10 @@
-# 当前并行任务：Windows-only npm 发布恢复（2026-07-18，进行中）
+# 当前并行任务：Windows-only npm 发布恢复（2026-07-18，已完成）
 
 > 用户已决定 npm 只支持 Windows x64：只保留 `killstata-windows-x64` 与 `killstata` 两个 tarball。macOS、Linux、Windows baseline 的 npm 原生包退出正式发布；源码开发不受影响。
 
 - 详细 TDD 计划：`docs/superpowers/plans/2026-07-18-windows-only-npm-release.md`。
 - 验收：manifest 精确两包、原生包先于 launcher、typecheck、两包真实 pack、registry dry-run、diff check。
-- 结果：原生包上传后 npm registry 传播超过旧的 5 次复核窗口，已把默认重试扩展为 45 次；`killstata-windows-x64@0.1.26` 已发布并核验完整性，待主包恢复发布。
+- 结果：原生包上传后 npm registry 传播超过旧的 5 次复核窗口，已把默认重试扩展为 45 次。因并行合入导致 0.1.26 native 完整性不可覆盖，正式统一发布改为 `0.1.27`；两个包均已核验可见，`killstata@latest` 已指向 `0.1.27`。
 
 ---
 
