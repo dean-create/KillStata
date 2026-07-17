@@ -3398,6 +3398,250 @@ except Exception as e:
 `
 }
 
+function buildEstimationResultViews(input: {
+  params: {
+    methodName: MethodName
+    datasetId?: string
+    stageId?: string
+    treatmentVar?: string
+    dependentVar?: string
+    entityVar?: string
+    timeVar?: string
+    clusterVar?: string
+  }
+  result: PythonResult
+  datasetManifest: ReturnType<typeof resolveArtifactInput>["manifest"]
+  sourceStage: ReturnType<typeof resolveArtifactInput>["stage"]
+  qaGate: { qaGateStatus?: string; qaGateReason?: string }
+  principleChecks: PrincipleChecks
+  publishedFiles: EconometricsPublishedFile[]
+  isPropensityScoreDiagnostic: boolean
+  isPropensityScoreVisualization: boolean
+  isPropensityScoreMatching: boolean
+  isPropensityScoreIpw: boolean
+}) {
+  const {
+    params,
+    result,
+    datasetManifest,
+    sourceStage,
+    qaGate,
+    principleChecks,
+    publishedFiles,
+    isPropensityScoreDiagnostic,
+    isPropensityScoreVisualization,
+    isPropensityScoreMatching,
+    isPropensityScoreIpw,
+  } = input
+  return {
+      analysisView: isPropensityScoreDiagnostic
+        ? createToolAnalysisView({
+            kind: "econometrics",
+            step: params.methodName,
+            datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
+            stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
+            results: [
+              analysisMetric("N", result.rows_used),
+              analysisMetric("得分范围", `${result.score_min!.toFixed(4)}–${result.score_max!.toFixed(4)}`),
+              analysisMetric("共同支撑占比", `${(result.share_in_support! * 100).toFixed(1)}%`),
+            ],
+            artifacts: isPropensityScoreVisualization
+              ? [
+                  analysisArtifact(result.plot_path ? relativeWithinProject(result.plot_path) : undefined, {
+                    label: "倾向得分分布图",
+                    visibility: "user_default",
+                  }),
+                ]
+              : [
+                  analysisArtifact(
+                    result.propensity_scores_path ? relativeWithinProject(result.propensity_scores_path) : undefined,
+                    { label: "逐行倾向得分", visibility: "user_collapsed" },
+                  ),
+                ],
+            warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
+            conclusion: "已完成处理分配与共同支撑诊断；本步骤不是因果效应估计。",
+          })
+        : isPropensityScoreMatching
+          ? createToolAnalysisView({
+              kind: "econometrics",
+              step: "psm_matching",
+              datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
+              stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
+              results: [
+                analysisMetric("ATT（已匹配处理组）", result.att !== undefined ? result.att.toFixed(4) : undefined),
+                analysisMetric("已匹配处理组", result.matched_treated_count),
+                analysisMetric("未匹配处理组", result.unmatched_treated_count),
+                analysisMetric("匹配后最大绝对 SMD", result.post_match_max_abs_smd?.toFixed(4)),
+              ],
+              artifacts: [
+                analysisArtifact(result.output_path ? relativeWithinProject(result.output_path) : undefined, {
+                  label: "匹配结果",
+                  visibility: "user_collapsed",
+                }),
+              ],
+              warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
+              conclusion: "固定规则的最近邻匹配已通过协变量平衡阈值；该结果只对应已匹配处理组，且不包含显著性推断。",
+            })
+        : isPropensityScoreIpw
+          ? createToolAnalysisView({
+              kind: "econometrics",
+              step: "psm_ipw",
+              datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
+              stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
+              results: [
+                analysisMetric("ATE", result.ate !== undefined ? result.ate.toFixed(4) : undefined),
+                analysisMetric("处理组有效样本量", result.treatment_ess?.toFixed(2)),
+                analysisMetric("对照组有效样本量", result.control_ess?.toFixed(2)),
+                analysisMetric("加权后最大绝对 SMD", result.weighted_max_abs_smd?.toFixed(4)),
+              ],
+              artifacts: [
+                analysisArtifact(result.output_path ? relativeWithinProject(result.output_path) : undefined, {
+                  label: "加权结果",
+                  visibility: "user_collapsed",
+                }),
+              ],
+              warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
+              conclusion: "固定 Hájek 逆概率加权已通过重叠、有效样本量与协变量平衡阈值；当前不包含显著性推断。",
+            })
+        : createToolAnalysisView({
+            kind: "econometrics",
+            step: `econometrics(${params.methodName})`,
+            datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
+            stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
+            results: [
+              analysisMetric(
+                params.treatmentVar ? `${params.treatmentVar} 系数` : "系数",
+                result.numeric_snapshot_path && result.coefficient !== undefined ? result.coefficient.toFixed(4) : undefined,
+              ),
+              analysisMetric("标准误", result.std_error !== undefined ? result.std_error.toFixed(4) : undefined),
+              analysisMetric("p 值", result.p_value !== undefined ? result.p_value.toFixed(4) : undefined),
+              analysisMetric("N", result.rows_used),
+              analysisMetric("组数", groupCount(result)),
+              analysisMetric(
+                params.methodName === "panel_fe_regression" ? "within R²" : "R²",
+                result.numeric_snapshot_path && result.r_squared !== undefined ? result.r_squared.toFixed(4) : undefined,
+              ),
+            ],
+            artifacts: [
+              analysisArtifact(result.output_path ? relativeWithinProject(result.output_path) : undefined, {
+                visibility: "user_default",
+              }),
+              analysisArtifact(result.diagnostics_path ? relativeWithinProject(result.diagnostics_path) : undefined, {
+                visibility: "user_default",
+              }),
+              analysisArtifact(result.numeric_snapshot_path ? relativeWithinProject(result.numeric_snapshot_path) : undefined, {
+                visibility: "user_default",
+              }),
+              analysisArtifact(result.metadata_path ? relativeWithinProject(result.metadata_path) : undefined, {
+                visibility: "user_collapsed",
+              }),
+              ...publishedFiles.map((item) =>
+                analysisArtifact(item.relativePath, {
+                  label: item.label,
+                  visibility: "user_collapsed",
+                }),
+              ),
+            ],
+            warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
+            conclusion: buildEconometricsConclusion({
+              treatmentVar: params.treatmentVar,
+              coefficient: result.coefficient,
+              pValue: result.p_value,
+              principleChecks,
+            }),
+          }),
+      display: isPropensityScoreDiagnostic
+        ? createToolDisplay({
+            summary: `倾向得分诊断完成：共同支撑样本占比 ${(result.share_in_support! * 100).toFixed(1)}%`,
+            details: [
+              `样本量：${result.rows_used}`,
+              `得分范围：${result.score_min!.toFixed(4)} 至 ${result.score_max!.toFixed(4)}`,
+              "本步骤不是因果效应估计。",
+            ],
+            artifacts: isPropensityScoreVisualization
+              ? result.plot_path
+                ? [
+                    {
+                      label: "倾向得分分布图",
+                      path: relativeWithinProject(result.plot_path),
+                      visibility: "user_default" as const,
+                    },
+                  ]
+                : []
+              : result.propensity_scores_path
+                ? [
+                    {
+                      label: "逐行倾向得分",
+                      path: relativeWithinProject(result.propensity_scores_path),
+                      visibility: "user_collapsed" as const,
+                    },
+                  ]
+                : [],
+          })
+        : isPropensityScoreMatching
+          ? createToolDisplay({
+              summary: `倾向得分匹配完成：ATT（已匹配处理组）${result.att!.toFixed(4)}`,
+              details: [
+                `已匹配处理组：${result.matched_treated_count}/${result.treated_count}`,
+                `匹配后最大绝对 SMD：${result.post_match_max_abs_smd!.toFixed(4)}（阈值 ≤ 0.1000）`,
+                "未输出标准误、p 值、置信区间或显著性结论。",
+              ],
+              artifacts: [],
+            })
+        : isPropensityScoreIpw
+          ? createToolDisplay({
+              summary: `逆概率加权完成：ATE ${result.ate!.toFixed(4)}`,
+              details: [
+                `有效样本量：处理组 ${result.treatment_ess!.toFixed(2)}；对照组 ${result.control_ess!.toFixed(2)}（每组阈值 ≥ 20）`,
+                `加权后最大绝对 SMD：${result.weighted_max_abs_smd!.toFixed(4)}（阈值 ≤ 0.1000）`,
+                "未输出标准误、p 值、置信区间或显著性结论。",
+              ],
+              artifacts: [],
+            })
+        : createToolDisplay({
+            summary:
+              result.numeric_snapshot_path && result.coefficient !== undefined && result.p_value !== undefined
+                ? `econometrics(${params.methodName}) completed: ${params.treatmentVar ?? "treatment"} coefficient ${result.coefficient.toFixed(4)}, p-value ${result.p_value.toFixed(4)}`
+                : `econometrics(${params.methodName}) completed`,
+            details: [
+              `Dependent variable: ${params.dependentVar}`,
+              params.treatmentVar ? `Treatment variable: ${params.treatmentVar}` : undefined,
+              params.entityVar ? `Entity FE: ${params.entityVar}` : undefined,
+              params.timeVar ? `Time FE: ${params.timeVar}` : undefined,
+              params.clusterVar ?? result.cluster_var ? `Clustered SE: ${params.clusterVar ?? result.cluster_var}` : undefined,
+              result.numeric_snapshot_path && result.coefficient !== undefined ? `Coefficient: ${result.coefficient.toFixed(4)}` : undefined,
+              result.numeric_snapshot_path && result.std_error !== undefined ? `Std. error: ${result.std_error.toFixed(4)}` : undefined,
+              result.numeric_snapshot_path && result.p_value !== undefined ? `P-value: ${result.p_value.toFixed(4)}` : undefined,
+              result.rows_used !== undefined ? `N: ${result.rows_used}` : undefined,
+              result.post_estimation_gates?.find((gate) => gate.gate === "cluster_count" && gate.diagnosticValue !== undefined)
+                ?.diagnosticValue !== undefined
+                ? `Groups: ${result.post_estimation_gates.find((gate) => gate.gate === "cluster_count" && gate.diagnosticValue !== undefined)?.diagnosticValue}`
+                : undefined,
+              result.numeric_snapshot_path && result.r_squared !== undefined ? `R-squared: ${result.r_squared.toFixed(4)}` : undefined,
+              qaGate.qaGateStatus ? `QA gate: ${qaGate.qaGateStatus}` : undefined,
+              result.warnings?.length ? `Warnings: ${result.warnings.join(" | ")}` : undefined,
+              principleChecks.findings.length ? `Principle checks: ${principleChecks.findings.join(" | ")}` : undefined,
+            ],
+            artifacts: [
+              ...publishedFiles.map((item) => ({
+                label: item.label,
+                path: item.relativePath,
+                visibility: "user_collapsed" as const,
+              })),
+              ...(result.numeric_snapshot_path
+                ? [
+                    {
+                      label: "numeric_snapshot",
+                      path: relativeWithinProject(result.numeric_snapshot_path),
+                      visibility: "user_collapsed" as const,
+                    },
+                  ]
+                : []),
+            ],
+          }),
+  }
+}
+
 export const EconometricsTool = Tool.define("econometrics", async () => ({
   description: DESCRIPTION,
   parameters: z.object({
@@ -4091,211 +4335,19 @@ export const EconometricsTool = Tool.define("econometrics", async () => ({
             deliveryBundlePath,
             publishedFiles,
           }),
-      analysisView: isPropensityScoreDiagnostic
-        ? createToolAnalysisView({
-            kind: "econometrics",
-            step: params.methodName,
-            datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
-            stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
-            results: [
-              analysisMetric("N", result.rows_used),
-              analysisMetric("得分范围", `${result.score_min!.toFixed(4)}–${result.score_max!.toFixed(4)}`),
-              analysisMetric("共同支撑占比", `${(result.share_in_support! * 100).toFixed(1)}%`),
-            ],
-            artifacts: isPropensityScoreVisualization
-              ? [
-                  analysisArtifact(result.plot_path ? relativeWithinProject(result.plot_path) : undefined, {
-                    label: "倾向得分分布图",
-                    visibility: "user_default",
-                  }),
-                ]
-              : [
-                  analysisArtifact(
-                    result.propensity_scores_path ? relativeWithinProject(result.propensity_scores_path) : undefined,
-                    { label: "逐行倾向得分", visibility: "user_collapsed" },
-                  ),
-                ],
-            warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
-            conclusion: "已完成处理分配与共同支撑诊断；本步骤不是因果效应估计。",
-          })
-        : isPropensityScoreMatching
-          ? createToolAnalysisView({
-              kind: "econometrics",
-              step: "psm_matching",
-              datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
-              stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
-              results: [
-                analysisMetric("ATT（已匹配处理组）", result.att !== undefined ? result.att.toFixed(4) : undefined),
-                analysisMetric("已匹配处理组", result.matched_treated_count),
-                analysisMetric("未匹配处理组", result.unmatched_treated_count),
-                analysisMetric("匹配后最大绝对 SMD", result.post_match_max_abs_smd?.toFixed(4)),
-              ],
-              artifacts: [
-                analysisArtifact(result.output_path ? relativeWithinProject(result.output_path) : undefined, {
-                  label: "匹配结果",
-                  visibility: "user_collapsed",
-                }),
-              ],
-              warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
-              conclusion: "固定规则的最近邻匹配已通过协变量平衡阈值；该结果只对应已匹配处理组，且不包含显著性推断。",
-            })
-        : isPropensityScoreIpw
-          ? createToolAnalysisView({
-              kind: "econometrics",
-              step: "psm_ipw",
-              datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
-              stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
-              results: [
-                analysisMetric("ATE", result.ate !== undefined ? result.ate.toFixed(4) : undefined),
-                analysisMetric("处理组有效样本量", result.treatment_ess?.toFixed(2)),
-                analysisMetric("对照组有效样本量", result.control_ess?.toFixed(2)),
-                analysisMetric("加权后最大绝对 SMD", result.weighted_max_abs_smd?.toFixed(4)),
-              ],
-              artifacts: [
-                analysisArtifact(result.output_path ? relativeWithinProject(result.output_path) : undefined, {
-                  label: "加权结果",
-                  visibility: "user_collapsed",
-                }),
-              ],
-              warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
-              conclusion: "固定 Hájek 逆概率加权已通过重叠、有效样本量与协变量平衡阈值；当前不包含显著性推断。",
-            })
-        : createToolAnalysisView({
-            kind: "econometrics",
-            step: `econometrics(${params.methodName})`,
-            datasetId: datasetManifest?.datasetId ?? result.dataset_id ?? params.datasetId,
-            stageId: params.stageId ?? sourceStage?.stageId ?? result.stage_id,
-            results: [
-              analysisMetric(
-                params.treatmentVar ? `${params.treatmentVar} 系数` : "系数",
-                result.numeric_snapshot_path && result.coefficient !== undefined ? result.coefficient.toFixed(4) : undefined,
-              ),
-              analysisMetric("标准误", result.std_error !== undefined ? result.std_error.toFixed(4) : undefined),
-              analysisMetric("p 值", result.p_value !== undefined ? result.p_value.toFixed(4) : undefined),
-              analysisMetric("N", result.rows_used),
-              analysisMetric("组数", groupCount(result)),
-              analysisMetric(
-                params.methodName === "panel_fe_regression" ? "within R²" : "R²",
-                result.numeric_snapshot_path && result.r_squared !== undefined ? result.r_squared.toFixed(4) : undefined,
-              ),
-            ],
-            artifacts: [
-              analysisArtifact(result.output_path ? relativeWithinProject(result.output_path) : undefined, {
-                visibility: "user_default",
-              }),
-              analysisArtifact(result.diagnostics_path ? relativeWithinProject(result.diagnostics_path) : undefined, {
-                visibility: "user_default",
-              }),
-              analysisArtifact(result.numeric_snapshot_path ? relativeWithinProject(result.numeric_snapshot_path) : undefined, {
-                visibility: "user_default",
-              }),
-              analysisArtifact(result.metadata_path ? relativeWithinProject(result.metadata_path) : undefined, {
-                visibility: "user_collapsed",
-              }),
-              ...publishedFiles.map((item) =>
-                analysisArtifact(item.relativePath, {
-                  label: item.label,
-                  visibility: "user_collapsed",
-                }),
-              ),
-            ],
-            warnings: buildEconometricsWarnings({ result, qaGate, principleChecks }),
-            conclusion: buildEconometricsConclusion({
-              treatmentVar: params.treatmentVar,
-              coefficient: result.coefficient,
-              pValue: result.p_value,
-              principleChecks,
-            }),
-          }),
-      display: isPropensityScoreDiagnostic
-        ? createToolDisplay({
-            summary: `倾向得分诊断完成：共同支撑样本占比 ${(result.share_in_support! * 100).toFixed(1)}%`,
-            details: [
-              `样本量：${result.rows_used}`,
-              `得分范围：${result.score_min!.toFixed(4)} 至 ${result.score_max!.toFixed(4)}`,
-              "本步骤不是因果效应估计。",
-            ],
-            artifacts: isPropensityScoreVisualization
-              ? result.plot_path
-                ? [
-                    {
-                      label: "倾向得分分布图",
-                      path: relativeWithinProject(result.plot_path),
-                      visibility: "user_default" as const,
-                    },
-                  ]
-                : []
-              : result.propensity_scores_path
-                ? [
-                    {
-                      label: "逐行倾向得分",
-                      path: relativeWithinProject(result.propensity_scores_path),
-                      visibility: "user_collapsed" as const,
-                    },
-                  ]
-                : [],
-          })
-        : isPropensityScoreMatching
-          ? createToolDisplay({
-              summary: `倾向得分匹配完成：ATT（已匹配处理组）${result.att!.toFixed(4)}`,
-              details: [
-                `已匹配处理组：${result.matched_treated_count}/${result.treated_count}`,
-                `匹配后最大绝对 SMD：${result.post_match_max_abs_smd!.toFixed(4)}（阈值 ≤ 0.1000）`,
-                "未输出标准误、p 值、置信区间或显著性结论。",
-              ],
-              artifacts: [],
-            })
-        : isPropensityScoreIpw
-          ? createToolDisplay({
-              summary: `逆概率加权完成：ATE ${result.ate!.toFixed(4)}`,
-              details: [
-                `有效样本量：处理组 ${result.treatment_ess!.toFixed(2)}；对照组 ${result.control_ess!.toFixed(2)}（每组阈值 ≥ 20）`,
-                `加权后最大绝对 SMD：${result.weighted_max_abs_smd!.toFixed(4)}（阈值 ≤ 0.1000）`,
-                "未输出标准误、p 值、置信区间或显著性结论。",
-              ],
-              artifacts: [],
-            })
-        : createToolDisplay({
-            summary:
-              result.numeric_snapshot_path && result.coefficient !== undefined && result.p_value !== undefined
-                ? `econometrics(${params.methodName}) completed: ${params.treatmentVar ?? "treatment"} coefficient ${result.coefficient.toFixed(4)}, p-value ${result.p_value.toFixed(4)}`
-                : `econometrics(${params.methodName}) completed`,
-            details: [
-              `Dependent variable: ${params.dependentVar}`,
-              params.treatmentVar ? `Treatment variable: ${params.treatmentVar}` : undefined,
-              params.entityVar ? `Entity FE: ${params.entityVar}` : undefined,
-              params.timeVar ? `Time FE: ${params.timeVar}` : undefined,
-              params.clusterVar ?? result.cluster_var ? `Clustered SE: ${params.clusterVar ?? result.cluster_var}` : undefined,
-              result.numeric_snapshot_path && result.coefficient !== undefined ? `Coefficient: ${result.coefficient.toFixed(4)}` : undefined,
-              result.numeric_snapshot_path && result.std_error !== undefined ? `Std. error: ${result.std_error.toFixed(4)}` : undefined,
-              result.numeric_snapshot_path && result.p_value !== undefined ? `P-value: ${result.p_value.toFixed(4)}` : undefined,
-              result.rows_used !== undefined ? `N: ${result.rows_used}` : undefined,
-              result.post_estimation_gates?.find((gate) => gate.gate === "cluster_count" && gate.diagnosticValue !== undefined)
-                ?.diagnosticValue !== undefined
-                ? `Groups: ${result.post_estimation_gates.find((gate) => gate.gate === "cluster_count" && gate.diagnosticValue !== undefined)?.diagnosticValue}`
-                : undefined,
-              result.numeric_snapshot_path && result.r_squared !== undefined ? `R-squared: ${result.r_squared.toFixed(4)}` : undefined,
-              qaGate.qaGateStatus ? `QA gate: ${qaGate.qaGateStatus}` : undefined,
-              result.warnings?.length ? `Warnings: ${result.warnings.join(" | ")}` : undefined,
-              principleChecks.findings.length ? `Principle checks: ${principleChecks.findings.join(" | ")}` : undefined,
-            ],
-            artifacts: [
-              ...publishedFiles.map((item) => ({
-                label: item.label,
-                path: item.relativePath,
-                visibility: "user_collapsed" as const,
-              })),
-              ...(result.numeric_snapshot_path
-                ? [
-                    {
-                      label: "numeric_snapshot",
-                      path: relativeWithinProject(result.numeric_snapshot_path),
-                      visibility: "user_collapsed" as const,
-                    },
-                  ]
-                : []),
-            ],
-          }),
+      ...buildEstimationResultViews({
+        params,
+        result,
+        datasetManifest,
+        sourceStage,
+        qaGate,
+        principleChecks,
+        publishedFiles,
+        isPropensityScoreDiagnostic,
+        isPropensityScoreVisualization,
+        isPropensityScoreMatching,
+        isPropensityScoreIpw,
+      }),
     }
 
     diagnosticOutputPublished = true
