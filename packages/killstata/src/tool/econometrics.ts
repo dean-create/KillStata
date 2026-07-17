@@ -2163,300 +2163,8 @@ function regressionTableSubtitle(methodName: MethodName) {
   }
 }
 
-export const EconometricsTool = Tool.define("econometrics", async () => ({
-  description: DESCRIPTION,
-  parameters: z.object({
-    methodName: MethodSchema,
-    dataPath: z.string().optional(),
-    datasetId: z.string().optional(),
-    stageId: z.string().optional(),
-    runId: z.string().optional(),
-    branch: z.string().optional(),
-    dependentVar: z.string().optional(),
-    treatmentVar: z.string().optional(),
-    covariates: z.array(z.string()).optional(),
-    entityVar: z.string().optional(),
-    timeVar: z.string().optional(),
-    clusterVar: z.string().optional(),
-    options: z.object({}).passthrough().optional(),
-    outputDir: z.string().optional(),
-  }),
-  async execute(params, ctx) {
-    const retryBudget = checkRetryBudget("econometrics", ctx.sessionID)
-    if (!retryBudget.allowed) {
-      throw new Error(
-        `Retry budget exhausted for econometrics in this session (${retryBudget.count}/${retryBudget.max}). Inspect the reflection logs and repair the failed stage before retrying.`,
-      )
-    }
-    validateMethodOptions({
-      methodName: params.methodName,
-      dependentVar: params.dependentVar,
-      treatmentVar: params.treatmentVar,
-      options: params.options,
-      entityVar: params.entityVar,
-      timeVar: params.timeVar,
-    })
-    if (PROPENSITY_SCORE_TRANSACTIONAL_METHODS.has(params.methodName) && params.outputDir !== undefined) {
-      throw new Error(`${params.methodName} 不接受调用方指定 outputDir；输出目录由 Harness 隔离管理`)
-    }
-
-    // 参数校验必须先于审批弹窗：没有数据来源的调用根本跑不起来（resolveArtifactInput
-    // 不会凭空找出一个数据集），不该先弹执行计划打扰用户、等用户点了同意才报错。
-    if (!params.dataPath && !params.datasetId) {
-      throw new Error("Econometrics requires dataPath or datasetId/stageId")
-    }
-
-    const pythonStatus = await ensureRuntimePythonReady()
-    if (!pythonStatus.ok || pythonStatus.missing.length) {
-      throw new Error(formatRuntimePythonSetupError("econometrics", pythonStatus))
-    }
-    const pythonCommand = pythonStatus.executable
-    const installCommand = pythonStatus.installCommand
-
-    if (ctx.agent === "analyst" && params.methodName !== "auto_recommend") {
-      const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
-      if (!analystState.planApproved) {
-        const plannedRun = await ensureAnalysisPlan({
-          sessionID: ctx.sessionID,
-          datasetId: params.datasetId,
-          runId: params.runId,
-          branch: params.branch ?? "main",
-        })
-        const locale = plannedRun.workflowLocale
-        const approvalOptions = workflowChecklistOptions(locale, "empirical")
-        AnalysisIntent.markAnalystPlanGenerated(ctx.sessionID)
-        const answers = await Question.ask({
-          sessionID: ctx.sessionID,
-          questions: [
-            {
-              header: workflowAnalysisPlanHeader(locale),
-              question: [
-                workflowChecklistIntro(locale, "empirical"),
-                ...formatAnalysisChecklist(plannedRun),
-                "",
-                workflowChecklistApprovalPrompt(locale, "empirical"),
-              ].join("\n"),
-              custom: false,
-              options: [
-                approvalOptions.yes,
-                approvalOptions.no,
-              ],
-            },
-          ],
-          tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
-        })
-
-        if (answers[0]?.[0] !== approvalOptions.yes.label) {
-          setAnalysisPlanApproval({
-            sessionID: ctx.sessionID,
-            approvalStatus: "declined",
-            datasetId: params.datasetId,
-            runId: params.runId,
-            branch: params.branch ?? "main",
-          })
-          AnalysisIntent.markAnalystPlanApproval(ctx.sessionID, false)
-          throw new Question.RejectedError()
-        }
-        setAnalysisPlanApproval({
-          sessionID: ctx.sessionID,
-          approvalStatus: "approved",
-          datasetId: params.datasetId,
-          runId: params.runId,
-          branch: params.branch ?? "main",
-        })
-        AnalysisIntent.markAnalystPlanApproval(ctx.sessionID, true)
-      }
-    }
-
-    const artifactInput = resolveArtifactInput({
-      datasetId: params.datasetId,
-      stageId: params.stageId,
-      inputPath: params.dataPath
-        ? await resolveToolPath({
-            filePath: params.dataPath,
-            mode: "read",
-            toolName: "econometrics",
-            sessionID: ctx.sessionID,
-            messageID: ctx.messageID,
-            callID: ctx.callID,
-            ask: ctx.ask,
-          })
-        : undefined,
-    })
-    const dataPath = artifactInput.resolvedInputPath
-    if (!dataPath) {
-      throw new Error("Econometrics requires dataPath or datasetId/stageId")
-    }
-    if (!fs.existsSync(dataPath)) {
-      throw new Error(`Data file not found: ${dataPath}`)
-    }
-
-    const datasetManifest = artifactInput.manifest
-    const sourceStage = artifactInput.stage
-    const branch = params.branch ?? sourceStage?.branch ?? "main"
-    const runId = inferRunId({
-      requestedRunId: params.runId,
-      stage: sourceStage,
-    })
-    const outputStamp = buildFileStamp()
-    const outputDir = params.outputDir
-      ? await resolveToolPath({
-          filePath: params.outputDir,
-          mode: "write",
-          toolName: "econometrics",
-          sessionID: ctx.sessionID,
-          messageID: ctx.messageID,
-          callID: ctx.callID,
-          ask: ctx.ask,
-        })
-      : datasetManifest
-        ? reportOutputPath({
-          datasetId: datasetManifest.datasetId,
-          action: params.methodName,
-          stageId: params.stageId ?? sourceStage?.stageId,
-          branch,
-          format: "json",
-          stamp: outputStamp,
-        }).replace(/\.json$/, "")
-      : path.join(Instance.directory, "analysis", params.methodName)
-    await ctx.ask({
-      permission: "bash",
-      patterns: [`${pythonCommand} *econometrics*`],
-      always: [`${pythonCommand} *econometrics*`],
-      metadata: {
-        description: `Run econometric method: ${params.methodName}`,
-      },
-    })
-    fs.mkdirSync(outputDir, { recursive: true })
-    let diagnosticOutputPublished = false
-    using _diagnosticOutputCleanup = {
-      [Symbol.dispose]() {
-        if (PROPENSITY_SCORE_TRANSACTIONAL_METHODS.has(params.methodName) && !diagnosticOutputPublished) {
-          cleanupFailedPropensityScoreRun(outputDir)
-        }
-      },
-    }
-
-    if (params.methodName === "auto_recommend") {
-      const autoResult = await runAutoRecommend({
-        dataPath,
-        outputDir,
-        pythonCommand,
-        params,
-        abort: ctx.abort,
-      })
-
-      const publishedFiles: EconometricsPublishedFile[] = []
-      if (datasetManifest) {
-        appendArtifact(datasetManifest, {
-          artifactId: `${params.methodName}_${Date.now()}`,
-          runId,
-          stageId: params.stageId ?? sourceStage?.stageId,
-          branch,
-          action: params.methodName,
-          outputPath: autoResult.outputPath,
-          summaryPath: autoResult.recommendationPath,
-          logPath: autoResult.narrativePath,
-          createdAt: new Date().toISOString(),
-          metadata: {
-            data_structure: autoResult.profile.dataStructure,
-            recommended_method: autoResult.recommendation.recommendedMethod,
-            covariance: autoResult.recommendation.covariance,
-          },
-        })
-
-        const publish = (key: string, label: string, sourcePath?: string) => {
-          if (!sourcePath) return
-          const visiblePath = publishVisibleOutput({
-            manifest: datasetManifest,
-            key,
-            label,
-            sourcePath,
-            runId,
-            branch: path.join("econometrics", params.methodName),
-            stageId: params.stageId ?? sourceStage?.stageId,
-          })
-          publishedFiles.push({
-            label,
-            relativePath: relativeWithinProject(visiblePath),
-          })
-        }
-
-        publish("auto_recommend_profile", "auto_recommend_profile", autoResult.profilePath)
-        publish("auto_recommend_recommendation", "auto_recommend_recommendation", autoResult.recommendationPath)
-        publish("auto_recommend_summary", "auto_recommend_summary", autoResult.narrativePath)
-        publish("auto_recommend_results", "auto_recommend_results", autoResult.outputPath)
-      }
-
-      let output = `## Econometrics result - ${params.methodName}\n\n`
-      output += `Data file: ${relativeWithinProject(dataPath)}\n`
-      output += `Data structure: ${autoResult.profile.dataStructure}\n`
-      output += `Recommended method: ${autoResult.recommendation.recommendedMethod}\n`
-      output += `Suggested covariance: ${autoResult.recommendation.covariance}\n`
-      if (autoResult.recommendation.preferredEntityVar) {
-        output += `Preferred entity variable: ${autoResult.recommendation.preferredEntityVar}\n`
-      }
-      if (autoResult.recommendation.preferredTimeVar) {
-        output += `Preferred time variable: ${autoResult.recommendation.preferredTimeVar}\n`
-      }
-      if (autoResult.recommendation.preferredTreatmentVar) {
-        output += `Preferred treatment variable: ${autoResult.recommendation.preferredTreatmentVar}\n`
-      }
-      if (autoResult.recommendation.preferredClusterVar) {
-        output += `Preferred cluster variable: ${autoResult.recommendation.preferredClusterVar}\n`
-      }
-      output += `Confidence: ${autoResult.recommendation.confidence}\n`
-      if (autoResult.recommendation.reasons.length) {
-        output += `Reasons: ${autoResult.recommendation.reasons.join(" | ")}\n`
-      }
-      if (autoResult.recommendation.warnings.length) {
-        output += `Warnings: ${autoResult.recommendation.warnings.join(" | ")}\n`
-      }
-      output += `- Profile JSON: ${relativeWithinProject(autoResult.profilePath)}\n`
-      output += `- Recommendation JSON: ${relativeWithinProject(autoResult.recommendationPath)}\n`
-      output += `- Narrative summary: ${relativeWithinProject(autoResult.narrativePath)}\n`
-      output += `- Result JSON: ${relativeWithinProject(autoResult.outputPath)}\n`
-      output += `\nResults directory: ${relativeWithinProject(outputDir)}/\n`
-
-      const metadata: EconometricsToolMetadata = {
-        method: params.methodName,
-        profile: autoResult.profile,
-        recommendation: autoResult.recommendation,
-        datasetId: datasetManifest?.datasetId ?? params.datasetId,
-        stageId: params.stageId ?? sourceStage?.stageId,
-        runId,
-        outputDir: relativeWithinProject(outputDir),
-        publishedFiles,
-      }
-
-      return {
-        title: `Econometrics: ${params.methodName}`,
-        output,
-        metadata,
-      }
-    }
-
-    const payload = {
-      method: params.methodName,
-      data_path: dataPath,
-      dependent_var: params.dependentVar,
-      treatment_var: params.treatmentVar ?? null,
-      covariates: params.covariates ?? [],
-      entity_var: params.entityVar ?? null,
-      time_var: params.timeVar ?? null,
-      cluster_var: params.clusterVar ?? params.entityVar ?? null,
-      dataset_id: datasetManifest?.datasetId ?? params.datasetId ?? null,
-      stage_id: params.stageId ?? sourceStage?.stageId ?? null,
-      run_id: runId,
-      branch,
-      options: params.options ?? {},
-      output_dir: outputDir,
-      install_command: installCommand,
-    }
-
-    const payloadB64 = encodePythonPayload(payload)
-
-    const pythonScript = `
+function buildLegacyEconometricsPythonScript(payloadB64: string): string {
+  return `
 import base64
 import json
 import sys
@@ -3853,6 +3561,302 @@ except Exception as e:
     }
     emit(result)
 `
+}
+
+export const EconometricsTool = Tool.define("econometrics", async () => ({
+  description: DESCRIPTION,
+  parameters: z.object({
+    methodName: MethodSchema,
+    dataPath: z.string().optional(),
+    datasetId: z.string().optional(),
+    stageId: z.string().optional(),
+    runId: z.string().optional(),
+    branch: z.string().optional(),
+    dependentVar: z.string().optional(),
+    treatmentVar: z.string().optional(),
+    covariates: z.array(z.string()).optional(),
+    entityVar: z.string().optional(),
+    timeVar: z.string().optional(),
+    clusterVar: z.string().optional(),
+    options: z.object({}).passthrough().optional(),
+    outputDir: z.string().optional(),
+  }),
+  async execute(params, ctx) {
+    const retryBudget = checkRetryBudget("econometrics", ctx.sessionID)
+    if (!retryBudget.allowed) {
+      throw new Error(
+        `Retry budget exhausted for econometrics in this session (${retryBudget.count}/${retryBudget.max}). Inspect the reflection logs and repair the failed stage before retrying.`,
+      )
+    }
+    validateMethodOptions({
+      methodName: params.methodName,
+      dependentVar: params.dependentVar,
+      treatmentVar: params.treatmentVar,
+      options: params.options,
+      entityVar: params.entityVar,
+      timeVar: params.timeVar,
+    })
+    if (PROPENSITY_SCORE_TRANSACTIONAL_METHODS.has(params.methodName) && params.outputDir !== undefined) {
+      throw new Error(`${params.methodName} 不接受调用方指定 outputDir；输出目录由 Harness 隔离管理`)
+    }
+
+    // 参数校验必须先于审批弹窗：没有数据来源的调用根本跑不起来（resolveArtifactInput
+    // 不会凭空找出一个数据集），不该先弹执行计划打扰用户、等用户点了同意才报错。
+    if (!params.dataPath && !params.datasetId) {
+      throw new Error("Econometrics requires dataPath or datasetId/stageId")
+    }
+
+    const pythonStatus = await ensureRuntimePythonReady()
+    if (!pythonStatus.ok || pythonStatus.missing.length) {
+      throw new Error(formatRuntimePythonSetupError("econometrics", pythonStatus))
+    }
+    const pythonCommand = pythonStatus.executable
+    const installCommand = pythonStatus.installCommand
+
+    if (ctx.agent === "analyst" && params.methodName !== "auto_recommend") {
+      const analystState = AnalysisIntent.getAnalyst(ctx.sessionID)
+      if (!analystState.planApproved) {
+        const plannedRun = await ensureAnalysisPlan({
+          sessionID: ctx.sessionID,
+          datasetId: params.datasetId,
+          runId: params.runId,
+          branch: params.branch ?? "main",
+        })
+        const locale = plannedRun.workflowLocale
+        const approvalOptions = workflowChecklistOptions(locale, "empirical")
+        AnalysisIntent.markAnalystPlanGenerated(ctx.sessionID)
+        const answers = await Question.ask({
+          sessionID: ctx.sessionID,
+          questions: [
+            {
+              header: workflowAnalysisPlanHeader(locale),
+              question: [
+                workflowChecklistIntro(locale, "empirical"),
+                ...formatAnalysisChecklist(plannedRun),
+                "",
+                workflowChecklistApprovalPrompt(locale, "empirical"),
+              ].join("\n"),
+              custom: false,
+              options: [
+                approvalOptions.yes,
+                approvalOptions.no,
+              ],
+            },
+          ],
+          tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+        })
+
+        if (answers[0]?.[0] !== approvalOptions.yes.label) {
+          setAnalysisPlanApproval({
+            sessionID: ctx.sessionID,
+            approvalStatus: "declined",
+            datasetId: params.datasetId,
+            runId: params.runId,
+            branch: params.branch ?? "main",
+          })
+          AnalysisIntent.markAnalystPlanApproval(ctx.sessionID, false)
+          throw new Question.RejectedError()
+        }
+        setAnalysisPlanApproval({
+          sessionID: ctx.sessionID,
+          approvalStatus: "approved",
+          datasetId: params.datasetId,
+          runId: params.runId,
+          branch: params.branch ?? "main",
+        })
+        AnalysisIntent.markAnalystPlanApproval(ctx.sessionID, true)
+      }
+    }
+
+    const artifactInput = resolveArtifactInput({
+      datasetId: params.datasetId,
+      stageId: params.stageId,
+      inputPath: params.dataPath
+        ? await resolveToolPath({
+            filePath: params.dataPath,
+            mode: "read",
+            toolName: "econometrics",
+            sessionID: ctx.sessionID,
+            messageID: ctx.messageID,
+            callID: ctx.callID,
+            ask: ctx.ask,
+          })
+        : undefined,
+    })
+    const dataPath = artifactInput.resolvedInputPath
+    if (!dataPath) {
+      throw new Error("Econometrics requires dataPath or datasetId/stageId")
+    }
+    if (!fs.existsSync(dataPath)) {
+      throw new Error(`Data file not found: ${dataPath}`)
+    }
+
+    const datasetManifest = artifactInput.manifest
+    const sourceStage = artifactInput.stage
+    const branch = params.branch ?? sourceStage?.branch ?? "main"
+    const runId = inferRunId({
+      requestedRunId: params.runId,
+      stage: sourceStage,
+    })
+    const outputStamp = buildFileStamp()
+    const outputDir = params.outputDir
+      ? await resolveToolPath({
+          filePath: params.outputDir,
+          mode: "write",
+          toolName: "econometrics",
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+          callID: ctx.callID,
+          ask: ctx.ask,
+        })
+      : datasetManifest
+        ? reportOutputPath({
+          datasetId: datasetManifest.datasetId,
+          action: params.methodName,
+          stageId: params.stageId ?? sourceStage?.stageId,
+          branch,
+          format: "json",
+          stamp: outputStamp,
+        }).replace(/\.json$/, "")
+      : path.join(Instance.directory, "analysis", params.methodName)
+    await ctx.ask({
+      permission: "bash",
+      patterns: [`${pythonCommand} *econometrics*`],
+      always: [`${pythonCommand} *econometrics*`],
+      metadata: {
+        description: `Run econometric method: ${params.methodName}`,
+      },
+    })
+    fs.mkdirSync(outputDir, { recursive: true })
+    let diagnosticOutputPublished = false
+    using _diagnosticOutputCleanup = {
+      [Symbol.dispose]() {
+        if (PROPENSITY_SCORE_TRANSACTIONAL_METHODS.has(params.methodName) && !diagnosticOutputPublished) {
+          cleanupFailedPropensityScoreRun(outputDir)
+        }
+      },
+    }
+
+    if (params.methodName === "auto_recommend") {
+      const autoResult = await runAutoRecommend({
+        dataPath,
+        outputDir,
+        pythonCommand,
+        params,
+        abort: ctx.abort,
+      })
+
+      const publishedFiles: EconometricsPublishedFile[] = []
+      if (datasetManifest) {
+        appendArtifact(datasetManifest, {
+          artifactId: `${params.methodName}_${Date.now()}`,
+          runId,
+          stageId: params.stageId ?? sourceStage?.stageId,
+          branch,
+          action: params.methodName,
+          outputPath: autoResult.outputPath,
+          summaryPath: autoResult.recommendationPath,
+          logPath: autoResult.narrativePath,
+          createdAt: new Date().toISOString(),
+          metadata: {
+            data_structure: autoResult.profile.dataStructure,
+            recommended_method: autoResult.recommendation.recommendedMethod,
+            covariance: autoResult.recommendation.covariance,
+          },
+        })
+
+        const publish = (key: string, label: string, sourcePath?: string) => {
+          if (!sourcePath) return
+          const visiblePath = publishVisibleOutput({
+            manifest: datasetManifest,
+            key,
+            label,
+            sourcePath,
+            runId,
+            branch: path.join("econometrics", params.methodName),
+            stageId: params.stageId ?? sourceStage?.stageId,
+          })
+          publishedFiles.push({
+            label,
+            relativePath: relativeWithinProject(visiblePath),
+          })
+        }
+
+        publish("auto_recommend_profile", "auto_recommend_profile", autoResult.profilePath)
+        publish("auto_recommend_recommendation", "auto_recommend_recommendation", autoResult.recommendationPath)
+        publish("auto_recommend_summary", "auto_recommend_summary", autoResult.narrativePath)
+        publish("auto_recommend_results", "auto_recommend_results", autoResult.outputPath)
+      }
+
+      let output = `## Econometrics result - ${params.methodName}\n\n`
+      output += `Data file: ${relativeWithinProject(dataPath)}\n`
+      output += `Data structure: ${autoResult.profile.dataStructure}\n`
+      output += `Recommended method: ${autoResult.recommendation.recommendedMethod}\n`
+      output += `Suggested covariance: ${autoResult.recommendation.covariance}\n`
+      if (autoResult.recommendation.preferredEntityVar) {
+        output += `Preferred entity variable: ${autoResult.recommendation.preferredEntityVar}\n`
+      }
+      if (autoResult.recommendation.preferredTimeVar) {
+        output += `Preferred time variable: ${autoResult.recommendation.preferredTimeVar}\n`
+      }
+      if (autoResult.recommendation.preferredTreatmentVar) {
+        output += `Preferred treatment variable: ${autoResult.recommendation.preferredTreatmentVar}\n`
+      }
+      if (autoResult.recommendation.preferredClusterVar) {
+        output += `Preferred cluster variable: ${autoResult.recommendation.preferredClusterVar}\n`
+      }
+      output += `Confidence: ${autoResult.recommendation.confidence}\n`
+      if (autoResult.recommendation.reasons.length) {
+        output += `Reasons: ${autoResult.recommendation.reasons.join(" | ")}\n`
+      }
+      if (autoResult.recommendation.warnings.length) {
+        output += `Warnings: ${autoResult.recommendation.warnings.join(" | ")}\n`
+      }
+      output += `- Profile JSON: ${relativeWithinProject(autoResult.profilePath)}\n`
+      output += `- Recommendation JSON: ${relativeWithinProject(autoResult.recommendationPath)}\n`
+      output += `- Narrative summary: ${relativeWithinProject(autoResult.narrativePath)}\n`
+      output += `- Result JSON: ${relativeWithinProject(autoResult.outputPath)}\n`
+      output += `\nResults directory: ${relativeWithinProject(outputDir)}/\n`
+
+      const metadata: EconometricsToolMetadata = {
+        method: params.methodName,
+        profile: autoResult.profile,
+        recommendation: autoResult.recommendation,
+        datasetId: datasetManifest?.datasetId ?? params.datasetId,
+        stageId: params.stageId ?? sourceStage?.stageId,
+        runId,
+        outputDir: relativeWithinProject(outputDir),
+        publishedFiles,
+      }
+
+      return {
+        title: `Econometrics: ${params.methodName}`,
+        output,
+        metadata,
+      }
+    }
+
+    const payload = {
+      method: params.methodName,
+      data_path: dataPath,
+      dependent_var: params.dependentVar,
+      treatment_var: params.treatmentVar ?? null,
+      covariates: params.covariates ?? [],
+      entity_var: params.entityVar ?? null,
+      time_var: params.timeVar ?? null,
+      cluster_var: params.clusterVar ?? params.entityVar ?? null,
+      dataset_id: datasetManifest?.datasetId ?? params.datasetId ?? null,
+      stage_id: params.stageId ?? sourceStage?.stageId ?? null,
+      run_id: runId,
+      branch,
+      options: params.options ?? {},
+      output_dir: outputDir,
+      install_command: installCommand,
+    }
+
+    const payloadB64 = encodePythonPayload(payload)
+
+    const pythonScript = buildLegacyEconometricsPythonScript(payloadB64)
 
     log.info("run econometrics", {
       method: params.methodName,
