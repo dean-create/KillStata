@@ -1,3 +1,47 @@
+# 当前并行任务：npm 多平台发布链路整理（2026-07-18，已完成）
+
+> 目标：把版本推断、全平台打包、npm 发布、GHCR 推送和 Windows 特例拆开，形成显式版本、可恢复、主包最后发布的最小链路。
+
+- 版本必须由 `--version X.Y.Z` 显式提供，不再只看 `killstata@latest` 猜版本。
+- `pack-release.ts` 只构建/打包并生成带 SHA-512 SRI 的 manifest；`release.ts` 只做预检、顺序发布和 registry 核验。
+- npm 多包无事务，采用 native packages 先发、launcher `killstata` 最后发；重跑时同版本同完整性跳过，不同完整性阻断。
+- npm 发布不再写临时 Token 文件，也不再顺带执行 Docker/GHCR；认证交给 npm 标准配置，GHCR 保持独立 workflow。
+- 详细 TDD 计划：`docs/superpowers/plans/2026-07-18-npm-release-pipeline.md`。
+- 验证结果：发布协议 15/15、全量 402/402、typecheck 与 diff check 通过；`0.1.26` dry-run 生成 12 个包且没有上传；独立复审 Critical 0、Important 0。
+- 当前边界：代码整理已经完成，真实 npm publish 尚未执行；Trusted Publishing 仍需在 npm 网站配置。
+
+---
+
+# 当前大任务：真实论文数据 + 模型工具调用回放验收基座（2026-07-17）
+
+> 目标：用同一个验收 case 串起 `锁定数据 → 数据画像/QA → DeepSeek 原生 tool_calls
+> → JSON Schema → 生产 Harness → 真实后端 → 独立数值 oracle → 失败参数拒绝`，以后每个计量工具
+> 必须通过完整证据链才能标记为准入。
+
+## 已冻结的架构决策
+
+- 三类数据统一入库：两份用户真实 Excel、linearmodels 7.0 自带数据、按方法审核的专用权威数据。
+- 数据“自动查找”只在开发期发现候选；经来源、许可、变量语义、方法适配和 SHA-256 审核后固化。测试/CI 不临时联网换数据。
+- PSM 必须使用 NSW/LaLonde；Card 只能保留 wiring/smoke，不得冒充 PSM 方法学对标。
+- 现有 schema-only replay、DeepSeek-only routing 和 backend-only E2E 将统一为真实生产 Harness trace。
+- 数值证据分 A/B/C/wiring；后端若本身使用 linearmodels，不能用同一库自证算法正确。
+- 诊断工具按倾向得分、共同支撑、SMD、ESS、样本计数验收，不强造系数或无效标准误。
+- 首个纵向 pilot 是 `panel_fe_regression + did.xlsx`，先证明基座能抓住假调用、错参数、错执行和数值漂移，再扩展到 PSM/DID/RDD。
+
+## 七段实施顺序
+
+1. 统一 `AcceptanceCase` schema 与数据注册表。
+2. 建方法→专用数据能力映射和审核式下载/固化脚本。
+3. 加生产 Harness 结构化 trace observer，不走测试旁路。
+4. 建独立 oracle、设定指纹和字段级数值容差。
+5. 跑 DeepSeek 真实调用 3 次稳定性回放，要求工具、变量角色和安全决策 3/3 一致。
+6. 对每个工具补 Schema、血缘、变量角色、方法假设、进程边界五类失败用例。
+7. 输出机器可读准入报告与方法卡，CI 分 PR/Python/Nightly 三层门禁。
+
+详细 TDD 实施方案：`docs/superpowers/plans/2026-07-17-econometrics-paper-replay-acceptance-bench.md`。
+
+---
+
 # 总路线图：计量方法工具准入 v2（2026-07-16，Claude 盘点后与现行协议合并）
 
 > 定位：不另起炉灶。Codex 现行准入协议（psm_construction 是样板）保留为基础，
@@ -108,11 +152,12 @@ PSM 家族剩余 4 项准入 12-16h；RDD 2-3 项 10-14h。其余基础设施工
 
 ## 第 3 项：`psm_matching`（进行中，2026-07-17）
 
-- 已冻结首版边界：只开放 canonical stage 上的 `dependentVar + treatmentVar + covariates`，固定 1:1 最近邻、允许重复使用对照组、固定 0.2 SD(logit PS) caliper，估计 `ATT（已匹配处理组）`。
+- 已冻结首版边界：只开放 canonical stage 上的 `dependentVar + treatmentVar + covariates + analysisUnitVar + preTreatmentAggregation`，固定 1:1 最近邻、允许重复使用对照组、固定 0.2 SD(logit PS) caliper，估计 `ATT（已匹配处理组）`。
 - 不向模型开放匹配比例、caliper、estimand、`options` 或输出目录；普通 bootstrap 对固定邻居匹配通常无效，首版不输出 SE/p 值/置信区间或显著性。
 - 准入门槛：逐项检验 caliper、并列权重、未匹配处理组的 estimand 标签、匹配后 SMD ≤ 0.10、零残留失败路径、LaLonde/NSW 对标及 ≥5 条模型回放。
 - 详细 TDD 执行计划：`docs/superpowers/plans/2026-07-17-psm-matching-tool.md`。
 - 已完成实现与聚焦验证：模型入口已固定为结果变量、0/1 处理变量和处理前协变量；后端固定 1:1（允许对照重复使用）、logit PS 的 0.2 SD caliper、并列最近邻等权平均，只返回已匹配处理组 ATT；不产生 SE/p 值/CI/显著性。平衡未达最大绝对 SMD 0.10 时，Harness 删除隔离目录并拒绝发布。
+- 面板 PSM 硬门禁已补：`psm_matching` 与 `psm_ipw` 都要求明确分析单位和处理前聚合方式；Python 在估计前验证当前 stage 的分析单位无缺失且恰好一行一个单位。真实 `city × year` 面板即使伪称已做预处理也会在后端拒绝，不能再把重复逐期行当独立样本。
 - 真实数据状态：Card 1995 通过完整工具链（ATT=0.04197110，2,053 个处理组均匹配，匹配后最大绝对 SMD=0.01321997），仅作 B 级 wiring/smoke；从 NBER 下载的 LaLonde/NSW DW 445 行数据（SHA-256 `d1bd2680…e4e072`）在完整基线协变量下得到匹配后最大绝对 SMD=0.1849，已被正确拒绝，**不能伪装成 A 级准入**。下一步是归档该夹具与独立参考实现，决定是否通过用户可见的预处理阶段获得合格样本；不得暗中放宽 0.10 阈值。
 
 ## 第 4 项：`psm_ipw`（准入完成，2026-07-17）
@@ -122,6 +167,7 @@ PSM 家族剩余 4 项准入 12-16h；RDD 2-3 项 10-14h。其余基础设施工
 - 输出边界：只返回通过重叠、ESS 与平衡门槛后的 ATE 点估计、权重范围、ESS 与加权 SMD；首版不输出 SE/p 值/CI/显著性，且失败不得发布产物。
 - 已完成实现与聚焦验证：模型入口、工作流路由、事务清理和结果校验均只接受固定 Hájek ATE 契约；Python 层已覆盖归一化、极端得分不静默裁剪、低 ESS、加权失衡四类红线。完整模型工具链已跑通合成数据与 Card 1995；Card 结果 ATE=0.04153583，作为 B 级 wiring/smoke 基线，不作为 IPW 因果结论验证。
 - 未完成但不阻塞首版：LaLonde/NSW A 级独立参考对标与模型意图回放仍归入 PSM 家族夹具工作；在完成前不得把 Card smoke 误写为方法学正确性的证明。
+- 同一分析单位/聚合硬门禁与 `psm_matching` 共用；验证覆盖工具 schema、真实 Python 拒绝、Card 与合成横截面回归。
 
 ## 并行校准：两份真实论文 Excel 全链路测试（2026-07-17）
 

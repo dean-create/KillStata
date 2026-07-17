@@ -238,26 +238,27 @@ Windows-priority build:
 bun run --cwd packages/killstata build:windows-priority
 ```
 
-Windows-priority npm release dry run:
+Build and inspect a complete cross-platform npm release without publishing:
 
 ```bash
-bun run --cwd packages/killstata release:windows:latest --dry-run
+bun run --cwd packages/killstata release:npm --version 0.1.26 --dry-run
 ```
 
-Windows-priority npm release:
+Publish a verified release from a clean, synchronized `main`/`master` branch:
 
 ```bash
-$env:NPM_TOKEN="your_npm_token"
-bun run --cwd packages/killstata release:windows:latest
+bun run --cwd packages/killstata release:npm --version 0.1.26
 ```
 
 What the release script does:
 
-- checks that you are on `main` or `master`
-- checks that the branch is in sync with `origin`
-- runs workspace typecheck before publish
-- publishes the Windows-first npm packages
-- verifies the published version and dist-tag on npm
+- requires an explicit version and builds every supported native package
+- writes a SHA-512 release manifest and checks package dependency closure
+- publishes native packages sequentially and the `killstata` launcher last
+- resumes safely by skipping identical immutable versions
+- verifies registry integrity and the final `latest` dist-tag
+
+See [npm release architecture and runbook](./docs/npm-release.md) for authentication and recovery details.
 
 ## FAQ
 
@@ -269,9 +270,9 @@ No. KillStata is designed as its own CLI workflow layer. It can import common re
 
 No. Raw files are only the entry point. After import, KillStata is designed to continue from structured artifacts and tracked stages rather than repeatedly treating the original spreadsheet as the source of truth.
 
-### Why is the project Windows-first right now?
+### Which platforms does the npm package support?
 
-Because the current npm packaging and release flow are optimized for Windows users first. Cross-platform distribution is still important, but Windows is the current stability target.
+The release contains native packages for supported Windows, macOS, and Linux architectures. npm selects the package matching the current operating system and CPU.
 
 ### Can it handle large datasets or many tables?
 
