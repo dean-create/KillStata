@@ -1,4 +1,14 @@
-# 当前并行任务：npm 多平台发布链路整理（2026-07-18，已完成）
+# 当前并行任务：Windows-only npm 发布收缩（2026-07-18，已完成）
+
+> 用户已决定 npm 只支持 Windows x64：只保留 `killstata-windows-x64` 与 `killstata` 两个 tarball。macOS、Linux、Windows baseline 的 npm 原生包退出正式发布；源码开发不受影响。
+
+- 详细 TDD 计划：`docs/superpowers/plans/2026-07-18-windows-only-npm-release.md`。
+- 验收：manifest 精确两包、原生包先于 launcher、typecheck、两包真实 pack、registry dry-run、diff check。
+- 结果：发布协议测试 16/16、typecheck、`postinstall.mjs` 语法检查、两包真实 pack 与 registry dry-run 已通过；未上传 npm。
+
+---
+
+# 已完成：npm 多平台发布链路整理（2026-07-18）
 
 > 目标：把版本推断、全平台打包、npm 发布、GHCR 推送和 Windows 特例拆开，形成显式版本、可恢复、主包最后发布的最小链路。
 

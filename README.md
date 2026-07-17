@@ -6,7 +6,7 @@
 ![CLI](https://img.shields.io/badge/interface-CLI-111111)
 ![TypeScript](https://img.shields.io/badge/language-TypeScript-3178C6)
 ![Runtime](https://img.shields.io/badge/runtime-Bun-F9F1E1)
-![Platform](https://img.shields.io/badge/platform-Windows%20first-0078D4)
+![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
 
 KillStata is an AI-native CLI for econometric research workflows.
 
@@ -102,7 +102,7 @@ That design is what keeps the CLI usable when the analysis gets long, multi-step
 npm i -g killstata@latest
 ```
 
-This is the recommended install path right now. Windows users should usually get the bundled native binary and be able to start the CLI without installing Bun first.
+This is the supported npm install path. Windows x64 users get the bundled native binary and can start the CLI without installing Bun first. npm installation on macOS and Linux is intentionally unsupported.
 
 ### Source Development
 
@@ -232,13 +232,7 @@ Build the CLI package:
 bun run --cwd packages/killstata build
 ```
 
-Windows-priority build:
-
-```bash
-bun run --cwd packages/killstata build:windows-priority
-```
-
-Build and inspect a complete cross-platform npm release without publishing:
+Build and inspect the Windows x64 npm release without publishing:
 
 ```bash
 bun run --cwd packages/killstata release:npm --version 0.1.26 --dry-run
@@ -272,7 +266,7 @@ No. Raw files are only the entry point. After import, KillStata is designed to c
 
 ### Which platforms does the npm package support?
 
-The release contains native packages for supported Windows, macOS, and Linux architectures. npm selects the package matching the current operating system and CPU.
+The npm release supports Windows x64 only. It contains `killstata` and `killstata-windows-x64`; macOS and Linux npm installation is intentionally unsupported.
 
 ### Can it handle large datasets or many tables?
 
@@ -310,8 +304,7 @@ No. This repository now focuses on the CLI core. If you are looking for a full d
 
 Near-term priorities:
 
-- stabilize the Windows-first npm distribution flow
-- improve cross-platform binary packaging
+- stabilize the Windows x64 npm distribution flow
 - keep tightening the CLI-only repository structure
 - improve UTF-8 and Chinese text handling across outputs
 - make artifact-driven analysis paths more visible in the UX

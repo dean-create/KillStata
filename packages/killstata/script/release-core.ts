@@ -5,17 +5,7 @@ import path from "node:path"
 export const NPM_PUBLIC_REGISTRY = "https://registry.npmjs.org/"
 
 export const EXPECTED_NATIVE_PACKAGE_NAMES = [
-  "killstata-darwin-arm64",
-  "killstata-darwin-x64",
-  "killstata-darwin-x64-baseline",
-  "killstata-linux-arm64",
-  "killstata-linux-arm64-musl",
-  "killstata-linux-x64",
-  "killstata-linux-x64-baseline",
-  "killstata-linux-x64-baseline-musl",
-  "killstata-linux-x64-musl",
   "killstata-windows-x64",
-  "killstata-windows-x64-baseline",
 ] as const
 
 export interface ReleaseArtifact {

@@ -19,6 +19,14 @@
 - 尚未执行真实 npm publish。外部待办只有：发布账号权限/2FA 或 Trusted Publishing 配置，以及在干净且与远端同步的 main/master 上运行正式命令。
 - 发布原理与恢复手册：`docs/npm-release.md`；实现计划与 RED/GREEN 记录：`docs/superpowers/plans/2026-07-18-npm-release-pipeline.md`。
 
+## npm Windows x64-only 发布（2026-07-18，已完成）
+
+- 用户决定停止 macOS、Linux、Windows baseline 的 npm 原生分发；正式包只保留 `killstata-windows-x64` 和 launcher `killstata`。
+- 发布 manifest 现严格要求这两个包，且固定原生包先于 launcher；launcher 同时声明 `os: ["win32"]`、`cpu: ["x64"]` 并仅依赖 `killstata-windows-x64`，macOS/Linux 不会再出现“装了但没有二进制”的假成功。
+- `build.ts` 只构建一个 Windows x64 目标；删除全平台、baseline、`--single`、`--windows-priority` 分支及对应 npm script。
+- 验证：发布协议 16/16；typecheck、`node --check script/postinstall.mjs`、两包真实 pack、生成 manifest/launcher 元数据断言、registry dry-run、`git diff --check` 均通过。dry-run 仅计划 `killstata-windows-x64@0.1.26`、`killstata@0.1.26`，没有上传。
+- 外部待办不变：先在 npm 网页用交互式 2FA 让 `deangeek` 接受 `killstata` 的 maintainer 邀请，然后以 `deangeek` 身份从干净 main 正式发布。
+
 ## 计量工具并行任务（延续 2026-07-17）
 
 - 真实论文数据 + DeepSeek 工具调用回放验收基座已完成设计；首个 pilot 为 `panel_fe_regression + did.xlsx`。

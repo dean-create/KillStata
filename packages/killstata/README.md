@@ -1,7 +1,7 @@
 # killstata
 
 [![npm version](https://img.shields.io/npm/v/killstata?label=npm)](https://www.npmjs.com/package/killstata)
-![Windows first](https://img.shields.io/badge/platform-Windows%20first-0078D4)
+![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
 
 killstata is an AI-native CLI for econometric analysis workflows.
 
@@ -9,7 +9,7 @@ It is designed for users who need reproducible data import, staged preprocessing
 
 ## Install
 
-Recommended for Windows users:
+Supported on Windows x64:
 
 ```bash
 npm i -g killstata@latest
@@ -77,7 +77,7 @@ If installation succeeds but the CLI still does not start, retry the Windows-fir
 npm i -g killstata@latest
 ```
 
-If you are developing from source on a platform without a bundled native binary, install Bun:
+The npm package supports Windows x64 only. For source development, install Bun:
 
 - https://bun.sh
 

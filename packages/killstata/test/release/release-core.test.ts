@@ -103,6 +103,10 @@ class MemoryRegistry implements ReleaseRegistry {
 }
 
 describe("npm release protocol", () => {
+  test("authorizes only the Windows x64 native package", () => {
+    expect(EXPECTED_NATIVE_PACKAGE_NAMES).toEqual(["killstata-windows-x64"])
+  })
+
   test("exposes one pack command and one publish command without legacy Windows aliases", async () => {
     const packageJson = await Bun.file(new URL("../../package.json", import.meta.url)).json()
     const scripts = packageJson.scripts as Record<string, string>
@@ -132,14 +136,14 @@ describe("npm release protocol", () => {
     })
 
     expect(await registry.inspect("missing", VERSION)).toBeUndefined()
-    expect(await registry.inspect("killstata-linux-x64", VERSION)).toEqual({ integrity: "sha512-remote" })
-    await registry.publish(native("killstata-linux-x64"))
+    expect(await registry.inspect("killstata-windows-x64", VERSION)).toEqual({ integrity: "sha512-remote" })
+    await registry.publish(native("killstata-windows-x64"))
     expect(await registry.getTag("killstata", "latest")).toBe(VERSION)
     await registry.setTag("killstata", VERSION, "latest")
 
     expect(calls).toContainEqual([
       "publish",
-      `dist/killstata-linux-x64/killstata-linux-x64-${VERSION}.tgz`,
+      `dist/killstata-windows-x64/killstata-windows-x64-${VERSION}.tgz`,
       "--access",
       "public",
       "--tag",
@@ -161,8 +165,8 @@ describe("npm release protocol", () => {
   })
 
   test("rejects a self-consistent manifest that omits supported platforms", () => {
-    const linux = native("killstata-linux-x64")
-    expect(() => validateReleaseManifest(manifest([linux, launcher({ [linux.name]: VERSION })]))).toThrow(
+    const unsupported = native("killstata-linux-x64")
+    expect(() => validateReleaseManifest(manifest([unsupported, launcher({ [unsupported.name]: VERSION })]))).toThrow(
       `exactly ${EXPECTED_NATIVE_PACKAGE_NAMES.length} supported native packages`,
     )
   })
@@ -172,7 +176,7 @@ describe("npm release protocol", () => {
     const filepath = path.join(directory, "artifact.tgz")
     try {
       await Bun.write(filepath, "original")
-      const artifact = native("killstata-linux-x64", await fileIntegrity(filepath))
+      const artifact = native("killstata-windows-x64", await fileIntegrity(filepath))
       artifact.tarball = "artifact.tgz"
       await verifyArtifactFiles([artifact], directory)
 
@@ -228,72 +232,68 @@ describe("npm release protocol", () => {
   })
 
   test("resumes a partial release, skips identical artifacts, and publishes the launcher last", async () => {
-    const linux = native("killstata-linux-x64")
     const windows = native("killstata-windows-x64")
-    const cli = launcher({ [linux.name]: VERSION, [windows.name]: VERSION })
+    const cli = launcher({ [windows.name]: VERSION })
     const registry = new MemoryRegistry()
-    registry.packages.set(registry.key(linux.name, VERSION), linux.integrity)
+    registry.packages.set(registry.key(windows.name, VERSION), windows.integrity)
 
-    const result = await publishRelease([linux, windows, cli], registry)
+    const result = await publishRelease([windows, cli], registry)
 
     expect(result).toEqual([
-      { name: linux.name, action: "skip" },
-      { name: windows.name, action: "publish" },
+      { name: windows.name, action: "skip" },
       { name: cli.name, action: "publish" },
     ])
-    expect(registry.published).toEqual([windows.name, cli.name])
+    expect(registry.published).toEqual([cli.name])
   })
 
   test("dry-run inspection reports publish, skip, and conflict without mutating the registry", async () => {
-    const linux = native("killstata-linux-x64")
     const windows = native("killstata-windows-x64")
-    const cli = launcher({ [linux.name]: VERSION, [windows.name]: VERSION })
+    const cli = launcher({ [windows.name]: VERSION })
     const registry = new MemoryRegistry()
-    registry.packages.set(registry.key(linux.name, VERSION), linux.integrity)
+    registry.packages.set(registry.key(windows.name, VERSION), windows.integrity)
     registry.packages.set(registry.key(cli.name, VERSION), "sha512-conflict")
 
-    expect(await inspectRelease([linux, windows, cli], registry)).toEqual([
-      { name: linux.name, action: "skip" },
-      { name: windows.name, action: "publish" },
+    expect(await inspectRelease([windows, cli], registry)).toEqual([
+      { name: windows.name, action: "skip" },
       { name: cli.name, action: "conflict" },
     ])
     expect(registry.published).toEqual([])
   })
 
   test("stops before publishing when an immutable version has different content", async () => {
-    const linux = native("killstata-linux-x64")
-    const cli = launcher({ [linux.name]: VERSION })
+    const windows = native("killstata-windows-x64")
+    const cli = launcher({ [windows.name]: VERSION })
     const registry = new MemoryRegistry()
-    registry.packages.set(registry.key(linux.name, VERSION), "sha512-someone-else")
+    registry.packages.set(registry.key(windows.name, VERSION), "sha512-someone-else")
 
-    await expect(publishRelease([linux, cli], registry)).rejects.toThrow(
+    await expect(publishRelease([windows, cli], registry)).rejects.toThrow(
       "integrity conflict",
     )
     expect(registry.published).toEqual([])
   })
 
   test("verifies registry integrity after each upload instead of trusting npm exit code", async () => {
-    const linux = native("killstata-linux-x64")
-    const cli = launcher({ [linux.name]: VERSION })
+    const windows = native("killstata-windows-x64")
+    const cli = launcher({ [windows.name]: VERSION })
     const registry = new MemoryRegistry()
     registry.persistPublishedArtifact = false
 
     await expect(
-      publishRelease([linux, cli], registry, { verificationDelayMs: 0 }),
+      publishRelease([windows, cli], registry, { verificationDelayMs: 0 }),
     ).rejects.toThrow("registry verification failed")
-    expect(registry.published).toEqual([linux.name])
+    expect(registry.published).toEqual([windows.name])
   })
 
   test("rechecks a tarball immediately before upload", async () => {
-    const linux = native("killstata-linux-x64")
-    const cli = launcher({ [linux.name]: VERSION })
+    const windows = native("killstata-windows-x64")
+    const cli = launcher({ [windows.name]: VERSION })
     const registry = new MemoryRegistry()
-    let linuxChecks = 0
+    let windowsChecks = 0
 
     await expect(
-      publishRelease([linux, cli], registry, {
+      publishRelease([windows, cli], registry, {
         verifyArtifact: async (artifact) => {
-          if (artifact.name === linux.name && ++linuxChecks === 2) throw new Error("tarball changed after packing")
+          if (artifact.name === windows.name && ++windowsChecks === 2) throw new Error("tarball changed after packing")
         },
       }),
     ).rejects.toThrow("changed after packing")
@@ -301,12 +301,12 @@ describe("npm release protocol", () => {
   })
 
   test("retries bounded registry verification while a published version is propagating", async () => {
-    const linux = native("killstata-linux-x64")
-    const cli = launcher({ [linux.name]: VERSION })
+    const windows = native("killstata-windows-x64")
+    const cli = launcher({ [windows.name]: VERSION })
     const registry = new MemoryRegistry()
     registry.visibilityDelayReads = 2
 
-    const result = await publishRelease([linux, cli], registry, {
+    const result = await publishRelease([windows, cli], registry, {
       verificationAttempts: 3,
       verificationDelayMs: 0,
     })
@@ -315,14 +315,14 @@ describe("npm release protocol", () => {
   })
 
   test("repairs the latest tag when every immutable artifact already exists", async () => {
-    const linux = native("killstata-linux-x64")
-    const cli = launcher({ [linux.name]: VERSION })
+    const windows = native("killstata-windows-x64")
+    const cli = launcher({ [windows.name]: VERSION })
     const registry = new MemoryRegistry()
-    registry.packages.set(registry.key(linux.name, VERSION), linux.integrity)
+    registry.packages.set(registry.key(windows.name, VERSION), windows.integrity)
     registry.packages.set(registry.key(cli.name, VERSION), cli.integrity)
     registry.latest = "0.1.24"
 
-    const result = await publishRelease([linux, cli], registry)
+    const result = await publishRelease([windows, cli], registry)
 
     expect(result.every((item) => item.action === "skip")).toBe(true)
     expect(registry.tags).toEqual([`killstata@${VERSION}:latest`])

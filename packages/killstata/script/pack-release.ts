@@ -12,11 +12,6 @@ const cliBinaryName = "killstata"
 const version = parseReleaseVersion(process.argv.slice(2))
 process.env.KILLSTATA_VERSION = version
 
-function currentBinaryPackageName() {
-  const platform = process.platform === "win32" ? "windows" : process.platform
-  return `${pkg.name}-${platform}-${process.arch}`
-}
-
 async function localBinaryPath(name: string) {
   const windowsPath = `./dist/${name}/bin/${cliBinaryName}.exe`
   if (await Bun.file(windowsPath).exists()) return windowsPath
@@ -25,11 +20,16 @@ async function localBinaryPath(name: string) {
 
 const { binaries } = await import("./build.ts")
 {
-  const name = currentBinaryPackageName()
+  const name = `${pkg.name}-windows-x64`
   const binaryPath = await localBinaryPath(name)
-  console.log(`smoke test: running ${binaryPath} --version`)
-  const builtVersion = await $`${binaryPath} --version`.text().then((output) => output.trim())
-  if (builtVersion !== version) throw new Error(`binary version mismatch: expected ${version}, got ${builtVersion}`)
+  if (!(await Bun.file(binaryPath).exists())) throw new Error(`missing Windows binary: ${binaryPath}`)
+  if (process.platform === "win32" && process.arch === "x64") {
+    console.log(`smoke test: running ${binaryPath} --version`)
+    const builtVersion = await $`${binaryPath} --version`.text().then((output) => output.trim())
+    if (builtVersion !== version) throw new Error(`binary version mismatch: expected ${version}, got ${builtVersion}`)
+  } else {
+    console.log(`smoke test: Windows binary exists; runtime smoke requires Windows x64`)
+  }
 }
 
 fs.mkdirSync(`./dist/${pkg.name}`, { recursive: true })
@@ -55,6 +55,8 @@ await Bun.file(`./dist/${pkg.name}/package.json`).write(
         postinstall: "bun ./postinstall.mjs || node ./postinstall.mjs",
       },
       version,
+      os: ["win32"],
+      cpu: ["x64"],
       optionalDependencies: binaries,
     },
     null,
