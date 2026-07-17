@@ -23,11 +23,11 @@
 - Create: `docs/npm-release.md`, `docs/progress/2026-07-17.md`, `packages/killstata/script/{pack-release,release-core,release}.ts`, `packages/killstata/test/release/release-core.test.ts`
 - Delete: `packages/killstata/script/publish.ts`, `packages/killstata/script/release-windows.ts`
 
-- [ ] **Step 1: 暂存仅发布链路文件**
+- [x] **Step 1: 暂存仅发布链路文件**
 
 Run the explicit path-only `git add` command; do not use `git add .`.
 
-- [ ] **Step 2: 提交发布链路**
+- [x] **Step 2: 提交发布链路**
 
 Run: `git commit -m "build: harden npm multi-platform release"`
 
@@ -37,17 +37,17 @@ Expected: one commit containing only release scripts, release documentation, rel
 
 **Files:** none; Git history only.
 
-- [ ] **Step 1: 创建临时 main worktree**
+- [x] **Step 1: 创建临时 main worktree**
 
 Run: `git worktree add <temporary-path> origin/main`
 
-- [ ] **Step 2: 合并发布分支**
+- [x] **Step 2: 合并发布分支**
 
 Run: `git merge --no-ff agent/repo-cleanup-20260714`
 
 Expected: either a merge commit or explicit conflict resolution before continuing.
 
-- [ ] **Step 3: 验证合并内容**
+- [x] **Step 3: 验证合并内容**
 
 Run targeted release tests, typecheck, `git diff --check`, and compare `main` against the source branch.
 
@@ -55,14 +55,14 @@ Run targeted release tests, typecheck, `git diff --check`, and compare `main` ag
 
 **Files:** npm registry only.
 
-- [ ] **Step 1: 推送 main**
+- [x] **Step 1: 推送 main**
 
 Run: `git push origin HEAD:main`
 
-- [ ] **Step 2: 正式发布**
+- [ ] **Step 2: 正式发布（被 npm 2FA bypass 阻断）**
 
 Run: `bun run --cwd packages/killstata release:npm --version 0.1.26`
 
-- [ ] **Step 3: 逐包核验**
+- [x] **Step 3: 逐包核验**
 
 Run `npm view` for all 12 packages and assert `killstata@latest` is `0.1.26`.

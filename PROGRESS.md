@@ -1,5 +1,13 @@
 # 当前进度
 
+## main 合并与 npm 正式发布（2026-07-18）
+
+- 已将 `agent/repo-cleanup-20260714` 的 22 个既有提交、npm 发布链路提交和两份可复现真实论文 fixture 合并并推送到 GitHub `main`：`907c217`。
+- 隔离 main 验证：`bun run typecheck` 通过；全量 `bun test` 为 401 pass、0 fail、1748 assertions；`git diff --check` 通过。
+- 首次全量测试暴露已提交测试依赖被 `/test/` 忽略的 `dataset-contract.json` 与 `backend-results.json`；已仅跟踪这两份无路径/无凭据的确定性 fixture，相关 8 项测试与全量测试均转绿。
+- 已发起 `release:npm --version 0.1.26`；npm 在第一个原生包上传前以 E403 拒绝，原因是当前认证缺少 2FA bypass。随后逐包核验：12 个 `0.1.26` 包全部不存在，`killstata@latest` 仍为 `0.1.24`，没有半发布。
+- 下一步：在 npm 为 `deangeeker` 创建或更新带 `Read and write` 与 `Bypass two-factor authentication` 的 granular token（或配置 Trusted Publishing）；完成后在干净、同步的 main 上重跑同一发布命令。
+
 ## npm 多平台发布链路（2026-07-18，已完成整理）
 
 - 发布入口收敛为两条：`pack:release --version X.Y.Z` 只构建打包，`release:npm --version X.Y.Z [--dry-run]` 负责预检与发布。
