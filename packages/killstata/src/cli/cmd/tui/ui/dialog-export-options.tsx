@@ -99,7 +99,7 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
           keyBindings={[{ name: "return", action: "submit" }]}
           ref={(val: TextareaRenderable) => (textarea = val)}
           initialValue={props.defaultFilename}
-          placeholder="Enter filename"
+          placeholder="输入文件名"
           textColor={theme.text}
           focusedTextColor={theme.text}
           cursorColor={theme.text}
@@ -157,14 +157,14 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
       </box>
       <Show when={store.active !== "filename"}>
         <text fg={theme.textMuted} paddingBottom={1}>
-          Press <span style={{ fg: theme.text }}>space</span> to toggle, <span style={{ fg: theme.text }}>return</span>{" "}
-          to confirm
+          按 <span style={{ fg: theme.text }}>space</span> 切换，<span style={{ fg: theme.text }}>return</span>{" "}
+          确认
         </text>
       </Show>
       <Show when={store.active === "filename"}>
         <text fg={theme.textMuted} paddingBottom={1}>
-          Press <span style={{ fg: theme.text }}>return</span> to confirm, <span style={{ fg: theme.text }}>tab</span>{" "}
-          for options
+          按 <span style={{ fg: theme.text }}>return</span> 确认，<span style={{ fg: theme.text }}>tab</span>{" "}
+          切换选项
         </text>
       </Show>
     </box>

@@ -6,13 +6,15 @@
 ![CLI](https://img.shields.io/badge/interface-CLI-111111)
 ![TypeScript](https://img.shields.io/badge/language-TypeScript-3178C6)
 ![Runtime](https://img.shields.io/badge/runtime-Bun-F9F1E1)
-![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
+![Platform](https://img.shields.io/badge/platform-Windows%20first-0078D4)
 
 KillStata is an AI-native CLI for econometric research workflows.
 
 It is built for people doing empirical research with panel data, policy evaluation, causal inference, and paper-ready reporting, but who do not want to glue together spreadsheets, Stata scripts, Python notebooks, regression exports, and result summaries by hand every single time.
 
-This repository is the open-source CLI core. It focuses on reproducible data import, staged data processing, econometric estimation, and deliverable generation.
+This repository is the open-source core for KillStata.
+
+It includes the AI-native CLI core and a shared Desktop Interface directory.
 
 ## Table of Contents
 
@@ -96,13 +98,14 @@ That design is what keeps the CLI usable when the analysis gets long, multi-step
 
 ## Installation
 
-### Windows Users
+### npm CLI
 
 ```bash
-npm i -g killstata@latest
+npm install -g killstata@latest
+killstata --version
 ```
 
-This is the supported npm install path. Windows x64 users get the bundled native binary and can start the CLI without installing Bun first. npm installation on macOS and Linux is intentionally unsupported.
+The npm package includes the native runtime for each published platform. Bun is only needed when developing from source.
 
 ### Source Development
 
@@ -121,6 +124,30 @@ killstata
 ```
 
 On the first run, paste your DeepSeek API key. KillStata then prepares its private data-analysis environment automatically; no Python, Stata, MCP, skills, or directory configuration is required.
+
+### Run the shared Web interface
+
+Web mode will be available starting with release `0.1.30`. The npm `latest` tag must point to a Web-enabled release before these commands will work; older published packages do not contain the Web assets.
+
+```bash
+npm install -g killstata@latest
+killstata --version
+killstata web
+```
+
+By default KillStata opens the browser at `http://127.0.0.1:3080` and accepts connections only from that computer. Keep the terminal open while using it and press `Ctrl+C` to stop the service. Workspaces and model credentials are stored on the host computer. In connected mode, analysis requests are sent to the selected model provider.
+
+Web and Desktop share the same research UI and default to a local experience that records research information without connecting the analysis core. To run a real analysis, open **设置 → 分析模式 → 连接分析核心**. The app then asks for a model profile and API Key through the platform's credential adapter.
+
+To let other people on the same trusted private network use the host's configured analysis service, run:
+
+```bash
+killstata web --share
+```
+
+The terminal prints private-LAN links with a one-hour exchange token. Visitors select files in their own browser and receive a separate workspace ID. They can connect to the host's configured analysis core, while model credentials remain controlled by the host owner. A selected file is uploaded to the host only after a visitor explicitly connects and submits an analysis. Keep the terminal running until visitors finish. The standard `killstata web` command continues to bind only to this computer.
+
+For a remote browser connected through SSH, establish a local port forward (`ssh -L 3080:127.0.0.1:3080 user@host`), then run `killstata web --no-open` on the host and open its printed `127.0.0.1` launch link from the forwarded client.
 
 For source development only:
 
@@ -191,15 +218,15 @@ Why this matters:
 
 ## Repository Structure
 
-This repository is a CLI-focused monorepo.
+This repository is a CLI + Desktop monorepo sharing a single Core Harness.
 
 ```text
 packages/
-  killstata/   main CLI package
-  plugin/      plugin-related code
+  killstata/   Core runtime / CLI / TUI
   script/      shared build and automation scripts
-  sdk/js/      JavaScript SDK pieces
+  sdk/js/      JavaScript SDK used by CLI, TUI, and Desktop
   util/        shared utilities
+desktop/       Desktop interface built on the same Core Harness
 ```
 
 Main package:
@@ -232,16 +259,22 @@ Build the CLI package:
 bun run --cwd packages/killstata build
 ```
 
-Build and inspect the Windows x64 npm release without publishing:
+Windows-priority build:
 
 ```bash
-bun run --cwd packages/killstata release:npm --version 0.1.26 --dry-run
+bun run --cwd packages/killstata build:windows-priority
+```
+
+Build and inspect a complete cross-platform npm release without publishing:
+
+```bash
+bun run --cwd packages/killstata release:npm --version 0.1.30 --dry-run
 ```
 
 Publish a verified release from a clean, synchronized `main`/`master` branch:
 
 ```bash
-bun run --cwd packages/killstata release:npm --version 0.1.26
+bun run --cwd packages/killstata release:npm --version 0.1.30
 ```
 
 What the release script does:
@@ -266,7 +299,7 @@ No. Raw files are only the entry point. After import, KillStata is designed to c
 
 ### Which platforms does the npm package support?
 
-The npm release supports Windows x64 only. It contains `killstata` and `killstata-windows-x64`; macOS and Linux npm installation is intentionally unsupported.
+The release contains native packages for supported Windows, macOS, and Linux architectures. npm selects the package matching the current operating system and CPU.
 
 ### Can it handle large datasets or many tables?
 
@@ -274,7 +307,7 @@ That is exactly why the project uses an artifact-first design. The goal is to av
 
 ### What should I do if installation fails?
 
-For Windows users, retry the recommended path first:
+For users on a supported platform, retry the global install first:
 
 ```bash
 npm i -g killstata@latest
@@ -304,7 +337,8 @@ No. This repository now focuses on the CLI core. If you are looking for a full d
 
 Near-term priorities:
 
-- stabilize the Windows x64 npm distribution flow
+- validate npm native package selection across supported platforms
+- improve cross-platform binary packaging
 - keep tightening the CLI-only repository structure
 - improve UTF-8 and Chinese text handling across outputs
 - make artifact-driven analysis paths more visible in the UX

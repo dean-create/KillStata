@@ -4,7 +4,7 @@ import os from "os"
 import path from "path"
 import { Instance } from "../../src/project/instance"
 import { Identifier } from "../../src/id/id"
-import { buildParquetReadGuidance, ReadTool } from "../../src/tool/read"
+import { buildParquetReadGuidance, buildQualityInspectionReadGuidance, ReadTool } from "../../src/tool/read"
 
 const ctx = {
   // 必须是合法的 session id（ses_ 前缀）：read 成功路径上会拿它去查会话消息，
@@ -48,27 +48,31 @@ async function read(filePath: string) {
 }
 
 describe("tool.read data guard", () => {
-  test("refuses to read a raw dataset CSV as text", async () => {
+  test("returns a guidance result instead of surfacing a raw-dataset read error", async () => {
     const target = path.join(root, "panel.csv")
     writeBigCsv(target)
 
     // 读它只会拿到一个被截断的任意切片；任何基于这个切片算出的统计量都是错的。
-    await expect(read(target)).rejects.toThrow(/Refusing to read/)
+    const result = await read(target)
+    expect(result.output).toContain("拒绝将")
+    expect(result.metadata?.rawDatasetReadBlocked).toBe(true)
   })
 
-  test("the refusal tells the model what to do instead (not just 'no')", async () => {
+  test("the guidance tells the model what to do instead (not just 'no')", async () => {
     const target = path.join(root, "big.csv")
     writeBigCsv(target)
 
-    const error = await read(target).catch((e: Error) => e.message)
-    expect(error).toContain("data_import")
-    expect(error).toContain("numeric_snapshot.json")
+    const result = await read(target)
+    expect(result.output).toContain("data_import")
+    expect(result.output).toContain("numeric_snapshot.json")
   })
 
   test("parquet guidance points to dedicated estimators instead of the legacy dispatcher", () => {
-    const guidance = buildParquetReadGuidance(path.join(root, ".killstata", "datasets", "d1", "stages", "stage.parquet"))
+    const guidance = buildParquetReadGuidance(
+      path.join(root, ".killstata", "datasets", "d1", "stages", "stage.parquet"),
+    )
 
-    expect(guidance).toContain("dedicated estimator tool")
+    expect(guidance).toContain("专用估计工具")
     expect(guidance).not.toContain("data_import or econometrics")
     expect(guidance).not.toContain("data_import/econometrics")
   })
@@ -90,13 +94,33 @@ describe("tool.read data guard", () => {
     expect(result.output).toContain("处理组")
   })
 
+  test("只读质量体检读取内部产物时直接使用已有摘要，不再打开文件", async () => {
+    const artifact = path.join(root, ".killstata", "datasets", "d1", "reports", "quality.json")
+    fs.mkdirSync(path.dirname(artifact), { recursive: true })
+    fs.writeFileSync(artifact, "不应被读取")
+    const qualityContext = { ...ctx, extra: { qualityInspectionOnly: true } }
+    const result = await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const tool = await ReadTool.init()
+        return tool.execute({ filePath: artifact }, qualityContext)
+      },
+    })
+
+    expect(result.output).toBe(buildQualityInspectionReadGuidance())
+    expect(result.metadata?.qualityInspectionReadBlocked).toBe(true)
+    expect(result.output).not.toContain("不应被读取")
+  })
+
   test("excel and stata files remain blocked regardless of size", async () => {
     const xlsx = path.join(root, "tiny.xlsx")
     fs.writeFileSync(xlsx, "not really xlsx")
     const dta = path.join(root, "tiny.dta")
     fs.writeFileSync(dta, "not really dta")
 
-    await expect(read(xlsx)).rejects.toThrow(/Cannot read Excel workbook as text/)
-    await expect(read(dta)).rejects.toThrow(/Cannot read Stata dataset as text/)
+    const xlsxResult = await read(xlsx)
+    expect(xlsxResult.output).toContain("不能将Excel 工作簿按文本读取：")
+    const dtaResult = await read(dta)
+    expect(dtaResult.output).toContain("不能将Stata 数据集按文本读取：")
   })
 })

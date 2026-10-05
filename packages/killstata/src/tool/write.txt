@@ -1,8 +1,8 @@
-Writes a file to the local filesystem.
+# 写入文件
+创建新文件，或在用户明确要求时完整覆盖已有文件。
 
-Usage:
-- This tool will overwrite the existing file if there is one at the provided path.
-- If this is an existing file, you MUST use the Read tool first to read the file's contents. This tool will fail if you did not read the file first.
-- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
-- NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
-- Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.
+- filePath 使用真实目标路径，content 只包含完成当前任务所需的内容。
+- 目标已存在时必须先用 read 读取当前内容；局部修改优先 edit，不要为小改动整文件覆盖。
+- 不主动创建 README、说明文档或其他用户未要求的文件，不添加无关配置、抽象或装饰。
+- 覆盖会丢失原内容。写入工作目录外、共享位置、关键配置或难以恢复的文件前，必须获得针对该路径和内容的确认。
+- 写入失败时先检查父目录、路径、权限和并发修改；不得改写到另一个猜测路径，也不得用 Bash 重定向绕过 read/权限检查。

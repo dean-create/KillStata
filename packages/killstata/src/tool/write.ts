@@ -1,21 +1,20 @@
 import z from "zod"
 import * as path from "path"
 import { Tool } from "./tool"
-import { createTwoFilesPatch } from "diff"
+import { ToolModel } from "./model-contracts"
 import DESCRIPTION from "./write.txt"
 import { Bus } from "../bus"
 import { File } from "../file"
 import { FileTime } from "../file/time"
 import { Instance } from "../project/instance"
-import { trimDiff } from "./edit"
 import { assertExternalDirectory } from "./external-directory"
+import { displayPath } from "./analysis-display"
 
-
-export const WriteTool = Tool.define("write", {
+export const WriteTool = Tool.define("write", Tool.Execution.protectedFilesystem, ToolModel.forTool("write"), {
   description: DESCRIPTION,
   parameters: z.object({
-    content: z.string().describe("The content to write to the file"),
-    filePath: z.string().describe("The absolute path to the file to write (must be absolute, not relative)"),
+    content: z.string().describe("要写入文件的内容"),
+    filePath: z.string().describe("要写入的文件绝对路径，不能使用相对路径"),
   }),
   async execute(params, ctx) {
     const filepath = path.isAbsolute(params.filePath) ? params.filePath : path.join(Instance.directory, params.filePath)
@@ -23,18 +22,13 @@ export const WriteTool = Tool.define("write", {
 
     const file = Bun.file(filepath)
     const exists = await file.exists()
-    const contentOld = exists ? await file.text() : ""
     if (exists) await FileTime.assert(ctx.sessionID, filepath)
 
-    const diff = trimDiff(createTwoFilesPatch(filepath, filepath, contentOld, params.content))
     await ctx.ask({
       permission: "edit",
       patterns: [path.relative(Instance.worktree, filepath)],
       always: ["*"],
-      metadata: {
-        filepath,
-        diff,
-      },
+      metadata: { filepath },
     })
 
     await Bun.write(filepath, params.content)
@@ -49,7 +43,7 @@ export const WriteTool = Tool.define("write", {
     const output = "Wrote file successfully."
 
     return {
-      title: path.relative(Instance.worktree, filepath),
+      title: displayPath(path.relative(Instance.worktree, filepath)),
       metadata: {
         filepath,
         exists: exists,

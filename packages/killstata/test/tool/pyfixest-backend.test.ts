@@ -2,13 +2,23 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { runPyfixestBackend, validatePyfixestBackendResult } from "../../src/tool/pyfixest-backend"
+import { execFileSync } from "child_process"
+import { runPyfixestBackend, validatePyfixestBackendResult } from "../../../../trash/killstata-legacy-econometrics/tool/pyfixest-backend"
 
 let tempDir = ""
 
 beforeAll(() => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "killstata-pyfixest-"))
-})
+  // test/preload 为每个 Bun 进程创建隔离 HOME，Matplotlib 因而没有字体缓存；若让第一个
+  // 30 秒计量用例承担冷启动，字体扫描会把真实估计误报成超时。测试文件级预热不改变
+  // 产品超时，也不共享用户 HOME，后续 PyFixest 子进程复用同一隔离 HOME 的缓存。
+  const python = process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+  execFileSync(python, ["-c", "import matplotlib.font_manager"], {
+    env: process.env,
+    stdio: "ignore",
+    timeout: 120_000,
+  })
+}, 120_000)
 
 afterAll(() => {
   fs.rmSync(tempDir, { recursive: true, force: true })
@@ -22,7 +32,7 @@ describe("PyFixest backend", () => {
     for (const treated of [0, 1]) {
       for (const post of [0, 1]) {
         for (let index = 0; index < 20; index += 1) {
-          const noise = (index % 5 - 2) * 0.1
+          const noise = ((index % 5) - 2) * 0.1
           const outcome = 10 + 2 * treated - post + 3 * treated * post + noise
           rows.push(`${treated},${post},${outcome}`)
         }
@@ -50,7 +60,7 @@ describe("PyFixest backend", () => {
     expect(result.primary?.term).toBe("treated:t")
     expect(result.primary?.estimate).toBeCloseTo(3, 10)
     expect(result.rowsUsed).toBe(80)
-    expect(result.warnings?.join("\n")).toContain("两个时期")
+    expect(result.warnings?.join("\n")).toContain("单一post指标")
   }, 30_000)
 
   test("estimates HDFE with clustered inference and safe aliases for non-formula column names", async () => {
@@ -61,7 +71,7 @@ describe("PyFixest backend", () => {
       for (let year = 2018; year <= 2023; year += 1) {
         const treatment = ((firm * 3 + year * 2) % 7) - 3
         const control = ((firm * year) % 5) - 2
-        const noise = ((firm + year) % 3 - 1) * 0.01
+        const noise = (((firm + year) % 3) - 1) * 0.01
         const outcome = 2 * treatment + 0.7 * control + firm * 0.5 + (year - 2018) * 0.3 + noise
         rows.push(`${firm},${year},${outcome},${treatment},${control}`)
       }
@@ -104,7 +114,7 @@ describe("PyFixest backend", () => {
       for (let year = 1; year <= 8; year += 1) {
         const treated = cohort > 0 && year >= cohort ? 1 : 0
         const eventTime = cohort > 0 ? year - cohort : "-inf"
-        const noise = ((unit * 7 + year * 3) % 11 - 5) * 0.01
+        const noise = (((unit * 7 + year * 3) % 11) - 5) * 0.01
         const outcome = unit * 0.2 + year * 0.1 + treated * 1.5 + noise
         rows.push(`${unit},${year},${cohort},${treated},${eventTime},${outcome}`)
       }
@@ -160,6 +170,38 @@ describe("PyFixest backend", () => {
     expect(saturated.coefficients?.find((item) => item.term === "0.0")?.estimate).toBeCloseTo(1.5, 1)
   }, 60_000)
 
+  test("saturated event study accepts string-valued panel entities", async () => {
+    const dataPath = path.join(tempDir, "staggered-string-entity.csv")
+    const rows = ["region,year,cohort,outcome"]
+    for (let region = 1; region <= 60; region += 1) {
+      const cohort = region <= 20 ? 4 : region <= 40 ? 6 : 0
+      for (let year = 1; year <= 8; year += 1) {
+        const treated = cohort > 0 && year >= cohort ? 1 : 0
+        rows.push(`region-${region},${year},${cohort},${region * 0.2 + year * 0.1 + treated * 1.5}`)
+      }
+    }
+    fs.writeFileSync(dataPath, `${rows.join("\n")}\n`, "utf-8")
+
+    const result = await runPyfixestBackend({
+      pythonCommand: process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python"),
+      cwd: process.cwd(),
+      payload: {
+        method: "did_event_study_saturated",
+        dataPath,
+        outputDir: path.join(tempDir, "saturated-string-entity"),
+        dependentVar: "outcome",
+        cohortVar: "cohort",
+        entityVar: "region",
+        timeVar: "year",
+        clusterVar: "region",
+        aggregateAtt: false,
+      },
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.coefficients?.length).toBeGreaterThan(3)
+  }, 30_000)
+
   test("fails closed when DID treatment reverses from one back to zero", async () => {
     const dataPath = path.join(tempDir, "invalid-did.csv")
     const rows = ["unit,year,treated,event_time,outcome"]
@@ -173,23 +215,25 @@ describe("PyFixest backend", () => {
     }
     fs.writeFileSync(dataPath, `${rows.join("\n")}\n`, "utf-8")
 
-    await expect(runPyfixestBackend({
-      pythonCommand: process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python"),
-      cwd: process.cwd(),
-      payload: {
-        method: "did2s",
-        dataPath,
-        outputDir: path.join(tempDir, "invalid-did-result"),
-        dependentVar: "outcome",
-        treatmentVar: "treated",
-        relativeTimeVar: "event_time",
-        entityVar: "unit",
-        timeVar: "year",
-        clusterVar: "unit",
-        covariates: [],
-        referencePeriod: -1,
-      },
-    })).rejects.toThrow("处理状态一旦变为 1，就不能再回到 0")
+    await expect(
+      runPyfixestBackend({
+        pythonCommand: process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python"),
+        cwd: process.cwd(),
+        payload: {
+          method: "did2s",
+          dataPath,
+          outputDir: path.join(tempDir, "invalid-did-result"),
+          dependentVar: "outcome",
+          treatmentVar: "treated",
+          relativeTimeVar: "event_time",
+          entityVar: "unit",
+          timeVar: "year",
+          clusterVar: "unit",
+          covariates: [],
+          referencePeriod: -1,
+        },
+      }),
+    ).rejects.toThrow("处理状态一旦变为 1，就不能再回到 0")
   }, 30_000)
 
   test("fails closed when DID relative time disagrees with the observed treatment start", async () => {
@@ -204,23 +248,25 @@ describe("PyFixest backend", () => {
     }
     fs.writeFileSync(dataPath, `${rows.join("\n")}\n`, "utf-8")
 
-    await expect(runPyfixestBackend({
-      pythonCommand: process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python"),
-      cwd: process.cwd(),
-      payload: {
-        method: "did2s",
-        dataPath,
-        outputDir: path.join(tempDir, "misaligned-event-time-result"),
-        dependentVar: "outcome",
-        treatmentVar: "treated",
-        relativeTimeVar: "event_time",
-        entityVar: "unit",
-        timeVar: "year",
-        clusterVar: "unit",
-        covariates: [],
-        referencePeriod: -1,
-      },
-    })).rejects.toThrow("相对时期与实际首次处理时点不一致")
+    await expect(
+      runPyfixestBackend({
+        pythonCommand: process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python"),
+        cwd: process.cwd(),
+        payload: {
+          method: "did2s",
+          dataPath,
+          outputDir: path.join(tempDir, "misaligned-event-time-result"),
+          dependentVar: "outcome",
+          treatmentVar: "treated",
+          relativeTimeVar: "event_time",
+          entityVar: "unit",
+          timeVar: "year",
+          clusterVar: "unit",
+          covariates: [],
+          referencePeriod: -1,
+        },
+      }),
+    ).rejects.toThrow("相对时期与实际首次处理时点不一致")
   }, 30_000)
 
   test("requires the saturated event study to declare never-treated units as cohort zero", async () => {
@@ -235,22 +281,24 @@ describe("PyFixest backend", () => {
     }
     fs.writeFileSync(dataPath, `${rows.join("\n")}\n`, "utf-8")
 
-    await expect(runPyfixestBackend({
-      pythonCommand: process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python"),
-      cwd: process.cwd(),
-      payload: {
-        method: "did_event_study_saturated",
-        dataPath,
-        outputDir: path.join(tempDir, "no-never-treated-result"),
-        dependentVar: "outcome",
-        cohortVar: "cohort",
-        entityVar: "unit",
-        timeVar: "year",
-        clusterVar: "unit",
-        covariates: [],
-        aggregateAtt: false,
-      },
-    })).rejects.toThrow("首次处理时期变量必须用 0 表示从未处理组")
+    await expect(
+      runPyfixestBackend({
+        pythonCommand: process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python"),
+        cwd: process.cwd(),
+        payload: {
+          method: "did_event_study_saturated",
+          dataPath,
+          outputDir: path.join(tempDir, "no-never-treated-result"),
+          dependentVar: "outcome",
+          cohortVar: "cohort",
+          entityVar: "unit",
+          timeVar: "year",
+          clusterVar: "unit",
+          covariates: [],
+          aggregateAtt: false,
+        },
+      }),
+    ).rejects.toThrow("首次处理时期变量必须用 0 表示从未处理组")
   }, 30_000)
 
   test("requires one stable treatment cohort per entity", async () => {
@@ -266,22 +314,24 @@ describe("PyFixest backend", () => {
     }
     fs.writeFileSync(dataPath, `${rows.join("\n")}\n`, "utf-8")
 
-    await expect(runPyfixestBackend({
-      pythonCommand: process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python"),
-      cwd: process.cwd(),
-      payload: {
-        method: "did_event_study_saturated",
-        dataPath,
-        outputDir: path.join(tempDir, "changing-cohort-result"),
-        dependentVar: "outcome",
-        cohortVar: "cohort",
-        entityVar: "unit",
-        timeVar: "year",
-        clusterVar: "unit",
-        covariates: [],
-        aggregateAtt: false,
-      },
-    })).rejects.toThrow("同一个体的首次处理时期必须保持不变")
+    await expect(
+      runPyfixestBackend({
+        pythonCommand: process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python"),
+        cwd: process.cwd(),
+        payload: {
+          method: "did_event_study_saturated",
+          dataPath,
+          outputDir: path.join(tempDir, "changing-cohort-result"),
+          dependentVar: "outcome",
+          cohortVar: "cohort",
+          entityVar: "unit",
+          timeVar: "year",
+          clusterVar: "unit",
+          covariates: [],
+          aggregateAtt: false,
+        },
+      }),
+    ).rejects.toThrow("同一个体的首次处理时期必须保持不变")
   }, 30_000)
 
   test("rejects incomplete success payloads from the Python boundary", () => {
@@ -296,25 +346,27 @@ describe("PyFixest backend", () => {
       confLow: null,
       confHigh: null,
     }
-    expect(() => validatePyfixestBackendResult({
-      success: true,
-      method: "hdfe_regression",
-      backend: "pyfixest",
-      pyfixestVersion: "0.60.0",
-      rowsInput: 100,
-      rowsUsed: 100,
-      droppedRows: 0,
-      coefficients: [coefficient],
-      primary: coefficient,
-      rSquared: 0.5,
-      rSquaredWithin: 0.4,
-      covariance: "HC1",
-      clusterVars: [],
-      clusterCounts: {},
-      fixedEffects: ["firm"],
-      coefficientsPath: "/tmp/coefficients.csv",
-      resultPath: "/tmp/results.json",
-      warnings: [],
-    })).toThrow("结果结构不完整")
+    expect(() =>
+      validatePyfixestBackendResult({
+        success: true,
+        method: "hdfe_regression",
+        backend: "pyfixest",
+        pyfixestVersion: "0.60.0",
+        rowsInput: 100,
+        rowsUsed: 100,
+        droppedRows: 0,
+        coefficients: [coefficient],
+        primary: coefficient,
+        rSquared: 0.5,
+        rSquaredWithin: 0.4,
+        covariance: "HC1",
+        clusterVars: [],
+        clusterCounts: {},
+        fixedEffects: ["firm"],
+        coefficientsPath: "/tmp/coefficients.csv",
+        resultPath: "/tmp/results.json",
+        warnings: [],
+      }),
+    ).toThrow("结果结构不完整")
   })
 })

@@ -2,8 +2,13 @@
   "$schema": "https://json.schemastore.org/package",
   "name": "@killstata/script",
   "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "devDependencies": {
-    "@types/bun": "catalog:"
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
   },
   "exports": {
     ".": "./src/index.ts"

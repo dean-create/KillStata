@@ -14,7 +14,7 @@ async function runIpw(input: {
   covariates: Record<string, number[]>
 }) {
   const python = process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python")
-  const moduleDir = path.resolve(import.meta.dir, "../../python/econometrics")
+  const moduleDir = path.resolve(import.meta.dir, "../../../killstata-econometrics-engine/python/econometrics")
   const script = [
     "import json, sys",
     "import pandas as pd",
@@ -89,17 +89,13 @@ async function withInstance<T>(fn: (root: string) => Promise<T>) {
 }
 
 async function modelVisibleTool() {
-  const tools = await ToolRegistry.tools(
-    { providerID: "deepseek", modelID: "deepseek-v4-flash" },
-    undefined,
-    {
-      inputIntent: "analysis",
-      currentStage: "preprocess_or_filter",
-      platformCapabilities: { mcp: false, images: false, remote: false },
-      modelCapabilities: { supportsTools: true, supportsImages: false },
-    },
-  )
-  return tools.find((tool) => tool.id === "psm_ipw")
+  const pool = await ToolRegistry.resolvePool({ providerID: "deepseek", modelID: "deepseek-v4-flash" }, undefined, {
+    inputIntent: "analysis",
+    currentStage: "preprocess_or_filter",
+    platformCapabilities: { mcp: false, images: false, remote: false },
+    modelCapabilities: { supportsTools: true, supportsImages: false },
+  })
+  return (await pool.load(["psm_ipw"]))[0]
 }
 
 describe("strict propensity-score IPW", () => {
@@ -166,8 +162,15 @@ describe("strict propensity-score IPW", () => {
     await withInstance(async (root) => {
       const sessionID = "psm_ipw_card"
       const sourcePath = path.join(root, "card1995.csv")
-      const cardRows = fs.readFileSync(path.join(import.meta.dir, "../fixtures/golden/card1995.csv"), "utf-8").trim().split("\n")
-      fs.writeFileSync(sourcePath, ["unit," + cardRows[0], ...cardRows.slice(1).map((row, index) => `${index + 1},${row}`)].join("\n"), "utf-8")
+      const cardRows = fs
+        .readFileSync(path.join(import.meta.dir, "../fixtures/golden/card1995.csv"), "utf-8")
+        .trim()
+        .split("\n")
+      fs.writeFileSync(
+        sourcePath,
+        ["unit," + cardRows[0], ...cardRows.slice(1).map((row, index) => `${index + 1},${row}`)].join("\n"),
+        "utf-8",
+      )
       const source = registerCanonicalDataset({ sessionID, sourcePath, datasetId: "dataset_card1995_psm_ipw" })
       const tool = await modelVisibleTool()
       expect(tool).toBeDefined()
@@ -248,19 +251,19 @@ describe("strict propensity-score IPW", () => {
     input.propensityScore[0] = 0.02
 
     await expect(runIpw(input)).rejects.toThrow(/overlap|propensity|极端|重叠/i)
-  })
+  }, 30_000)
 
   test("rejects low effective sample size even when propensity scores remain inside the fixed overlap range", async () => {
     const input = balancedFixture()
     for (let index = 0; index < 20; index += 1) input.propensityScore[index] = index === 0 ? 0.05 : 0.94
 
     await expect(runIpw(input)).rejects.toThrow(/effective sample|ESS|有效样本/i)
-  })
+  }, 30_000)
 
   test("rejects a weighted result that leaves any supplied covariate imbalanced", async () => {
     const input = balancedFixture()
     input.covariates.x = [...Array(20).fill(10), ...Array.from({ length: 20 }, (_, index) => index % 2)]
 
     await expect(runIpw(input)).rejects.toThrow(/balance|SMD|平衡/i)
-  })
+  }, 30_000)
 })

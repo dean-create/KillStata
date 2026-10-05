@@ -1,7 +1,7 @@
 import { TextAttributes } from "@opentui/core"
 import { useTheme } from "../context/theme"
 import { useSync } from "@tui/context/sync"
-import { For, Match, Switch, Show, createMemo } from "solid-js"
+import { For, Match, Switch, Show } from "solid-js"
 import { Installation } from "@/installation"
 
 export type DialogStatusProps = {}
@@ -9,32 +9,6 @@ export type DialogStatusProps = {}
 export function DialogStatus() {
   const sync = useSync()
   const { theme } = useTheme()
-
-
-  const plugins = createMemo(() => {
-    const list = sync.data.config.plugin ?? []
-    const result = list.map((value) => {
-      if (value.startsWith("file://")) {
-        const path = value.substring("file://".length)
-        const parts = path.split("/")
-        const filename = parts.pop() || path
-        if (!filename.includes(".")) return { name: filename }
-        const basename = filename.split(".")[0]
-        if (basename === "index") {
-          const dirname = parts.pop()
-          const name = dirname || basename
-          return { name }
-        }
-        return { name: basename }
-      }
-      const index = value.lastIndexOf("@")
-      if (index <= 0) return { name: value, version: "latest" }
-      const name = value.substring(0, index)
-      const version = value.substring(index + 1)
-      return { name, version }
-    })
-    return result.toSorted((a, b) => a.name.localeCompare(b.name))
-  })
 
   return (
     <box paddingLeft={2} paddingRight={2} gap={1} paddingBottom={1}>
@@ -71,9 +45,9 @@ export function DialogStatus() {
                   <b>{key}</b>{" "}
                   <span style={{ fg: theme.textMuted }}>
                     <Switch fallback={item.status}>
-                      <Match when={item.status === "connected"}>Connected</Match>
+                      <Match when={item.status === "connected"}>已连接</Match>
                       <Match when={item.status === "failed" && item}>{(val) => val().error}</Match>
-                      <Match when={item.status === "disabled"}>Disabled in configuration</Match>
+                      <Match when={item.status === "disabled"}>已在配置中禁用</Match>
                       <Match when={(item.status as string) === "needs_auth"}>
                         Needs authentication in advanced configuration
                       </Match>
@@ -82,29 +56,6 @@ export function DialogStatus() {
                       </Match>
                     </Switch>
                   </span>
-                </text>
-              </box>
-            )}
-          </For>
-        </box>
-      </Show>
-      <Show when={plugins().length > 0} fallback={<text fg={theme.text}>No Plugins</text>}>
-        <box>
-          <text fg={theme.text}>{plugins().length} Plugins</text>
-          <For each={plugins()}>
-            {(item) => (
-              <box flexDirection="row" gap={1}>
-                <text
-                  flexShrink={0}
-                  style={{
-                    fg: theme.success,
-                  }}
-                >
-                  •
-                </text>
-                <text wrapMode="word" fg={theme.text}>
-                  <b>{item.name}</b>
-                  {item.version && <span style={{ fg: theme.textMuted }}> @{item.version}</span>}
                 </text>
               </box>
             )}

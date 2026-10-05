@@ -1,7 +1,7 @@
 # killstata
 
 [![npm version](https://img.shields.io/npm/v/killstata?label=npm)](https://www.npmjs.com/package/killstata)
-![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
+![Cross-platform CLI](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D4)
 
 killstata is an AI-native CLI for econometric analysis workflows.
 
@@ -9,10 +9,11 @@ It is designed for users who need reproducible data import, staged preprocessing
 
 ## Install
 
-Supported on Windows x64:
+Install globally:
 
 ```bash
-npm i -g killstata@latest
+npm install -g killstata@latest
+killstata --version
 ```
 
 For source development:
@@ -29,6 +30,30 @@ killstata --version
 ```
 
 On first run, enter a DeepSeek API key. KillStata prepares its private data-analysis environment automatically; Python, Stata, MCP, and skills setup are not required.
+
+### Local Web interface
+
+Web mode will be available starting with release `0.1.30`. The npm `latest` tag must point to a Web-enabled release before these commands will work; older published packages do not contain the Web assets.
+
+```bash
+npm install -g killstata@latest
+killstata --version
+killstata web
+```
+
+By default KillStata opens the browser at `http://127.0.0.1:3080` and accepts connections only from that computer. Keep the terminal open while using it and press `Ctrl+C` to stop the service. Workspaces and model credentials are stored on the host computer. In connected mode, analysis requests are sent to the selected model provider.
+
+Web and Desktop share the same research UI and default to a local experience that records research information without connecting the analysis core. To run a real analysis, open **设置 → 分析模式 → 连接分析核心**. Model credentials are accessed only after this explicit action.
+
+To let people on the same trusted private network use the host's configured analysis service:
+
+```bash
+killstata web --share
+```
+
+Share the private-LAN link printed in the terminal; its token can be exchanged for one hour. Visitors use their own browser file picker and separate workspace ID. They can connect to the host's configured analysis core, but cannot view or change its API Key or model profiles. A selected file is uploaded to the host only after the visitor explicitly connects and submits an analysis. The default `killstata web` command remains available at `127.0.0.1:3080` only.
+
+For remote access over SSH, forward the local port (`ssh -L 3080:127.0.0.1:3080 user@host`), run `killstata web --no-open` on the host, and open the printed local launch link through the tunnel.
 
 `killstata config` remains available only for optional advanced model settings.
 
@@ -71,13 +96,13 @@ Typical artifact layout:
 
 ## Install Troubleshooting
 
-If installation succeeds but the CLI still does not start, retry the Windows-first install path:
+If installation succeeds but the CLI still does not start, reinstall the package for the current platform:
 
 ```bash
 npm i -g killstata@latest
 ```
 
-The npm package supports Windows x64 only. For source development, install Bun:
+If you are developing from source on a platform without a bundled native binary, install Bun:
 
 - https://bun.sh
 

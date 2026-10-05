@@ -1,21 +1,25 @@
 import { describe, expect, test } from "bun:test"
 import fs from "fs"
+import os from "os"
 import path from "path"
 import { Tool } from "@/tool/tool"
 import {
   EconometricsRecommendTool,
   PropensityScoreConstructionTool,
   PropensityScoreVisualizationTool,
-  OlsRegressionTool,
-  PanelFeRegressionTool,
-  Iv2slsTool,
-} from "@/tool/econometrics-method-tools"
-import {
-  HdfeRegressionTool,
-  DidStaticTool,
-  Did2sTool,
-  SaturatedDidEventStudyTool,
-} from "@/tool/pyfixest"
+} from "../../../../trash/killstata-legacy-econometrics/tool/econometrics-method-tools"
+import { OlsRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/ols"
+import { PanelFeTool } from "../../../../trash/killstata-legacy-econometrics/tool/panel-fe"
+import { IvTool } from "../../../../trash/killstata-legacy-econometrics/tool/iv"
+import { HdfeRegressionTool, DidStaticTool, Did2sTool, SaturatedDidEventStudyTool } from "../../../../trash/killstata-legacy-econometrics/tool/pyfixest"
+import { LogitRegressionTool, ProbitRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/glm"
+import { PoissonRegressionTool, NegativeBinomialRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/count"
+import { MultinomialLogitTool } from "../../../../trash/killstata-legacy-econometrics/tool/multinomial"
+import { RobustRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/rlm"
+import { WlsRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/wls"
+import { QuantileRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/quantile"
+import { PanelRandomEffectsTool } from "../../../../trash/killstata-legacy-econometrics/tool/panel"
+import { EconometricsEngineClient } from "@/runtime/services/econometrics-engine-client"
 
 /**
  * 模型调用回放：五关准入协议里的第五关。
@@ -42,17 +46,37 @@ const REPLAY_TOOLS: Record<string, Tool.Info> = {
   psm_construction: PropensityScoreConstructionTool,
   psm_visualize: PropensityScoreVisualizationTool,
   ols_regression: OlsRegressionTool,
-  panel_fe_regression: PanelFeRegressionTool,
-  iv_2sls: Iv2slsTool,
+  panel_fe_regression: PanelFeTool,
+  iv_2sls: IvTool,
   hdfe_regression: HdfeRegressionTool,
   did_static: DidStaticTool,
   did2s: Did2sTool,
   did_event_study_saturated: SaturatedDidEventStudyTool,
+  logit_regression: LogitRegressionTool,
+  probit_regression: ProbitRegressionTool,
+  poisson_regression: PoissonRegressionTool,
+  negbin_regression: NegativeBinomialRegressionTool,
+  quantile_regression: QuantileRegressionTool,
+  panel_random_effects: PanelRandomEffectsTool,
+  multinomial_logit: MultinomialLogitTool,
+  robust_regression: RobustRegressionTool,
+  wls_regression: WlsRegressionTool,
 }
 
 const MIN_TOTAL = 5
 const MIN_PASS = 2
 const MIN_REJECT = 3
+
+function registryClient() {
+  const managedPython = process.platform === "win32"
+    ? path.join(os.homedir(), ".killstata", "venv", "Scripts", "python.exe")
+    : path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+  return new EconometricsEngineClient({
+    command: process.env.KILLSTATA_PYTHON ?? managedPython,
+    cwd: path.resolve(process.cwd(), "../.."),
+    pythonPath: path.resolve(process.cwd(), "../killstata-econometrics-engine/src"),
+  })
+}
 
 function loadFixtures(toolId: string): Array<ReplayFixture & { file: string }> {
   const dir = path.join(FIXTURES_ROOT, toolId)
@@ -89,8 +113,26 @@ describe("model call replay (五关准入协议·第五关)", () => {
 
       for (const fixture of fixtures) {
         test(`[${fixture.file}] ${fixture.description}`, async () => {
-          const info = await tool.init()
           const normalized = Tool.normalizeToolArgs(fixture.modelArgs)
+          if (toolId === "econometrics_recommend") {
+            const engine = registryClient()
+            try {
+              const result = await engine.validate(toolId, normalized as Record<string, unknown>, {
+                runtime: { datasetId: "dataset_replay", stageId: "stage_000" },
+              })
+              expect(fixture.expect, `${fixture.file} 应拒绝`).toBe("pass")
+              expect(result.method_id).toBe(toolId)
+            } catch (error) {
+              expect(fixture.expect, `${fixture.file} 应通过；实际错误：${String(error)}`).toBe("reject")
+              const message = error instanceof Error ? error.message : String(error)
+              for (const hint of fixture.rejectHint ?? []) expect(message).toContain(hint)
+            } finally {
+              await engine.close()
+            }
+            return
+          }
+
+          const info = await tool.init()
           const result = info.parameters.safeParse(normalized)
 
           if (fixture.expect === "pass") {

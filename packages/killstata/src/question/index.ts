@@ -10,8 +10,8 @@ export namespace Question {
 
   export const Option = z
     .object({
-      label: z.string().max(30).describe("Display text (1-5 words, concise)"),
-      description: z.string().describe("Explanation of choice"),
+      label: z.string().max(30).describe("选项显示文字，简短清晰"),
+      description: z.string().describe("说明该选项的含义或影响"),
     })
     .meta({
       ref: "QuestionOption",
@@ -20,11 +20,11 @@ export namespace Question {
 
   export const Info = z
     .object({
-      question: z.string().describe("Complete question"),
-      header: z.string().max(30).describe("Very short label (max 30 chars)"),
-      options: z.array(Option).describe("Available choices"),
-      multiple: z.boolean().optional().describe("Allow selecting multiple choices"),
-      custom: z.boolean().optional().describe("Allow typing a custom answer (default: true)"),
+      question: z.string().describe("完整、明确的问题"),
+      header: z.string().max(30).describe("不超过 30 字的简短标签"),
+      options: z.array(Option).describe("可选择的答案"),
+      multiple: z.boolean().optional().describe("是否允许多选"),
+      custom: z.boolean().optional().describe("是否允许用户填写自定义答案，默认允许"),
     })
     .meta({
       ref: "QuestionInfo",
@@ -35,7 +35,7 @@ export namespace Question {
     .object({
       id: Identifier.schema("question"),
       sessionID: Identifier.schema("session"),
-      questions: z.array(Info).describe("Questions to ask"),
+      questions: z.array(Info).describe("需要向用户提出的问题"),
       tool: z
         .object({
           messageID: z.string(),
@@ -56,7 +56,7 @@ export namespace Question {
   export const Reply = z.object({
     answers: z
       .array(Answer)
-      .describe("User answers in order of questions (each answer is an array of selected labels)"),
+      .describe("按问题顺序返回的用户答案；每个答案是已选标签的数组"),
   })
   export type Reply = z.infer<typeof Reply>
 
@@ -99,6 +99,12 @@ export namespace Question {
     questions: Info[]
     tool?: { messageID: string; callID: string }
   }): Promise<Answer[]> {
+    const issues = collectLabelIssues(input.questions)
+    if (issues.length) {
+      throw new Error(
+        `question tool 参数不合法：${issues.join("；")}。label 必须 ≤30 字符，header 也必须 ≤30 字符；超出会被 TUI 拒收。`,
+      )
+    }
     const s = await state()
     const id = Identifier.ascending("question")
 
@@ -118,6 +124,22 @@ export namespace Question {
       }
       Bus.publish(Event.Asked, info)
     })
+  }
+
+  /** 提前拦截超长 label/header：让模型在拿到错误时知道是字符数问题，避免无效重试。 */
+  function collectLabelIssues(questions: Info[]) {
+    const issues: string[] = []
+    questions.forEach((q, qi) => {
+      if (q.header && q.header.length > 30) {
+        issues.push(`第 ${qi + 1} 题 header "${q.header}" 长 ${q.header.length}，超过 30`)
+      }
+      q.options?.forEach((opt, oi) => {
+        if (opt.label && opt.label.length > 30) {
+          issues.push(`第 ${qi + 1} 题第 ${oi + 1} 项 label "${opt.label}" 长 ${opt.label.length}，超过 30`)
+        }
+      })
+    })
+    return issues
   }
 
   export async function reply(input: { requestID: string; answers: Answer[] }): Promise<void> {

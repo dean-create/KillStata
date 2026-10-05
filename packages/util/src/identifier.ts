@@ -1,5 +1,3 @@
-import { randomBytes } from "crypto"
-
 export namespace Identifier {
   const LENGTH = 26
 
@@ -17,8 +15,9 @@ export namespace Identifier {
 
   function randomBase62(length: number): string {
     const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    const bytes = new Uint8Array(length)
+    crypto.getRandomValues(bytes)
     let result = ""
-    const bytes = randomBytes(length)
     for (let i = 0; i < length; i++) {
       result += chars[bytes[i] % 62]
     }
@@ -38,11 +37,13 @@ export namespace Identifier {
 
     now = descending ? ~now : now
 
-    const timeBytes = Buffer.alloc(6)
+    const timeBytes = new Uint8Array(6)
     for (let i = 0; i < 6; i++) {
       timeBytes[i] = Number((now >> BigInt(40 - 8 * i)) & BigInt(0xff))
     }
 
-    return timeBytes.toString("hex") + randomBase62(LENGTH - 12)
+    // Convert bytes to hex without Buffer
+    const hex = Array.from(timeBytes, (b) => b.toString(16).padStart(2, "0")).join("")
+    return hex + randomBase62(LENGTH - 12)
   }
 }

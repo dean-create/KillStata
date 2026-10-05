@@ -1,0 +1,11 @@
+{
+  "description": "贷款违约(default 0/1)对收入 + 负债比的 Probit",
+  "modelArgs": {
+    "datasetId": "loans_11",
+    "stageId": "stage_000",
+    "dependentVar": "default",
+    "treatmentVar": "income",
+    "covariates": ["debt_ratio"]
+  },
+  "expect": "pass"
+}

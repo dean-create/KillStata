@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "KillStata Desktop 主窗口的最小权限集",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        { "name": "binaries/killstata-core", "sidecar": true }
+      ]
+    }
+  ]
+}

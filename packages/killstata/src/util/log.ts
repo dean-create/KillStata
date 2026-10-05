@@ -136,11 +136,11 @@ export namespace Log {
       const diff = next.getTime() - last
       last = next.getTime()
       const safeMessage = message === undefined || message === null ? undefined : safeValue(message)
-      return boundLine(
-        [next.toISOString().split(".")[0], "+" + diff + "ms", prefix, safeMessage]
-          .filter(Boolean)
-          .join(" "),
-      ) + "\n"
+      return (
+        boundLine(
+          [next.toISOString().split(".")[0], "+" + diff + "ms", prefix, safeMessage].filter(Boolean).join(" "),
+        ) + "\n"
+      )
     }
     const result: Logger = {
       debug(message?: any, extra?: Record<string, any>) {

@@ -48,3 +48,24 @@ trash/
 # 有长期价值的验证记录归档到 docs/verification/。
 /test/
 killstata_docx/
+data/
+docs/
+HUMAN.md
+ks/
+claude-code-sourcemap-main/
+tool.md
+claude-code-sourcemap-main.zip
+
+# KillStata runtime/debug artifacts (never commit)
+packages/killstata/analysis/
+packages/killstata/session-ses_*.md
+packages/killstata/__*-probe.ts
+# drive harness 每轮跑出来的报告，按时间戳堆积，无长期价值
+packages/killstata/test/sandbox/
+# TypeScript 增量构建缓存
+tsconfig.tsbuildinfo
+packages/killstata/tsconfig.tsbuildinfo
+deepseek-harness-master/
+pi-main/
+teach/
+ces.md

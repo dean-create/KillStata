@@ -4,14 +4,51 @@ import { Global } from "../global"
 import fs from "fs/promises"
 import z from "zod"
 import { NamedError } from "@killstata/util/error"
-import { lazy } from "../util/lazy"
-import { $ } from "bun"
+import { lazy } from "@killstata/util/lazy"
+import { Shell } from "@/shell/shell"
 
 import { ZipReader, BlobReader, BlobWriter } from "@zip.js/zip.js"
 import { Log } from "@/util/log"
 
 export namespace Ripgrep {
   const log = Log.create({ service: "ripgrep" })
+
+  // 默认排除清单：对齐 claude-code 的搜索防护——大目录、构建产物、虚拟环境不进入全树扫描。
+  // 用 `!**/X/**` 而非 `!X/**`：实测 ripgrep 15.x 对目录排除时 `!X/**` 不生效（目录本身未被 glob 命中，
+  // rg 会进入目录扫描后再匹配子路径），`!**/X/**` 才能排除任意层级的同名目录。
+  export const DEFAULT_IGNORE_GLOBS = [
+    "!**/.git/**",
+    "!**/.killstata/**",
+    "!**/node_modules/**",
+    "!**/dist/**",
+    "!**/build/**",
+    "!**/__pycache__/**",
+    "!**/.venv/**",
+    "!**/venv/**",
+    "!**/env/**",
+    "!**/target/**",
+    "!**/vendor/**",
+  ]
+
+  /** 默认搜索超时（ms）。对齐 claude-code 的 20s；可用环境变量覆盖。 */
+  export function defaultRgTimeoutMs() {
+    const fromEnv = Number(process.env.KILLSTATA_RG_TIMEOUT_MS)
+    return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 20_000
+  }
+
+  export const RipgrepTimeoutError = NamedError.create(
+    "RipgrepTimeoutError",
+    z.object({
+      cwd: z.string(),
+      timedOutMs: z.number(),
+      aborted: z.boolean().optional(),
+    }),
+  )
+
+  /** 判断未知错误是否为 ripgrep 超时/中止（对齐 claude-code 区分"无匹配"与"没搜完"）。 */
+  export function isRipgrepTimeoutError(error: unknown): error is InstanceType<typeof RipgrepTimeoutError> {
+    return RipgrepTimeoutError.isInstance(error)
+  }
   const Stats = z.object({
     elapsed: z.object({
       secs: z.number(),
@@ -209,8 +246,13 @@ export namespace Ripgrep {
     hidden?: boolean
     follow?: boolean
     maxDepth?: number
+    /** 超时后杀进程并抛 RipgrepTimeoutError（已 yield 的行调用方已拿到）。默认 defaultRgTimeoutMs()。 */
+    timeoutMs?: number
+    abort?: AbortSignal
   }) {
-    const args = [await filepath(), "--files", "--glob=!.git/*"]
+    // 顺序敏感：rg 的 --glob 匹配中，先出现的 include glob 会覆盖后出现的 ignore。
+    // 因此默认忽略清单必须追加在用户 glob 之后，否则 node_modules 等会被用户 include 带回来。
+    const args = [await filepath(), "--files"]
     if (input.follow !== false) args.push("--follow")
     if (input.hidden !== false) args.push("--hidden")
     if (input.maxDepth !== undefined) args.push(`--max-depth=${input.maxDepth}`)
@@ -218,6 +260,9 @@ export namespace Ripgrep {
       for (const g of input.glob) {
         args.push(`--glob=${g}`)
       }
+    }
+    for (const g of DEFAULT_IGNORE_GLOBS) {
+      args.push(`--glob=${g}`)
     }
 
     // Bun.spawn should throw this, but it incorrectly reports that the executable does not exist.
@@ -230,21 +275,45 @@ export namespace Ripgrep {
       })
     }
 
+    const timeoutMs = input.timeoutMs ?? defaultRgTimeoutMs()
+    // detached: 让 rg 成为进程组 leader，Shell.killTree 才能一次杀干净整个进程树
+    // （rg 在超大目录里可能派生子进程，直接 kill 单个 pid 会留孤儿继续烧 CPU）。
     const proc = Bun.spawn(args, {
       cwd: input.cwd,
       stdout: "pipe",
       stderr: "ignore",
       maxBuffer: 1024 * 1024 * 20,
+      detached: true,
     })
 
     const reader = proc.stdout.getReader()
     const decoder = new TextDecoder()
     let buffer = ""
+    let stopped: "timeout" | "abort" | undefined
+
+    const stop = (reason: "timeout" | "abort") => {
+      if (stopped) return
+      stopped = reason
+      void Shell.killTree(proc).catch(() => {})
+    }
+    const timer = setTimeout(() => stop("timeout"), timeoutMs)
+    timer.unref?.()
+    const abortHandler = () => stop("abort")
+    input.abort?.addEventListener("abort", abortHandler, { once: true })
+    if (input.abort?.aborted) stop("abort")
 
     try {
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
+        if (stopped) {
+          // 超时/中止：已收集的行照常吐给调用方（部分结果），最后以错误收尾标记"没搜完"。
+          throw new RipgrepTimeoutError({
+            cwd: input.cwd,
+            timedOutMs: timeoutMs,
+            aborted: stopped === "abort",
+          })
+        }
 
         buffer += decoder.decode(value, { stream: true })
         // Handle both Unix (\n) and Windows (\r\n) line endings
@@ -256,8 +325,14 @@ export namespace Ripgrep {
         }
       }
 
+      if (stopped) {
+        throw new RipgrepTimeoutError({ cwd: input.cwd, timedOutMs: timeoutMs, aborted: stopped === "abort" })
+      }
+
       if (buffer) yield buffer
     } finally {
+      clearTimeout(timer)
+      input.abort?.removeEventListener("abort", abortHandler)
       reader.releaseLock()
       await proc.exited
     }
@@ -371,8 +446,9 @@ export namespace Ripgrep {
     glob?: string[]
     limit?: number
     follow?: boolean
+    timeoutMs?: number
   }) {
-    const args = [`${await filepath()}`, "--json", "--hidden", "--glob='!.git/*'"]
+    const args = [`${await filepath()}`, "--json", "--hidden"]
     if (input.follow !== false) args.push("--follow")
 
     if (input.glob) {
@@ -385,17 +461,36 @@ export namespace Ripgrep {
       args.push(`--max-count=${input.limit}`)
     }
 
+    // 默认忽略放用户 glob 之后（rg glob 顺序敏感，include 覆盖 ignore）。
+    // 注意不要给 glob 加引号：下面走 argv 直传，引号会变成 pattern 的字面字符。
+    for (const g of DEFAULT_IGNORE_GLOBS) {
+      args.push(`--glob=${g}`)
+    }
+
     args.push("--")
     args.push(input.pattern)
 
-    const command = args.join(" ")
-    const result = await $`${{ raw: command }}`.cwd(input.cwd).quiet().nothrow()
-    if (result.exitCode !== 0) {
+    // argv 直传，不经过 shell（与 files() 一致）。
+    //
+    // 此前是 `args.join(" ")` 再交给 Bun Shell 执行：用户提供的 pattern 和 glob 被原样拼进
+    // 命令字符串且**没有引号**，带空格的 pattern 会被切成两个参数（"hello world" → rg 把
+    // world 当成搜索路径），带 shell 元字符（`*` `;` `$(...)` 反引号）的 pattern 会被展开
+    // 甚至执行。而 pattern 直接来自模型的 grep 调用，是不可信输入。走 argv 后这一整类问题
+    // 从根上消失，两条搜索路径的语义也终于一致。
+    const proc = Bun.spawn(args, {
+      cwd: input.cwd,
+      stdout: "pipe",
+      stderr: "ignore",
+      maxBuffer: 1024 * 1024 * 20,
+    })
+    const stdout = await new Response(proc.stdout).text()
+    const exitCode = await proc.exited
+    if (exitCode !== 0) {
       return []
     }
 
     // Handle both Unix (\n) and Windows (\r\n) line endings
-    const lines = result.text().trim().split(/\r?\n/).filter(Boolean)
+    const lines = stdout.trim().split(/\r?\n/).filter(Boolean)
     // Parse JSON lines from ripgrep output
 
     return lines

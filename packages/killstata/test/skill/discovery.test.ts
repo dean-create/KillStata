@@ -40,4 +40,30 @@ describe("user skill discovery", () => {
       await fs.rm(project, { recursive: true, force: true })
     }
   })
+
+  test("parses frontmatter recommendedTools into Skill.Info", async () => {
+    const project = path.join(Global.Path.home, "skill-allowed-tools-test")
+    const skillDir = path.join(Global.Path.home, ".killstata", "skills", "tool-scoped-skill")
+    const skillFile = path.join(skillDir, "SKILL.md")
+    await fs.mkdir(skillDir, { recursive: true })
+    await fs.writeFile(
+      skillFile,
+      "---\nname: tool-scoped-skill\ndescription: skill with tool suggestions\nrecommendedTools:\n  - ols_regression\n  - iv_2sls\n---\n\nUse only listed tools.\n",
+      "utf-8",
+    )
+
+    try {
+      await Instance.provide({
+        directory: project,
+        fn: async () => {
+          const loaded = await Skill.get("tool-scoped-skill")
+          expect(loaded?.recommendedTools).toEqual(["ols_regression", "iv_2sls"])
+          await Instance.dispose()
+        },
+      })
+    } finally {
+      await fs.rm(path.join(Global.Path.home, ".killstata", "skills", "tool-scoped-skill"), { recursive: true, force: true })
+      await fs.rm(project, { recursive: true, force: true })
+    }
+  })
 })

@@ -1,10 +1,16 @@
-Run explicit heterogeneity, mechanism, placebo, and alternative-specification analyses from a baseline econometric result.
+# 派生规格分析
+在当前规范化数据阶段上，基于规格已核验的线性固定效应（FE）基准，运行用户明确要求的异质性、机制、安慰剂或替代规格分析。Harness 会从当前阶段已发布产物中定位基准结果，并在执行前逐项核对基准 method ID、变量、控制项、固定效应和聚类口径。
 
-Use this after a baseline model already exists and only when the user has explicitly named the subgroup or mechanism variables to test.
-
-Behavior:
-- Read baseline `results.json`, `diagnostics.json`, and `numeric_snapshot.json` first.
-- Refuse to continue if the baseline already has blocking QA or diagnostic failures.
-- Create one structured result directory per specification.
-- Save unified summaries, narratives, and a publication-style comparison table.
-- Every narrative claim must be grounded in each specification's own structured outputs.
+- 不要提供 `baselineResultDir` 或 `directResultPath`，也不要猜测、拼接或复用历史文件路径；它们不是模型输入。若当前阶段有多个合适的基准产物，工具会返回可选 `baselineOutputKey`，再询问用户选择。
+- `datasetId` 和 `stageId` 必须匹配当前活动 workflow 的规范化阶段，由 Harness 注入；缺少活动 workflow、传入同一数据集的历史阶段，或通过 direct-call 省略血缘时都会拒绝，不会退回到读取任意基准文件路径。
+- 当前执行器固定采用 OLS + entity/time 虚拟变量固定效应（LSDV）。只有 `panel_fe_regression`，或恰好吸收实体和时间两项固定效应且协方差可映射的 `hdfe_regression`，才可能进入执行；缺少 Harness 保存的原始规格或字段不一致时停止，不运行估计。
+- 传统 DID、DID2S 和事件研究的估计量与当前 OLS+LSDV 扩展不等价，当前一律停下并说明限制；不得把用户选定的 DID 方法静默换成 LSDV。当前阶段没有可核验的 FE 基准时，先完成并保存适用的基准估计；不能从其他会话、数据阶段或项目路径挑选结果。
+- 基准存在 blocking 数据质量检查 或诊断失败时停止，不在不可信基准上扩展结论。
+- 只有用户明确分组变量、机制变量或待改变的规格时才调用；不得根据列名猜测分组规则，也不得擅自更换基准计量方法。
+- 数值型 `heterogeneityVars` 当前会自动生成“样本中位数高/低子样本”和“中心化 treatment×变量交互”两类规格；本工具输入暂不能只选其中一种。调用前必须明确告诉用户这两类规格都会运行并确认用户接受，若用户只要其中一种则先停下询问。
+- 类别型 `heterogeneityVars` 会对该列全部非缺失类别分别估计，不会只运行前几个类别。类别超过两种时，另行尝试的二元交互规格会明确标记为跳过；逐组成功、失败和跳过状态都必须保留并报告。
+- 默认复用基准因变量、核心解释变量、样本、控制变量、固定效应和聚类设置，只改变用户要求检验的部分。
+- `heterogeneityVars` 的当前执行规则必须先告诉用户并获得对该批规格的明确同意：数值变量会同时执行按本样本中位数划分的高/低子样本和中心化交互项；类别变量会对全部非缺失类别逐组估计，不截取前几个类别。类别超过两种时，额外交互规格会明确标为跳过；每个规格的成功、失败或跳过都必须报告。
+- 工具输入目前不能选择“只做中位数分组”或“只做交互”。用户只同意其中一种时，不得静默执行两种；应先说明当前接口会执行的完整规格并询问是否接受，或等待工具支持精确模式后再运行。
+- 每个规格创建独立结构化结果目录，并返回统一摘要、叙述和可比较表格；每条结论必须由该规格自己的结构化产物支持。
+- 报告全部相关规格及变化，不只选择显著结果。失败时只修复失败规格，不重跑已成功的基准和其他规格。

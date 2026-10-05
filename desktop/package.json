@@ -1,0 +1,50 @@
+{
+  "name": "killstata-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "build:web": "bun scripts/build-web.ts",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "clean": "bun scripts/clean-dev-artifacts.ts",
+    "test:watch": "vitest",
+    "test:engine": "bun test engine/auto-decision.test.ts engine/workspace-permission.test.ts",
+    "verify:integration-baseline": "bun scripts/verify-integration-baseline.ts",
+    "verify:cli-contract": "bun scripts/verify-cli-contract.ts",
+    "prepare:sidecars": "bun scripts/prepare-sidecars.ts",
+    "create:core-manifest": "bun scripts/create-core-manifest.ts",
+    "verify:release-sidecars": "bun scripts/verify-release-sidecars.ts",
+    "verify:release-lifecycle": "bun scripts/verify-release-lifecycle.ts",
+    "verify:real-analysis": "bun scripts/verify-real-analysis.ts",
+    "tauri": "tauri",
+    "desktop:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "desktop:dev:bundle": "tauri build --debug --bundles app --config src-tauri/tauri.dev.conf.json",
+    "desktop:dev:app": "bun run desktop:dev:bundle && open 'src-tauri/target/debug/bundle/macos/KillStata Dev.app'",
+    "macos:app:local": "KILLSTATA_ALLOW_DIRTY_CORE=true bun run prepare:sidecars && tauri build --bundles app --no-sign",
+    "macos:verify": "bun run verify:release-sidecars && bun run verify:release-lifecycle",
+    "macos:release": "bun run prepare:sidecars && tauri build --bundles app,dmg && bun run macos:verify",
+    "desktop:build": "bun run macos:release"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@killstata/sdk": "workspace:*",
+    "solid-js": "1.9.14",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@solidjs/testing-library": "0.8.10",
+    "@tauri-apps/cli": "^2.11.4",
+    "@testing-library/user-event": "14.6.1",
+    "@types/node": "22.13.9",
+    "bun-types": "1.3.14",
+    "jsdom": "26.0.0",
+    "typescript": "5.8.2",
+    "vite": "6.4.3",
+    "vite-plugin-solid": "2.11.10",
+    "vitest": "3.1.2"
+  }
+}

@@ -1,4 +1,20 @@
-# 当前并行任务：Windows-only npm 发布恢复（2026-07-18，已完成）
+# 当前计划：桌面/Web 同一界面与本机 CLI 分享体验（更新于 2026-10-05）
+
+> 目标：Desktop 与 Web 共用研究 UI 和可见交互；全局 npm CLI `killstata web` 默认只监听本机 `127.0.0.1:3080`，显式 `--share` 才开放可信私有局域网访客。
+
+- 详细实施与测试记录：`docs/superpowers/plans/2026-10-04-desktop-web-parity-cli.md`。
+- 两端默认 frontend：不读模型凭据、不启动 Core；提交只记录研究信息。用户主动连接后才启用平台适配器。
+- Web 保留浏览器文件能力；访客工作区按不透明 ID 隔离，文件只在连接后提交分析时上传。分享访客可用主机预配置模型，档案只读且不返回 API Key。
+- 已验证：Desktop 全量 365 通过、2 跳过；Web 构建、Desktop/CLI 类型检查、分享专项测试、CLI 帮助测试通过；本机 CLI 候选 0.1.30 已打包，12 个 tarball 的 SHA-512 与 manifest 一致，npm dry-run 未发布，隔离 arm64 安装可启动 `killstata web`。
+- 视觉验收：最终 Web 在 1440×900 与 390×844 可用；Desktop/Web 的“1”研究记录及通用设置内容一致。已修复窄屏工作区抽屉遮住设置面板的问题。
+- 已知门禁：CLI 全量 2161 通过、5 跳过、3 失败；两项 runtime-config 测试单独复跑通过，`test/drive/scripted-stable-composite-panel.test.ts` 仍单独失败，详见 `PROGRESS.md`。该失败需要查明后才能请求发布审批。
+- Draft PR #6 已开，GitHub CI 运行中；推送保护发现的 key-shaped 测试文件名已改为非密钥占位符，定向脱敏测试通过。
+- GitHub Draft PR #6 的 `check-standards` 通过；`typecheck` 因 clean checkout 缺失忽略的 trash legacy 源与 `data/file-discovery.ts` 而失败。相关文件在另一活动工作树，部分有本地修改；未复制或推送。
+- 仍待完成：确认 clean-checkout 依赖的处理方式、查明 CLI 全量测试中复合面板回放失败；Linux 主机启动及第二台局域网设备验收；公开 npm 发布前的最终用户批准。当前公开 registry 仍为 `killstata@0.1.27`，本机预览版服务运行于 `http://127.0.0.1:3080`。
+
+---
+
+# 历史计划：Windows-only npm 发布恢复（2026-07-18，已完成）
 
 > 用户已决定 npm 只支持 Windows x64：只保留 `killstata-windows-x64` 与 `killstata` 两个 tarball。macOS、Linux、Windows baseline 的 npm 原生包退出正式发布；源码开发不受影响。
 

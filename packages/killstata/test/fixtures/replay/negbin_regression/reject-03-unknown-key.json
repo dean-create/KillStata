@@ -1,0 +1,12 @@
+{
+  "description": "模型多塞了一个 method 字段;strict 契约应拒绝未知键",
+  "modelArgs": {
+    "datasetId": "health_21",
+    "stageId": "stage_000",
+    "dependentVar": "visits",
+    "treatmentVar": "insured",
+    "methodName": "nb2"
+  },
+  "expect": "reject",
+  "rejectHint": ["methodName"]
+}

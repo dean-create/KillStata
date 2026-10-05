@@ -1,14 +1,20 @@
 {
-  "description": "带外生控制变量，显式选择 nonrobust 协方差",
+  "description": "带外生控制变量（exper、expersq），显式选择 nonrobust 协方差",
   "modelArgs": {
-    "datasetId": "card1995",
+    "datasetId": "card_1995",
     "stageId": "stage_000",
-    "dependentVar": "log_wage",
-    "endogenousVar": "education",
-    "instrumentVar": "near_college",
-    "instrumentJustification": "地理距离满足相关性、外生性与排除限制，控制家庭背景和地区固定效应后依然成立。",
-    "covariates": ["experience", "black", "south"],
-    "covariance": "nonrobust"
+    "dependentVar": "lwage",
+    "treatmentVar": "educ",
+    "instrumentVars": [
+      "nearc4",
+      "nearc2"
+    ],
+    "covariates": [
+      "exper",
+      "expersq"
+    ],
+    "covariance": "unadjusted",
+    "instrumentJustification": "Card (1995) 中到四年制大学的距离改变上学成本，在控制变量给定下不直接进入工资方程。"
   },
   "expect": "pass"
 }

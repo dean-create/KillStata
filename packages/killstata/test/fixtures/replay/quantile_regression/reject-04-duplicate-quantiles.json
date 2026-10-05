@@ -1,0 +1,12 @@
+{
+  "description": "分位点列表重复",
+  "modelArgs": {
+    "datasetId": "wage_88",
+    "stageId": "stage_000",
+    "dependentVar": "wage",
+    "treatmentVar": "union",
+    "quantiles": [0.5, 0.5]
+  },
+  "expect": "reject",
+  "rejectHint": ["quantiles", "重复"]
+}

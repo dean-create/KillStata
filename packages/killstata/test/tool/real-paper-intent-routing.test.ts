@@ -45,19 +45,18 @@ async function withAnalysisTools<T>(fn: (tools: Awaited<ReturnType<typeof ToolRe
   try {
     return await Instance.provide({
       directory: root,
-      fn: async () =>
-        fn(
-          await ToolRegistry.tools(
-            { providerID: "deepseek", modelID: "deepseek-v4-flash" },
-            undefined,
-            {
-              inputIntent: "analysis",
-              currentStage: "preprocess_or_filter",
-              platformCapabilities: { mcp: false, images: false, remote: false },
-              modelCapabilities: { supportsTools: true, supportsImages: false },
-            },
-          ),
-        ),
+      fn: async () => {
+        const pool = await ToolRegistry.resolvePool({ providerID: "deepseek", modelID: "deepseek-v4-flash" }, undefined, {
+            inputIntent: "analysis",
+            currentStage: "preprocess_or_filter",
+            platformCapabilities: { mcp: false, images: false, remote: false },
+            modelCapabilities: { supportsTools: true, supportsImages: false },
+        })
+        return fn(await pool.load([
+          ...(pool.resolution.directToolIDs ?? []),
+          ...(pool.resolution.deferredToolIDs ?? []),
+        ]))
+      },
     })
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
@@ -112,7 +111,9 @@ function stringsFromArgs(args: Record<string, unknown>) {
   const listKeys = ["covariates", "fixedEffects", "clusterVars"]
   return [
     ...roleKeys.flatMap((key) => (typeof args[key] === "string" ? [args[key] as string] : [])),
-    ...listKeys.flatMap((key) => (Array.isArray(args[key]) ? (args[key] as unknown[]).filter((x): x is string => typeof x === "string") : [])),
+    ...listKeys.flatMap((key) =>
+      Array.isArray(args[key]) ? (args[key] as unknown[]).filter((x): x is string => typeof x === "string") : [],
+    ),
   ]
 }
 
@@ -151,7 +152,9 @@ describe("real-paper research intent routing contracts", () => {
         if (!tool) continue
         const parsed = tool.parameters.safeParse(fixture.expectedArgs)
         if (!parsed.success) {
-          throw new Error(`${fixture.id}: ${fixture.expectedTool} 参数未通过真实 Schema：${JSON.stringify(parsed.error.issues)}`)
+          throw new Error(
+            `${fixture.id}: ${fixture.expectedTool} 参数未通过真实 Schema：${JSON.stringify(parsed.error.issues)}`,
+          )
         }
         expect(fixture.forbiddenTools).not.toContain(fixture.expectedTool)
         for (const legacyKey of ["dataPath", "methodName", "options", "outputDir", "cwd", "command"]) {

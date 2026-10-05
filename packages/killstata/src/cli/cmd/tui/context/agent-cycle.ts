@@ -2,18 +2,14 @@ export interface CycleAgent {
   name: string
 }
 
-const TAB_CYCLE_AGENT_NAMES = new Set(["analyst", "explorer"])
+const TAB_CYCLE_AGENT_NAMES = new Set(["analyst"])
 
 export function pickTabCycleAgents<T extends CycleAgent>(agents: T[]): T[] {
   const preferred = agents.filter((agent) => TAB_CYCLE_AGENT_NAMES.has(agent.name))
   return preferred.length > 0 ? preferred : agents
 }
 
-export function nextTabCycleIndex(input: {
-  agents: CycleAgent[]
-  currentName: string
-  direction: 1 | -1
-}) {
+export function nextTabCycleIndex(input: { agents: CycleAgent[]; currentName: string; direction: 1 | -1 }) {
   const { agents, currentName, direction } = input
   if (agents.length === 0) return -1
 

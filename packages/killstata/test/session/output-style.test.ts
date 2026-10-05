@@ -1,28 +1,26 @@
 import { describe, expect, test } from "bun:test"
 import fs from "fs"
 import path from "path"
-import { WORKFLOW_ANALYSIS_TOOL_IDS } from "@/runtime/tool-catalog"
+import { TOOL_MANIFEST } from "@/runtime/tool-manifest"
+import { SystemPrompt } from "@/session/system"
 
 // 这些断言锁住的是「用户看到什么」的产品决策，不是实现细节：
 // 工具调用默认只报告做了什么，代码正文 / diff / 命令输出 / 数据表格都藏在 /details 后面。
 const SESSION_VIEW = path.join(process.cwd(), "src", "cli", "cmd", "tui", "routes", "session", "index.tsx")
-const DEEPSEEK_PROMPT = path.join(process.cwd(), "src", "session", "prompt", "deepseek.txt")
 
 describe("session output style", () => {
-  test("Bash, Write and Edit only expand their full body when details are toggled on", () => {
+  test("Bash and Write only expand their full body when details are toggled on; Edit stays compact", () => {
     const source = fs.readFileSync(SESSION_VIEW, "utf-8")
 
-    // 每个铺开正文的 BlockTool 分支都必须挂在 showDetails 门禁后面。
-    // Bash 的正文 key 在 metadata.output，Edit 的在 metadata.diff。
+    // 每个仍保留正文的 BlockTool 分支都必须挂在 showDetails 门禁后面。
     expect(source).toContain("<Match when={ctx.showDetails() && props.metadata.output !== undefined}>")
-    expect(source).toContain("<Match when={ctx.showDetails() && props.metadata.diff !== undefined}>")
     // Write 的详情视图挂在 showDetails 本身（LSP 删除后不再有 diagnostics 门禁，
     // 否则 Write 详情会永不渲染），正文取自 props.input.filePath。
     expect(source).toContain("<Match when={ctx.showDetails()}>")
     expect(source).not.toContain("props.metadata.diagnostics")
 
-    // 反向断言：不能再出现无门禁的裸展开分支（这正是改造前的写法）。
-    expect(source).not.toContain("<Match when={props.metadata.diff !== undefined}>")
+    // Diff 已退出产品界面，不能留下任何会话渲染入口。
+    expect(source).not.toContain("metadata.diff")
     expect(source).not.toContain("<Match when={props.metadata.output !== undefined}>")
   })
 
@@ -33,43 +31,93 @@ describe("session output style", () => {
     expect(source).toContain('kv.signal("generic_tool_output_visibility", false)')
   })
 
-  test("the deepseek prompt forbids pasting code and raw data into replies", () => {
-    const prompt = fs.readFileSync(DEEPSEEK_PROMPT, "utf-8")
+  test("完整提示词禁止向用户倾倒原始数据和内部过程", () => {
+    const prompt = SystemPrompt.sections({
+      model: { providerID: "deepseek", api: { id: "deepseek-v4-flash" } } as never,
+      agent: { name: "analyst" } as never,
+    })
+      .map((section) => section.content)
+      .join("\n")
 
-    expect(prompt).toContain("NEVER paste code")
-    expect(prompt).toContain("NEVER dump raw data")
-    // 并且要给出替代做法：报形状 + 指路径。
-    expect(prompt).toContain("Point to artifacts by path")
+    expect(prompt).toContain("不粘贴代码、原始数据")
+    expect(prompt).toContain("内部工作路径")
+  })
+
+  test("每个 Provider 的完整提示词都要求直接、简洁且保留计量交付完整性", () => {
+    for (const model of [
+      { providerID: "deepseek", api: { id: "deepseek-v4-flash" } },
+      { providerID: "custom", api: { id: "qwen3-max" } },
+    ]) {
+      const prompt = SystemPrompt.sections({ model: model as never, agent: { name: "analyst" } as never })
+        .map((section) => section.content)
+        .join("\n")
+      expect(prompt).toContain("最简单方案")
+      expect(prompt).toContain("工具调用之间最多用一句中文说明")
+      expect(prompt).toContain("不受机械字数上限限制")
+      expect(prompt).toContain("直奔行动或结论")
+    }
   })
 
   test("the prompt never promises a capability the code does not have", () => {
-    const prompt = fs.readFileSync(DEEPSEEK_PROMPT, "utf-8")
-    const econ = fs.readFileSync(path.join(process.cwd(), "src", "tool", "econometrics.ts"), "utf-8")
+    // 校验的是**渲染后送达模型的完整提示词**，而不是单个 txt 文件：方法论层已从
+    // deepseek.txt 抽到 econometrics-context.ts，只扫一个文件会漏掉绝大部分点名。
+    const prompt = SystemPrompt.provider({
+      providerID: "deepseek",
+      api: { id: "deepseek-v4-flash" },
+    } as never).join("\n")
 
-    // 每一个 prompt 里点名的估计方法，都必须真实存在于 SUPPORTED_METHODS。
-    // 否则模型会拿着一个不存在的方法名去调工具，或者向用户承诺做不到的事。
-    // （改造前就踩过：prompt 承诺 DID 交错采纳用 Callaway-Sant'Anna，代码里根本没有这个估计量。）
-    const methodsBlock = econ.slice(econ.indexOf("const SUPPORTED_METHODS"))
-    const supported = new Set(
-      (methodsBlock.slice(0, methodsBlock.indexOf("]")).match(/"[a-z_0-9]+"/g) ?? []).map((m) => m.replace(/"/g, "")),
-    )
-    expect(supported.size).toBeGreaterThan(10)
+    // 真相源是 registry 的注册 ID + 两张准入表，**不是** tool/econometrics.ts 的
+    // SUPPORTED_METHODS——后者只是遗留 mega 工具的内部方法列表。像 data_preprocess /
+    // composite_evaluation 这类独立 Tool.define + 方法级准入的工具，本来就不在那张表里，
+    // 拿它当能力真相源会把真实存在的工具误判成"不存在的方法"。
+    const known = new Set(TOOL_MANIFEST.map((entry) => entry.id))
+    expect(known.size).toBeGreaterThan(10)
 
-    for (const named of prompt.match(/`([a-z_]+_[a-z_0-9]+)`/g) ?? []) {
-      const id = named.replace(/`/g, "")
-      // 只校验看起来像估计方法的（含下划线且不是工具名/文件名）
-      const toolsAndFiles = [
-        "data_import",
-        "experiment_log",
-        "numeric_snapshot",
-        "results_json",
-        ...WORKFLOW_ANALYSIS_TOOL_IDS,
-      ]
-      if (toolsAndFiles.includes(id) || id.includes(".")) continue
-      if (!supported.has(id)) {
-        throw new Error(`prompt 点名了一个不存在的方法: ${id}（不在 SUPPORTED_METHODS 里）`)
+    // 扫所有 snake_case 标识符，不要求反引号包裹：方法论层的工具名是插值进来的
+    // （`${T.panelFE}` → panel_fe_regression），渲染后没有反引号。只认反引号的旧写法
+    // 在本次分层后实际只能扫到 1 个名字，等于空过。
+    const artifacts = new Set([
+      "numeric_snapshot",
+      "results_json",
+      "model_metadata",
+      "diagnostics_json",
+      // 阶段名与方法/概念名，与工具 ID 同形但不受 registry 约束
+      "baseline_estimate",
+      "profile_or_schema_check",
+      "validate",
+      "preprocess_or_filter",
+      "profile_or_diagnostics",
+      "relative_time",
+      "random_effects",
+      "fixed_effects",
+      "att_gt",
+      "first_stage",
+      "exit_plan",
+      // workflow 工具的只读/查询 action（不是独立工具 ID）
+      "rerun_plan",
+      "timeline",
+      "tools",
+      "skills",
+      "status",
+      "artifacts",
+      "export_artifact",
+      "doctor",
+      "verify",
+      "diagnostics",
+      "data_path",
+      "output_dir",
+      "not_in",
+      "not_contains",
+    ])
+    const mentioned = new Set(prompt.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? [])
+    for (const id of mentioned) {
+      if (artifacts.has(id) || id.includes(".")) continue
+      if (!known.has(id)) {
+        throw new Error(`prompt 点名了一个未注册的工具: ${id}（不在 TOOL_MANIFEST 里）`)
       }
     }
+    // 断言它确实扫到了东西——否则正则一旦失配，这个测试会静默变成空过。
+    expect([...mentioned].filter((id) => known.has(id)).length).toBeGreaterThan(5)
 
     // 已删除的产物不该再出现在 prompt 里
     expect(prompt).not.toContain("three_line_table")
@@ -77,15 +125,19 @@ describe("session output style", () => {
     expect(prompt).not.toContain("Callaway")
   })
 
-  test("the prompt pins a steady, no-filler persona", () => {
-    const prompt = fs.readFileSync(DEEPSEEK_PROMPT, "utf-8")
+  test("提示词固定直接、无填充且数字可追溯的表达方式", () => {
+    const prompt = SystemPrompt.sections({
+      model: { providerID: "deepseek", api: { id: "deepseek-chat" } } as never,
+      agent: { name: "analyst" } as never,
+    })
+      .map((section) => section.content)
+      .join("\n")
 
-    // 性格必须是可执行的行为准则，不是"沉稳务实"四个空洞的形容词
-    expect(prompt).toContain("No preamble")
-    expect(prompt).toContain("No exclamation marks")
-    expect(prompt).toContain('Say "I don\'t know" when you don\'t know')
-    // 编造系数是这里最坏的产出——必须明说
-    expect(prompt).toContain("A fabricated coefficient is the worst thing you can produce")
+    expect(prompt).toContain("不复述用户问题")
+    expect(prompt).toContain("不展示内部推理")
+    expect(prompt).toContain("不得凭记忆计算、补全、改符号或猜测统计数字")
+
+    expect(prompt).toContain("统计数字只来自本轮工具结果")
   })
 
   test("removed tools leave no renderer behind in the session view", () => {
@@ -99,12 +151,12 @@ describe("session output style", () => {
   test("hiding tool bodies by default requires a discoverable way to get them back", () => {
     const source = fs.readFileSync(SESSION_VIEW, "utf-8")
 
-    // 收敛输出的前提是逃生门必须存在且好找：/details 斜杠命令。
-    // 若有人删掉它，默认隐藏就变成了「用户永远看不到正文」。
+    // 收敛输出的前提是逃生门必须存在且好找：命令面板 + 快捷键（/details 斜杠命令已移除）。
+    // 若有人删掉这个 toggle 命令，默认隐藏就变成了「用户永远看不到正文」。
     const detailsToggle = source.slice(
       source.indexOf('value: "session.toggle.actions"') - 400,
       source.indexOf('value: "session.toggle.actions"') + 200,
     )
-    expect(detailsToggle).toContain('name: "details"')
+    expect(detailsToggle).toContain('keybind: "tool_details"')
   })
 })

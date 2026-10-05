@@ -1,0 +1,11 @@
+{
+  "description": "就业二元结果(employed 0/1)对培训 + 年龄教育控制的 Logit",
+  "modelArgs": {
+    "datasetId": "nsw_98",
+    "stageId": "stage_000",
+    "dependentVar": "employed",
+    "treatmentVar": "train",
+    "covariates": ["age", "education"]
+  },
+  "expect": "pass"
+}

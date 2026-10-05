@@ -3,7 +3,7 @@ import { unique } from "remeda"
 import type { JSONSchema } from "zod/v4/core"
 import type { Provider } from "./provider"
 import type { ModelsDev } from "./models"
-import { iife } from "@/util/iife"
+import { iife } from "@killstata/util/iife"
 
 type Modality = NonNullable<ModelsDev.Model["modalities"]>["input"][number]
 
@@ -16,6 +16,9 @@ function mimeToModality(mime: string): Modality | undefined {
 }
 
 export namespace ProviderTransform {
+  export const BALANCE_OR_QUOTA_ERROR_MESSAGE =
+    "模型服务余额或 API key 额度不足，已停止重试。请充值、检查该 API key 的配额，或切换 provider/model。"
+
   // Maps npm package to the key the AI SDK expects for providerOptions
   function sdkKey(npm: string): string | undefined {
     switch (npm) {
@@ -162,7 +165,9 @@ export namespace ProviderTransform {
   }
 
   function applyCaching(msgs: ModelMessage[], providerID: string): ModelMessage[] {
-    const system = msgs.filter((msg) => msg.role === "system").slice(0, 2)
+    // 只把稳定 system 前缀设为缓存断点；运行时环境/工作流状态位于后续 system 消息，
+    // 不应因日期或阶段变化而使稳定前缀失效。
+    const system = msgs.filter((msg) => msg.role === "system").slice(0, 1)
     const final = msgs.filter((msg) => msg.role !== "system").slice(-2)
 
     const providerOptions = {
@@ -180,7 +185,10 @@ export namespace ProviderTransform {
       },
     }
 
-    for (const msg of unique([...system, ...final])) {
+    // 标记稳定 system 前缀和当前轮边界；不要给每条历史消息加断点，
+    // 否则 provider 需要处理更多 cache breakpoint，且动态历史更容易污染稳定前缀。
+    const breakpoints = [...system, ...final]
+    for (const msg of unique(breakpoints)) {
       const shouldUseContentOptions = providerID !== "anthropic" && Array.isArray(msg.content) && msg.content.length > 0
 
       if (shouldUseContentOptions) {
@@ -322,7 +330,15 @@ export namespace ProviderTransform {
     if (!model.capabilities.reasoning) return {}
 
     const id = model.id.toLowerCase()
-    if (id.includes("deepseek") || id.includes("minimax") || id.includes("glm") || id.includes("mistral")) return {}
+    if (id.includes("deepseek")) {
+      return {
+        low: { reasoningEffort: "low" },
+        medium: { reasoningEffort: "medium" },
+        high: { reasoningEffort: "high" },
+        max: { reasoningEffort: "max" },
+      }
+    }
+    if (id.includes("minimax") || id.includes("glm") || id.includes("mistral")) return {}
 
     // see: https://docs.x.ai/docs/guides/reasoning#control-how-hard-the-model-thinks
     if (id.includes("grok") && id.includes("grok-3-mini")) {
@@ -720,9 +736,37 @@ export namespace ProviderTransform {
     return schema
   }
 
+  export function isBalanceOrQuotaError(message: string | undefined) {
+    if (!message) return false
+    const lowered = message.toLowerCase()
+    const hasRateLimitMarker =
+      lowered.includes("rate limit") || lowered.includes("ratelimit") || lowered.includes("too many requests")
+
+    return (
+      lowered.includes("insufficient balance") ||
+      lowered.includes("insufficient funds") ||
+      lowered.includes("out of credits") ||
+      lowered.includes("no credits") ||
+      lowered.includes("insufficient_quota") ||
+      lowered.includes("arrearage") ||
+      lowered.includes("overdue-payment") ||
+      lowered.includes("payment required") ||
+      lowered.includes("account balance") ||
+      lowered.includes("spending limit") ||
+      lowered.includes("余额不足") ||
+      lowered.includes("额度不足") ||
+      lowered.includes("配额不足") ||
+      lowered.includes("账户欠费") ||
+      lowered.includes("账户余额") ||
+      lowered.includes("充值") ||
+      (!hasRateLimitMarker && (lowered.includes("quota exceeded") || lowered.includes("exceeded your current quota")))
+    )
+  }
+
   export function error(providerID: string, error: APICallError) {
     let message = error.message
-    const lowered = message.toLowerCase()
+    const details = [message, error.responseBody].filter(Boolean).join("\n")
+    const lowered = details.toLowerCase()
     if (providerID.includes("github-copilot") && error.statusCode === 403) {
       return "Please reauthenticate with the copilot provider to ensure your credentials work properly with Killstata."
     }
@@ -742,9 +786,10 @@ export namespace ProviderTransform {
     ) {
       return "API key is invalid or not active. Reconnect this provider and make sure you pasted the full API key."
     }
+    if (isBalanceOrQuotaError(details)) {
+      return BALANCE_OR_QUOTA_ERROR_MESSAGE
+    }
     if (
-      lowered.includes("arrearage") ||
-      lowered.includes("overdue-payment") ||
       lowered.includes("account is in good standing") ||
       lowered.includes("access denied")
     ) {

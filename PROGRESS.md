@@ -1,5 +1,19 @@
 # 当前进度
 
+## 桌面/Web 同一界面与本机 CLI 分享体验（2026-10-04）
+
+- 已实现共同研究界面、frontend 默认模式、显式 Core 连接、Web 文件/工作区适配、可信 LAN 分享和主机模型只读档案。分享访客连接需先选择本地工作区；不提交研究文件时不会把文件传到主机。
+- TDD 回归修复：窄屏从工作区抽屉打开设置时先关闭抽屉，避免设置面板被遮挡。红测复现、绿测通过。
+- 当前验证：Desktop 全量 365 pass / 2 skip；Desktop 与 CLI typecheck 通过；CLI Web 命令 9/9；最终候选 CLI 全量曾为 2161 pass / 5 skip / 3 fail。两项 runtime-config 失败单独复跑通过；复合面板回放在具备受管 Python 的全量运行中进入 `unknown_model_failure`。相关计量文件未在本任务修改范围内。当前续跑时旧 `/tmp` Python 环境已被系统清理，孤立重跑停在 runtime setup；根因仍待有受管 Python 的环境复核。
+- 最终共享 UI 窄屏修复已红绿验证；Desktop debug bundle 与 Web 生产构建均在修复后完成。Desktop/Web 默认模式、“1”研究记录、设置分类和 reasoning 折叠行为一致；Web 在 1440×900 / 390×844 可用，手机视图设置面板不再被工作区抽屉遮住。
+- `killstata@0.1.30` 最终 12 个包已重新 dry-run；11 个 native + launcher 的 SHA-512 manifest 全部匹配。最终候选已安装到隔离 npm prefix，`--version`、`web --help`、默认 loopback 页面启动和 `--share` 启动通过；当前本机预览服务使用该隔离安装在 `127.0.0.1:3080` 运行。
+- 已通过安装包 LAN 分享页连接隔离测试档案：访客选择自己的 workspace 后 Core ready，档案只读且无 API Key；合成文件未提交外部 Provider。LAN 链路只在同一台 Mac 上经私有网卡验证，未用第二台物理设备验收。
+- npm registry 仍为 `killstata@0.1.27`；`0.1.30` 未发布。Draft PR #6 已打开，push protection 的 key-shaped 测试夹具已替换为非密钥占位符。GitHub `check-standards` 通过，但 `typecheck` 因 clean checkout 缺少被忽略的 `trash/killstata-legacy-econometrics/tool/*` 和 `packages/killstata/src/data/file-discovery.ts` 而失败。
+- 本机主工作树包含这些依赖，且部分 trash 文件在活动工作树中有改动；没有复制或推送这些文件。需要确认是否把必要归档源纳入仓库，或调整依赖这些本地文件的测试。Draft PR 不会合并或发布。
+- 剩余：处置 clean-checkout 集成问题、复核 CLI full-suite 门禁、Linux 主机启动及第二台设备验收；真实模型 Provider 未连接。公开发布须等门禁复核和用户最终批准。
+- 本轮详细验证记录：`test/desktop-web-parity-2026-10-05.md`。
+- 环境验收限制：LAN 页面在同一台 Mac 通过私有网卡打开，尚未用第二台物理设备验收；未连接真实模型服务，也未在 Linux 主机运行原生程序。
+
 ## main 合并与 npm 正式发布（2026-07-18）
 
 - 已将 `agent/repo-cleanup-20260714` 的 22 个既有提交、npm 发布链路提交和两份可复现真实论文 fixture 合并并推送到 GitHub `main`：`907c217`。

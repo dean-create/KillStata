@@ -1,0 +1,13 @@
+{
+  "description": "个体索引与时间索引填了同一列",
+  "modelArgs": {
+    "datasetId": "wage_panel",
+    "stageId": "stage_000",
+    "dependentVar": "lwage",
+    "treatmentVar": "educ",
+    "entityVar": "year",
+    "timeVar": "year"
+  },
+  "expect": "reject",
+  "rejectHint": ["timeVar", "同一列"]
+}

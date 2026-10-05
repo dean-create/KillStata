@@ -5,15 +5,13 @@ function truthy(key: string) {
 
 export namespace Flag {
   export const KILLSTATA_AUTO_SHARE = truthy("KILLSTATA_AUTO_SHARE")
-  export const KILLSTATA_GIT_BASH_PATH = process.env["KILLSTATA_GIT_BASH_PATH"]
   export const KILLSTATA_CONFIG = process.env["KILLSTATA_CONFIG"]
   export declare const KILLSTATA_CONFIG_DIR: string | undefined
-  export const KILLSTATA_CONFIG_CONTENT = process.env["KILLSTATA_CONFIG_CONTENT"]
+  export declare const KILLSTATA_CONFIG_CONTENT: string | undefined
   export const KILLSTATA_DISABLE_AUTOUPDATE = truthy("KILLSTATA_DISABLE_AUTOUPDATE")
   export const KILLSTATA_DISABLE_PRUNE = truthy("KILLSTATA_DISABLE_PRUNE")
   export const KILLSTATA_DISABLE_TERMINAL_TITLE = truthy("KILLSTATA_DISABLE_TERMINAL_TITLE")
   export const KILLSTATA_PERMISSION = process.env["KILLSTATA_PERMISSION"]
-  export const KILLSTATA_DISABLE_DEFAULT_PLUGINS = truthy("KILLSTATA_DISABLE_DEFAULT_PLUGINS")
   export const KILLSTATA_DISABLE_LSP_DOWNLOAD = truthy("KILLSTATA_DISABLE_LSP_DOWNLOAD")
   export const KILLSTATA_ENABLE_EXPERIMENTAL_MODELS = truthy("KILLSTATA_ENABLE_EXPERIMENTAL_MODELS")
   export const KILLSTATA_DISABLE_AUTOCOMPACT = truthy("KILLSTATA_DISABLE_AUTOCOMPACT")
@@ -22,20 +20,15 @@ export namespace Flag {
   export const KILLSTATA_DISABLE_CLAUDE_CODE_PROMPT =
     KILLSTATA_DISABLE_CLAUDE_CODE || truthy("KILLSTATA_DISABLE_CLAUDE_CODE_PROMPT")
   export declare const KILLSTATA_DISABLE_PROJECT_CONFIG: boolean
-  export const KILLSTATA_FAKE_VCS = process.env["KILLSTATA_FAKE_VCS"]
   export const KILLSTATA_CLIENT = process.env["KILLSTATA_CLIENT"] ?? "cli"
   export const KILLSTATA_SERVER_PASSWORD = process.env["KILLSTATA_SERVER_PASSWORD"]
   export const KILLSTATA_SERVER_USERNAME = process.env["KILLSTATA_SERVER_USERNAME"]
 
   // Experimental
   export const KILLSTATA_EXPERIMENTAL = truthy("KILLSTATA_EXPERIMENTAL")
-  export const KILLSTATA_EXPERIMENTAL_FILEWATCHER = truthy("KILLSTATA_EXPERIMENTAL_FILEWATCHER")
-  export const KILLSTATA_EXPERIMENTAL_DISABLE_FILEWATCHER = truthy("KILLSTATA_EXPERIMENTAL_DISABLE_FILEWATCHER")
   export const KILLSTATA_EXPERIMENTAL_ICON_DISCOVERY =
     KILLSTATA_EXPERIMENTAL || truthy("KILLSTATA_EXPERIMENTAL_ICON_DISCOVERY")
   export const KILLSTATA_EXPERIMENTAL_DISABLE_COPY_ON_SELECT = truthy("KILLSTATA_EXPERIMENTAL_DISABLE_COPY_ON_SELECT")
-  export const KILLSTATA_ENABLE_EXA =
-    truthy("KILLSTATA_ENABLE_EXA") || KILLSTATA_EXPERIMENTAL || truthy("KILLSTATA_EXPERIMENTAL_EXA")
   export const KILLSTATA_EXPERIMENTAL_BASH_MAX_OUTPUT_LENGTH = number("KILLSTATA_EXPERIMENTAL_BASH_MAX_OUTPUT_LENGTH")
   export const KILLSTATA_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS = number("KILLSTATA_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS")
   export const KILLSTATA_EXPERIMENTAL_OUTPUT_TOKEN_MAX = number("KILLSTATA_EXPERIMENTAL_OUTPUT_TOKEN_MAX")
@@ -52,6 +45,16 @@ export namespace Flag {
     return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
   }
 }
+
+// Web hosts update a process-local config overlay when the user changes the active
+// model profile, then dispose the Core instance so it reloads that overlay.
+Object.defineProperty(Flag, "KILLSTATA_CONFIG_CONTENT", {
+  get() {
+    return process.env["KILLSTATA_CONFIG_CONTENT"]
+  },
+  enumerable: true,
+  configurable: false,
+})
 
 // Dynamic getter for KILLSTATA_DISABLE_PROJECT_CONFIG
 // This must be evaluated at access time, not module load time,

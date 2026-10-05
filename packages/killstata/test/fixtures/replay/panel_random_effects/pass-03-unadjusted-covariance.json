@@ -1,0 +1,13 @@
+{
+  "description": "unadjusted 协方差(显式选择常规 SE)",
+  "modelArgs": {
+    "datasetId": "wage_panel",
+    "stageId": "stage_000",
+    "dependentVar": "lwage",
+    "treatmentVar": "educ",
+    "entityVar": "nr",
+    "timeVar": "year",
+    "covariance": "unadjusted"
+  },
+  "expect": "pass"
+}

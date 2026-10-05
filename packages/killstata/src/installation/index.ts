@@ -4,7 +4,7 @@ import { $ } from "bun"
 import z from "zod"
 import { NamedError } from "@killstata/util/error"
 import { Log } from "../util/log"
-import { iife } from "@/util/iife"
+import { iife } from "@killstata/util/iife"
 import { Flag } from "../flag/flag"
 
 declare global {

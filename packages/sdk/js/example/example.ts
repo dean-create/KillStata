@@ -1,4 +1,4 @@
-import { createKillstataClient, createKillstataServer } from "@killstata/sdk"
+import { createKillstataClient, createKillstataServer } from "@killstata/sdk/v2"
 
 const server = await createKillstataServer()
 const client = createKillstataClient({ baseUrl: server.url })

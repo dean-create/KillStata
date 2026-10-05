@@ -1,0 +1,12 @@
+{
+  "description": "控制变量列表里同一列重复",
+  "modelArgs": {
+    "datasetId": "loans_11",
+    "stageId": "stage_000",
+    "dependentVar": "default",
+    "treatmentVar": "income",
+    "covariates": ["age", "age"]
+  },
+  "expect": "reject",
+  "rejectHint": ["covariates", "不能包含重复项"]
+}

@@ -1,1 +1,7 @@
-Lists files and directories in a given path. The path parameter must be absolute; omit it to use the current workspace directory. You can optionally provide an array of glob patterns to ignore with the ignore parameter. You should generally prefer the Glob and Grep tools, if you know which directories to search.
+# 列出目录
+递归收集指定目录下的文件路径，并以目录树展示最多 100 个条目；不读取文件正文。
+
+- path 可省略以使用当前工作目录；提供时应是要核对的真实目录。ignore 可排除无关的 glob 模式。
+- 适合确认父目录、候选产物和文件是否存在。已知名称模式时优先 glob，按内容查找时使用 grep，读取文件时使用 read。
+- 该工具会递归扫描指定目录；因此应尽量提供最小、明确的目录，不要无目的扫描整个工作区，也不要用目录列表猜测用户要分析的数据。结果达到 100 个文件路径时会截断。
+- 目录不存在、超时或权限不足时如实返回；超时可保留部分结果，不改用 Bash 绕过边界。

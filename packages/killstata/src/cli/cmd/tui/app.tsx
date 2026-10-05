@@ -2,7 +2,19 @@ import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentu
 import { Clipboard } from "@tui/util/clipboard"
 import { TextAttributes } from "@opentui/core"
 import { RouteProvider, useRoute } from "@tui/context/route"
-import { Switch, Match, createEffect, createMemo, untrack, ErrorBoundary, createSignal, onMount, batch, Show, on } from "solid-js"
+import {
+  Switch,
+  Match,
+  createEffect,
+  createMemo,
+  untrack,
+  ErrorBoundary,
+  createSignal,
+  onMount,
+  batch,
+  Show,
+  on,
+} from "solid-js"
 import { Installation } from "@/installation"
 import { Flag } from "@/flag/flag"
 import { DialogProvider, useDialog } from "@tui/ui/dialog"
@@ -11,6 +23,7 @@ import { SDKProvider, useSDK } from "@tui/context/sdk"
 import { SyncProvider, useSync } from "@tui/context/sync"
 import { LocalProvider, useLocal } from "@tui/context/local"
 import { DialogModel, useConnected } from "@tui/component/dialog-model"
+import { DialogReasoning } from "@tui/component/dialog-reasoning"
 import { DialogThemeList } from "@tui/component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
 import { CommandProvider, useCommandDialog } from "@tui/component/dialog-command"
@@ -30,10 +43,12 @@ import { Session as SessionApi } from "@/session"
 import { TuiEvent } from "./event"
 import { KVProvider, useKV } from "./context/kv"
 import { Provider } from "@/provider/provider"
+import { ProviderTransform } from "@/provider/transform"
 import { ArgsProvider, useArgs, type Args } from "./context/args"
 import open from "open"
 import { writeHeapSnapshot } from "v8"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
+import { DialogContext } from "@tui/routes/session/dialog-context"
 
 async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
   // can't set raw mode if not a TTY
@@ -202,7 +217,7 @@ function App() {
     if (!text || text.length === 0) return false
 
     await Clipboard.copy(text)
-      .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+      .then(() => toast.show({ message: "已复制到剪贴板", variant: "info" }))
       .catch(toast.error)
     renderer.clearSelection()
     return true
@@ -220,7 +235,7 @@ function App() {
 
     lastCtrlCAt = now
     toast.show({
-      message: copied ? "Copied selection. Press Ctrl+C again to exit" : "Press Ctrl+C again to exit",
+      message: copied ? "已复制选区，再按一次 Ctrl+C 退出" : "再按一次 Ctrl+C 退出",
       variant: "info",
       duration: CTRL_C_EXIT_WINDOW_MS,
     })
@@ -237,7 +252,7 @@ function App() {
     if (!text || text.length === 0) return
 
     await Clipboard.copy(text)
-      .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+      .then(() => toast.show({ message: "已复制到剪贴板", variant: "info" }))
       .catch(toast.error)
     renderer.clearSelection()
   }
@@ -274,7 +289,7 @@ function App() {
         if (!providerID || !modelID)
           return toast.show({
             variant: "warning",
-            message: `Invalid model format: ${args.model}`,
+            message: `模型格式无效：${args.model}`,
             duration: 3000,
           })
         local.model.set({ providerID, modelID }, { recent: true })
@@ -324,6 +339,20 @@ function App() {
   })
   command.register(() => [
     {
+      title: "查看上下文占用",
+      description: "查看当前会话上下文窗口、剩余预算与压缩状态",
+      value: "app.context",
+      category: "核心",
+      enabled: route.data.type === "session",
+      slash: {
+        name: "context",
+      },
+      onSelect: (dialog) => {
+        if (route.data.type !== "session") return
+        dialog.replace(() => <DialogContext />)
+      },
+    },
+    {
       title: "切换会话",
       value: "session.list",
       keybind: "session_list",
@@ -342,7 +371,7 @@ function App() {
       suggested: route.data.type === "session",
       value: "session.new",
       keybind: "session_new",
-      category: "Session",
+      category: "会话",
       slash: {
         name: "new",
         aliases: ["clear"],
@@ -374,70 +403,69 @@ function App() {
       },
     },
     {
-      title: "Model cycle",
+      title: "切换模型",
       value: "model.cycle_recent",
       keybind: "model_cycle_recent",
-      category: "Agent",
+      category: "模型",
       hidden: true,
       onSelect: () => {
         local.model.cycle(1)
       },
     },
     {
-      title: "Model cycle reverse",
+      title: "反向切换模型",
       value: "model.cycle_recent_reverse",
       keybind: "model_cycle_recent_reverse",
-      category: "Agent",
+      category: "模型",
       hidden: true,
       onSelect: () => {
         local.model.cycle(-1)
       },
     },
     {
-      title: "Favorite cycle",
+      title: "切换收藏模型",
       value: "model.cycle_favorite",
       keybind: "model_cycle_favorite",
-      category: "Agent",
+      category: "模型",
       hidden: true,
       onSelect: () => {
         local.model.cycleFavorite(1)
       },
     },
     {
-      title: "Favorite cycle reverse",
+      title: "反向切换收藏模型",
       value: "model.cycle_favorite_reverse",
       keybind: "model_cycle_favorite_reverse",
-      category: "Agent",
+      category: "模型",
       hidden: true,
       onSelect: () => {
         local.model.cycleFavorite(-1)
       },
     },
     {
-      title: "Agent cycle",
+      title: "切换agent",
       value: "agent.cycle",
       keybind: "agent_cycle",
-      category: "Agent",
+      category: "模型",
       hidden: true,
       onSelect: () => {
         local.agent.move(1)
       },
     },
     {
-      title: "Variant cycle",
-      value: "variant.cycle",
+      title: "推理等级",
+      value: "reasoning.list",
       keybind: "variant_cycle",
-      category: "Agent",
-      hidden: true,
-      onSelect: () => {
-        local.model.variant.cycle()
+      category: "模型",
+      onSelect: (dialog) => {
+        dialog.replace(() => <DialogReasoning />)
       },
     },
     {
-      title: "Agent cycle reverse",
+      title: "反向切换agent",
       value: "agent.cycle.reverse",
       keybind: "agent_cycle_reverse",
-      category: "Agent",
+      category: "模型",
       hidden: true,
       onSelect: () => {
         local.agent.move(-1)
@@ -445,7 +473,7 @@ function App() {
     },
     {
       title: "配置",
-      description: "配置模型提供商和 API Key",
+      description: "配置模型提供商和api key",
       value: "provider.connect",
       suggested: !connected(),
       slash: {
@@ -458,7 +486,7 @@ function App() {
       category: "核心",
     },
     {
-      title: "Switch theme",
+      title: "切换主题",
       value: "theme.switch",
       keybind: "theme_list",
       hidden: !showAdvancedCommands(),
@@ -468,17 +496,17 @@ function App() {
       onSelect: () => {
         dialog.replace(() => <DialogThemeList />)
       },
-      category: "System",
+      category: "系统",
     },
     {
-      title: "Toggle appearance",
+      title: "切换明暗外观",
       value: "theme.switch_mode",
       hidden: !showAdvancedCommands(),
       onSelect: (dialog) => {
         setMode(mode() === "dark" ? "light" : "dark")
         dialog.clear()
       },
-      category: "System",
+      category: "系统",
     },
     {
       title: "帮助",
@@ -492,17 +520,17 @@ function App() {
       category: "核心",
     },
     {
-      title: "Open docs",
+      title: "打开文档",
       value: "docs.open",
       hidden: !showAdvancedCommands(),
       onSelect: () => {
-        open("https://killstata.io/docs").catch(() => { })
+        open("https://killstata.io/docs").catch(() => {})
         dialog.clear()
       },
-      category: "System",
+      category: "系统",
     },
     {
-      title: "退出 killstata",
+      title: "退出killstata",
       value: "app.exit",
       slash: {
         name: "exit",
@@ -512,8 +540,8 @@ function App() {
       category: "核心",
     },
     {
-      title: "Toggle debug panel",
-      category: "System",
+      title: "切换调试面板",
+      category: "系统",
       value: "app.debug",
       hidden: !showAdvancedCommands(),
       onSelect: (dialog) => {
@@ -522,8 +550,8 @@ function App() {
       },
     },
     {
-      title: "Toggle console",
-      category: "System",
+      title: "切换控制台",
+      category: "系统",
       value: "app.console",
       hidden: !showAdvancedCommands(),
       onSelect: (dialog) => {
@@ -532,25 +560,25 @@ function App() {
       },
     },
     {
-      title: "Write heap snapshot",
-      category: "System",
+      title: "写入堆快照",
+      category: "系统",
       value: "app.heap_snapshot",
       hidden: !showAdvancedCommands(),
       onSelect: (dialog) => {
         const path = writeHeapSnapshot()
         toast.show({
           variant: "info",
-          message: `Heap snapshot written to ${path}`,
+          message: `堆快照已写入 ${path}`,
           duration: 5000,
         })
         dialog.clear()
       },
     },
     {
-      title: "Suspend terminal",
+      title: "挂起终端",
       value: "terminal.suspend",
       keybind: "terminal_suspend",
-      category: "System",
+      category: "系统",
       hidden: true,
       onSelect: () => {
         process.once("SIGCONT", () => {
@@ -563,10 +591,10 @@ function App() {
       },
     },
     {
-      title: terminalTitleEnabled() ? "Disable terminal title" : "Enable terminal title",
+      title: terminalTitleEnabled() ? "关闭终端标题" : "开启终端标题",
       value: "terminal.title.toggle",
       keybind: "terminal_title_toggle",
-      category: "System",
+      category: "系统",
       hidden: !showAdvancedCommands(),
       onSelect: (dialog) => {
         setTerminalTitleEnabled((prev) => {
@@ -587,8 +615,8 @@ function App() {
       untrack(() => {
         DialogAlert.show(
           dialog,
-          "Warning",
-          "While openrouter is a convenient way to access LLMs your request will often be routed to subpar providers that do not work well in our testing.\n\nFor reliable access to models check out Killstata\nhttps://killstata.io",
+          "警告",
+          "openrouter 虽然接入 LLM 方便，但你的请求经常会被路由到我们测试中表现不佳的次级提供商。\n\n要稳定使用模型，建议用 killstata\nhttps://killstata.io",
         ).then(() => kv.set("openrouter_warning", true))
       })
     }
@@ -619,7 +647,7 @@ function App() {
       route.navigate({ type: "home" })
       toast.show({
         variant: "info",
-        message: "The current session was deleted",
+        message: "当前会话已被删除",
       })
     }
   })
@@ -628,15 +656,22 @@ function App() {
     const error = evt.properties.error
     if (error && typeof error === "object" && error.name === "MessageAbortedError") return
     const message = (() => {
-      if (!error) return "An error occurred"
+      if (!error) return "发生错误"
 
-      if (typeof error === "object") {
+      let raw: string | undefined
+      let statusCode: number | undefined
+      if (typeof error === "object" && error !== null) {
         const data = error.data
-        if ("message" in data && typeof data.message === "string") {
-          return data.message
+        if (data && typeof data === "object") {
+          if ("message" in data && typeof data.message === "string") raw = data.message
+          if ("statusCode" in data && typeof data.statusCode === "number") statusCode = data.statusCode
         }
       }
-      return String(error)
+
+      raw ??= typeof error === "string" ? error : String(error)
+      return statusCode === 402 || ProviderTransform.isBalanceOrQuotaError(raw)
+        ? ProviderTransform.BALANCE_OR_QUOTA_ERROR_MESSAGE
+        : raw
     })()
 
     toast.show({
@@ -649,8 +684,8 @@ function App() {
   sdk.event.on(Installation.Event.UpdateAvailable.type, (evt) => {
     toast.show({
       variant: "info",
-      title: "Update Available",
-      message: `Killstata v${evt.properties.version} is available. Run 'killstata upgrade' to update manually.`,
+      title: "有可用更新",
+      message: `killstata v${evt.properties.version} 已发布，运行 'killstata upgrade' 手动更新。`,
       duration: 10000,
     })
   })
@@ -701,7 +736,7 @@ function ErrorComponent(props: {
       handleExit()
     }
   })
-  
+
   const [copied, setCopied] = createSignal(false)
   const issueURL = new URL("https://killstata.io/support?template=bug-report.yml")
   const isLight = props.mode === "light"

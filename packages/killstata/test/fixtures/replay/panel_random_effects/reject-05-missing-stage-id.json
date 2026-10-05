@@ -1,0 +1,12 @@
+{
+  "description": "漏传 stageId",
+  "modelArgs": {
+    "datasetId": "wage_panel",
+    "dependentVar": "lwage",
+    "treatmentVar": "educ",
+    "entityVar": "nr",
+    "timeVar": "year"
+  },
+  "expect": "reject",
+  "rejectHint": ["stageId"]
+}

@@ -8,12 +8,38 @@ import { Command } from "../../command"
 import { EOL } from "os"
 import { select } from "@clack/prompts"
 import { createKillstataClient, type KillstataClient } from "@killstata/sdk/v2"
-import { Server } from "../../server/server"
+import { CoreApplication, CoreApplicationClient } from "../../core"
 import { Provider } from "../../provider/provider"
 import { Agent } from "../../agent/agent"
-import { decideNonInteractivePermission, decideNonInteractiveQuestion, shouldAutoHandleRunPermissions } from "./run-permission"
+import {
+  decideNonInteractivePermission,
+  decideNonInteractiveQuestion,
+  shouldAutoHandleRunPermissions,
+} from "./run-permission"
+import { friendlyToolErrorForCli } from "./tool-error-display"
 import { readToolDisplay } from "../../tool/analysis-display"
 import { Redact } from "../../util/redact"
+import { sanitizeAnalysisAssistantText } from "../../runtime/analysis-text-sanitizer"
+import { MessageV2 } from "../../session/message-v2"
+
+/** CLI 默认文本在 session.idle 时统一净化，避免流式 delta 绕过 TUI/转录展示边界。 */
+export function sanitizeRunFinalText(text: string, latestUserText?: string) {
+  return sanitizeAnalysisAssistantText({
+    text,
+    tools: [],
+    latestUserText,
+  }).text.trim()
+}
+
+export function shouldPrintRunTextPart(
+  part: { type?: unknown; messageID?: unknown; synthetic?: unknown; ignored?: unknown },
+  internalSummaryMessageIDs: ReadonlySet<string>,
+) {
+  return part.type === "text" &&
+    part.synthetic !== true &&
+    part.ignored !== true &&
+    !(typeof part.messageID === "string" && internalSummaryMessageIDs.has(part.messageID))
+}
 
 const TOOL: Record<string, [string, string]> = {
   todowrite: ["Todo", UI.Style.TEXT_WARNING_BOLD],
@@ -26,10 +52,37 @@ const TOOL: Record<string, [string, string]> = {
   list: ["List", UI.Style.TEXT_INFO_BOLD],
   read: ["Read", UI.Style.TEXT_HIGHLIGHT_BOLD],
   write: ["Write", UI.Style.TEXT_SUCCESS_BOLD],
-  websearch: ["Search", UI.Style.TEXT_DIM_BOLD],
 }
 
-const DEFAULT_HIDDEN_TOOLS = new Set(["glob", "read", "workflow", "skill", "invalid", "task", "todowrite", "todoread"])
+const DEFAULT_HIDDEN_TOOLS = new Set(["glob", "read", "pipeline", "skill", "invalid", "task", "todowrite", "todoread"])
+
+const USER_TOOL_LABELS: Record<string, string> = {
+  data_import: "数据检查",
+  data_preprocess: "数据预处理",
+  econometrics_recommend: "计量方法推荐",
+  tool_search: "方法加载",
+  econometrics_execute: "计量执行",
+  ols_regression: "OLS回归",
+  panel_fe_regression: "面板固定效应回归",
+  panel_random_effects: "面板随机效应回归",
+  robust_regression: "稳健回归",
+  wls_regression: "加权最小二乘回归",
+  logit_regression: "Logit回归",
+  probit_regression: "Probit回归",
+  did_static: "传统双重差分",
+  did2s: "两阶段双重差分",
+}
+
+export function userFacingToolLabel(toolName: string, input?: Record<string, unknown>) {
+  if (toolName === "data_import") {
+    const action = typeof input?.action === "string" ? input.action : ""
+    if (action === "profile") return "数据画像"
+    if (action === "validate") return "数据质量检查"
+    if (action === "frequency") return "频数检查"
+    return "数据导入"
+  }
+  return USER_TOOL_LABELS[toolName] ?? toolName
+}
 
 function inferProjectRoot(workspaceRoot: string, processRoot: string) {
   const normalizedWorkspace = path.resolve(workspaceRoot)
@@ -171,12 +224,15 @@ export const RunCommand = cmd({
 
     const execute = async (sdk: KillstataClient, sessionID: string) => {
       let finalText: string | undefined
+      let receivedIdle = false
       let lastToolSignature: string | undefined
       let lastToolRunningSignature: string | undefined
       let lastToolErrorSignature: string | undefined
       let streamedAnyText = false
+      let streamedText = ""
       let textStreamOpenLine = false
       const eventsAbort = new AbortController()
+      const internalSummaryMessageIDs = new Set<string>()
 
       const flushTextStreamLine = () => {
         if (args.format === "default" && textStreamOpenLine) {
@@ -187,9 +243,11 @@ export const RunCommand = cmd({
 
       const writeTextDelta = (delta: string | undefined) => {
         if (args.format !== "default" || !delta) return false
-        process.stdout.write(delta)
+        // 不在 delta 到达时直接写 stdout：模型可能在后续片段中补出内部路径/ID，
+        // 流式直出会绕过统一文本净化。工具运行状态仍实时显示，正文在 idle 时一次净化输出。
+        streamedText += delta
         streamedAnyText = true
-        textStreamOpenLine = !delta.endsWith("\n")
+        textStreamOpenLine = false
         return true
       }
 
@@ -219,6 +277,8 @@ export const RunCommand = cmd({
       }
 
       const toolTitle = (part: any) => {
+        const userLabel = userFacingToolLabel(part.tool, part.state?.input)
+        if (userLabel !== part.tool) return userLabel
         const display = readToolDisplay(part.state?.metadata)
         if (display?.summary) return display.summary
         return part.state.title || "Unknown"
@@ -231,6 +291,18 @@ export const RunCommand = cmd({
 
       const eventProcessor = (async () => {
         for await (const event of events.stream) {
+          if (event.type === "message.updated") {
+            const info = event.properties.info
+            if (info.sessionID === sessionID && MessageV2.isInternalSummary(info)) {
+              internalSummaryMessageIDs.delete(info.id)
+              internalSummaryMessageIDs.add(info.id)
+              if (internalSummaryMessageIDs.size > 4096) {
+                const oldest = internalSummaryMessageIDs.values().next().value
+                if (typeof oldest === "string") internalSummaryMessageIDs.delete(oldest)
+              }
+            }
+            continue
+          }
           const rawEvent = event as any
           if (rawEvent.type === "runtime.workflow.state" && rawEvent.properties?.sessionID === sessionID) {
             if (outputJsonEvent("runtime.workflow.state", { properties: rawEvent.properties })) continue
@@ -241,13 +313,19 @@ export const RunCommand = cmd({
           if (rawEvent.type === "runtime.tool.lifecycle" && rawEvent.properties?.sessionID === sessionID) {
             if (outputJsonEvent("runtime.tool.lifecycle", { properties: rawEvent.properties })) continue
           }
+          if (rawEvent.type === "runtime.tool.progress" && rawEvent.properties?.sessionID === sessionID) {
+            if (outputJsonEvent("runtime.tool.progress", { properties: rawEvent.properties })) continue
+          }
 
           if (event.type === "message.part.updated") {
             const part = event.properties.part
             if (part.sessionID !== sessionID) continue
+            if (internalSummaryMessageIDs.has(part.messageID)) continue
 
             if (part.type === "text") {
-              const delta = typeof (event.properties as any).delta === "string" ? (event.properties as any).delta : undefined
+              if (!shouldPrintRunTextPart(part, internalSummaryMessageIDs)) continue
+              const delta =
+                typeof (event.properties as any).delta === "string" ? (event.properties as any).delta : undefined
               if (delta) {
                 if (outputJsonEvent("text_delta", { part, delta })) continue
                 writeTextDelta(delta)
@@ -257,7 +335,7 @@ export const RunCommand = cmd({
             if (part.type === "tool" && part.state.status === "running") {
               if (outputJsonEvent("tool_running", { part })) continue
               if (!shouldPrintTool(part)) continue
-              const [tool, color] = TOOL[part.tool] ?? [part.tool, UI.Style.TEXT_INFO_BOLD]
+              const [tool, color] = TOOL[part.tool] ?? [userFacingToolLabel(part.tool, part.state?.input), UI.Style.TEXT_INFO_BOLD]
               const title = toolTitle(part)
               const signature = `${part.callID ?? part.id}:${part.tool}:${title}:running`
               if (signature === lastToolRunningSignature) continue
@@ -266,21 +344,23 @@ export const RunCommand = cmd({
             }
 
             if (part.type === "tool" && part.state.status === "error") {
+              const metadata = part.state.metadata as Record<string, unknown> | undefined
+              if (metadata?.skippedAfterPriorToolFailure === true || metadata?.skippedAfterUserDecision === true) continue
               if (outputJsonEvent("tool_error", { part })) continue
               if (!shouldPrintTool(part)) continue
-              const [tool] = TOOL[part.tool] ?? [part.tool, UI.Style.TEXT_INFO_BOLD]
+              const [tool] = TOOL[part.tool] ?? [userFacingToolLabel(part.tool, part.state?.input), UI.Style.TEXT_INFO_BOLD]
               const title = toolTitle(part)
               const signature = `${part.callID ?? part.id}:${part.tool}:${title}:error`
               if (signature === lastToolErrorSignature) continue
               lastToolErrorSignature = signature
-              const error = part.state.error ? `: ${Redact.text(part.state.error, 500)}` : ""
+              const error = part.state.error ? `: ${friendlyToolErrorForCli(part.state.error)}` : ""
               printEvent(UI.Style.TEXT_DANGER_BOLD, tool, `Failed ${title}${error}`)
             }
 
             if (part.type === "tool" && part.state.status === "completed") {
               if (outputJsonEvent("tool_use", { part })) continue
               if (!shouldPrintTool(part)) continue
-              const [tool, color] = TOOL[part.tool] ?? [part.tool, UI.Style.TEXT_INFO_BOLD]
+              const [tool, color] = TOOL[part.tool] ?? [userFacingToolLabel(part.tool, part.state?.input), UI.Style.TEXT_INFO_BOLD]
               const title = toolTitle(part)
               const signature = `${part.tool}:${title}`
               if (signature === lastToolSignature) continue
@@ -320,15 +400,21 @@ export const RunCommand = cmd({
           }
 
           if (event.type === "session.idle" && event.properties.sessionID === sessionID) {
-            if (args.format === "default" && streamedAnyText) {
-              flushTextStreamLine()
-            } else if (args.format === "default" && finalText?.trim()) {
+            if (args.format === "default" && (streamedAnyText || finalText?.trim())) {
+              const displayText = sanitizeRunFinalText(streamedText || finalText || "", message)
               const isPiped = !process.stdout.isTTY
+              flushTextStreamLine()
               if (!isPiped) UI.println()
-              process.stdout.write((isPiped ? finalText : UI.markdown(finalText)) + EOL)
+              process.stdout.write((isPiped ? displayText : UI.markdown(displayText)) + EOL)
               if (!isPiped) UI.println()
             }
             eventsAbort.abort()
+            // session.idle 是 dispatch 正常结束的代理（dispatch→finishDispatch→SessionStatus.set(idle)）。
+            // promptAsync resolve 与 session.idle 之间有竞态：dispatch 先 resolve callbacks 再 fire idle，
+            // 中间可能 SSE 连接抢先关闭导致 idle 丢失，因此单靠 errorMsg 被清理来判定退出码不可靠。
+            // 改为：用 receivedIdle 作为会话完整结束的代理，收到 idle 就出 0，没收到才看 errorMsg。
+            receivedIdle = true
+            errorMsg = undefined
             break
           }
 
@@ -346,10 +432,13 @@ export const RunCommand = cmd({
                 },
               })
               if (
-                outputJsonEvent(decision.response === "reject" ? "permission_auto_rejected" : "permission_auto_allowed", {
-                  permission,
-                  decision,
-                })
+                outputJsonEvent(
+                  decision.response === "reject" ? "permission_auto_rejected" : "permission_auto_allowed",
+                  {
+                    permission,
+                    decision,
+                  },
+                )
               ) {
                 await sdk.permission.respond({
                   sessionID,
@@ -495,7 +584,7 @@ export const RunCommand = cmd({
       await eventProcessor.finally(() => {
         eventsAbort.abort()
       })
-      return errorMsg ? 1 : 0
+      return receivedIdle ? 0 : 1
     }
 
     if (args.attach) {
@@ -572,17 +661,7 @@ export const RunCommand = cmd({
     }
 
     await bootstrap(effectiveCwd, async () => {
-      const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request = new Request(input, init)
-        const headers = new Headers(request.headers)
-        headers.set("x-killstata-directory", effectiveCwd)
-        return Server.App().fetch(
-          new Request(request, {
-            headers,
-          }),
-        )
-      }) as typeof globalThis.fetch
-      const sdk = createKillstataClient({ baseUrl: "http://killstata.internal", fetch: fetchFn })
+      const sdk = CoreApplicationClient.inProcess(await CoreApplication.create({ directory: effectiveCwd })).sdk
 
       if (args.command) {
         const exists = await Command.get(args.command)

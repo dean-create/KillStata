@@ -1,0 +1,11 @@
+{
+  "description": "过度离散的就诊次数用负二项(visits)对参保 + 控制",
+  "modelArgs": {
+    "datasetId": "health_21",
+    "stageId": "stage_000",
+    "dependentVar": "visits",
+    "treatmentVar": "insured",
+    "covariates": ["age", "income"]
+  },
+  "expect": "pass"
+}

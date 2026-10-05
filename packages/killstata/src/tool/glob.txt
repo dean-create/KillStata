@@ -1,6 +1,8 @@
-- Fast file pattern matching tool for finding data files in the working directory
-- Supports glob patterns like "**/*.xlsx" or "data/**/*.csv"
-- Returns matching file paths sorted by modification time
-- Use this tool to locate data files (csv/xlsx/dta/parquet) or artifacts by name pattern
-- When you are doing an open-ended search that may require multiple rounds of globbing and grepping, use the Task tool instead
-- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.
+# 按路径模式查找文件
+快速匹配文件名和路径，返回按修改时间排序的候选路径，不读取文件正文。
+
+- pattern 支持 data/*.csv、reports/*.json 等 glob；path 省略时使用当前工作目录。
+- 用户给出明确路径时优先原样使用，不要先扫描目录。仅在需要定位同目录相关文件或用户明确要求探索时使用 glob。
+- 用户只说“帮我分析”但没有文件、路径或数据集时，不得用宽泛 **/* 猜测数据；应先问一个简短澄清问题，避免误选测试样例或旧文件。
+- 已知路径要读内容时使用 read；要按正则查文本使用 grep；要查看某个目录的一层内容使用 list。
+- 搜索超时、结果截断或候选过多时收窄 path/pattern，不把部分结果说成完整结果。

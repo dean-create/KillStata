@@ -1,0 +1,1 @@
+{"description":"模型多塞了一个 methodName；strict 拒绝未知键","modelArgs":{"datasetId":"panel_98","stageId":"stage_000","dependentVar":"y","treatmentVar":"x","weightsVar":"sample_weight","methodName":"wls"},"expect":"reject","rejectHint":["methodName"]}

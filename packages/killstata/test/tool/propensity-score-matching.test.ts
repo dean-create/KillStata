@@ -15,7 +15,7 @@ async function runMatcher(input: {
 }) {
   // 数值准入测试必须真正调用受管 Python；这里不依赖项目 Instance，避免测试被配置上下文掩盖。
   const python = process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python")
-  const moduleDir = path.resolve(import.meta.dir, "../../python/econometrics")
+  const moduleDir = path.resolve(import.meta.dir, "../../../killstata-econometrics-engine/python/econometrics")
   const script = [
     "import json, sys",
     "import pandas as pd",
@@ -72,17 +72,13 @@ async function withInstance<T>(fn: (root: string) => Promise<T>) {
 }
 
 async function modelVisibleTool() {
-  const tools = await ToolRegistry.tools(
-    { providerID: "deepseek", modelID: "deepseek-v4-flash" },
-    undefined,
-    {
-      inputIntent: "analysis",
-      currentStage: "preprocess_or_filter",
-      platformCapabilities: { mcp: false, images: false, remote: false },
-      modelCapabilities: { supportsTools: true, supportsImages: false },
-    },
-  )
-  return tools.find((tool) => tool.id === "psm_matching")
+  const pool = await ToolRegistry.resolvePool({ providerID: "deepseek", modelID: "deepseek-v4-flash" }, undefined, {
+    inputIntent: "analysis",
+    currentStage: "preprocess_or_filter",
+    platformCapabilities: { mcp: false, images: false, remote: false },
+    modelCapabilities: { supportsTools: true, supportsImages: false },
+  })
+  return (await pool.load(["psm_matching"]))[0]
 }
 
 describe("strict propensity-score matching", () => {
@@ -105,7 +101,8 @@ describe("strict propensity-score matching", () => {
         ] as const) {
           for (let index = 0; index < count; index += 1) {
             city += 1
-            for (const year of [2020, 2021]) rows.push(`city_${city},${year},${x + treated * 3},${treated},${x},${x * x}`)
+            for (const year of [2020, 2021])
+              rows.push(`city_${city},${year},${x + treated * 3},${treated},${x},${x * x}`)
           }
         }
       }
@@ -225,8 +222,15 @@ describe("strict propensity-score matching", () => {
     await withInstance(async (root) => {
       const sessionID = "psm_matching_card"
       const sourcePath = path.join(root, "card1995.csv")
-      const cardRows = fs.readFileSync(path.join(import.meta.dir, "../fixtures/golden/card1995.csv"), "utf-8").trim().split("\n")
-      fs.writeFileSync(sourcePath, ["unit," + cardRows[0], ...cardRows.slice(1).map((row, index) => `${index + 1},${row}`)].join("\n"), "utf-8")
+      const cardRows = fs
+        .readFileSync(path.join(import.meta.dir, "../fixtures/golden/card1995.csv"), "utf-8")
+        .trim()
+        .split("\n")
+      fs.writeFileSync(
+        sourcePath,
+        ["unit," + cardRows[0], ...cardRows.slice(1).map((row, index) => `${index + 1},${row}`)].join("\n"),
+        "utf-8",
+      )
       const source = registerCanonicalDataset({ sessionID, sourcePath, datasetId: "dataset_card1995_psm_matching" })
       const tool = await modelVisibleTool()
       expect(tool).toBeDefined()

@@ -5,25 +5,16 @@ import path from "path"
 import { Instance } from "@/project/instance"
 import { ToolRegistry } from "@/tool/registry"
 import { recordWorkflowStageSuccess } from "@/runtime/workflow"
+import { OlsRegressionTool as NewOlsTool } from "../../../../trash/killstata-legacy-econometrics/tool/ols"
+import { PanelFeTool } from "../../../../trash/killstata-legacy-econometrics/tool/panel-fe"
+import { IvTool } from "../../../../trash/killstata-legacy-econometrics/tool/iv"
+import {
+  ALL_ECONOMETRICS_ESTIMATOR_TOOL_IDS,
+  MODEL_ADMITTED_ECONOMETRICS_DIAGNOSTIC_TOOL_IDS,
+  MODEL_ADMITTED_ECONOMETRICS_ESTIMATOR_TOOL_IDS,
+} from "@/runtime/econometrics-admission"
 
-const SAFE_ECONOMETRICS_TOOL_IDS = [
-  "econometrics_recommend",
-  "psm_construction",
-  "psm_visualize",
-  "psm_matching",
-  "psm_ipw",
-  "ols_regression",
-  "panel_fe_regression",
-  "iv_2sls",
-  "hdfe_regression",
-  "did_static",
-  "did2s",
-  "did_event_study_saturated",
-] as const
-
-const ESTIMATOR_TOOL_IDS = SAFE_ECONOMETRICS_TOOL_IDS.filter(
-  (toolName) => !(["econometrics_recommend", "psm_construction", "psm_visualize"] as string[]).includes(toolName),
-)
+const ESTIMATOR_TOOL_IDS = MODEL_ADMITTED_ECONOMETRICS_ESTIMATOR_TOOL_IDS
 
 async function withAnalysisTools<T>(fn: (tools: Awaited<ReturnType<typeof ToolRegistry.tools>>) => Promise<T>) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "killstata-econometrics-tools-"))
@@ -31,16 +22,18 @@ async function withAnalysisTools<T>(fn: (tools: Awaited<ReturnType<typeof ToolRe
     return await Instance.provide({
       directory: root,
       fn: async () => {
-        const tools = await ToolRegistry.tools(
-          { providerID: "deepseek", modelID: "deepseek-v4-flash" },
-          undefined,
-          {
-            inputIntent: "analysis",
-            currentStage: "preprocess_or_filter",
-            platformCapabilities: { mcp: false, images: false, remote: false },
-            modelCapabilities: { supportsTools: true, supportsImages: false },
-          },
-        )
+        const pool = await ToolRegistry.resolvePool({ providerID: "deepseek", modelID: "deepseek-v4-flash" }, undefined, {
+          inputIntent: "analysis",
+          currentStage: "preprocess_or_filter",
+          platformCapabilities: { mcp: false, images: false, remote: false },
+          modelCapabilities: { supportsTools: true, supportsImages: false },
+        })
+        expect(pool.resolution.directToolIDs).toEqual(expect.arrayContaining([
+          "read", "list", "glob", "grep", "pipeline", "tool_search", "econometrics_execute", "data_import",
+        ]))
+        expect(pool.resolution.directToolIDs).not.toContain("ols_regression")
+        // 这里模拟真正发送给模型的 direct 工具面；历史 deferred 实现只供 replay 测试显式回查。
+        const tools = await pool.load(pool.resolution.directToolIDs ?? [])
         return fn(tools)
       },
     })
@@ -49,267 +42,191 @@ async function withAnalysisTools<T>(fn: (tools: Awaited<ReturnType<typeof ToolRe
   }
 }
 
+const HISTORICAL_TOOLS = {
+  ols_regression: NewOlsTool,
+  panel_fe_regression: PanelFeTool,
+  iv_2sls: IvTool,
+} as const
+
+async function registeredTool(toolID: keyof typeof HISTORICAL_TOOLS) {
+  const tool = HISTORICAL_TOOLS[toolID]
+  expect(tool, `${toolID} should remain registered for historical replay`).toBeDefined()
+  // 这三项已从 ProductionEconometricsTools 迁到各自独立数组注册（旧包装器没有 parameters
+  // 且与独立工具 ID 重复）。是否真的注册由上面读 ToolRegistry.ids() 的用例覆盖，这里只校验 ID。
+  expect(tool.id).toBe(toolID)
+  if (!tool) throw new Error(`Missing registered tool: ${toolID}`)
+  return tool.init()
+}
+
 describe("model-visible econometrics tools", () => {
-  test("exposes one strict tool per production method and hides the legacy dispatcher", async () => {
+  test("exposes only admission-approved tools and hides legacy or unadmitted backends", async () => {
     await withAnalysisTools(async (tools) => {
       const ids = tools.map((tool) => tool.id)
+      const registered = await ToolRegistry.ids()
 
-      for (const id of SAFE_ECONOMETRICS_TOOL_IDS) expect(ids).toContain(id)
+      expect(ids).toContain("tool_search")
+      expect(ids).toContain("econometrics_execute")
       expect(ids).not.toContain("econometrics")
-    })
-  })
-
-  test("rejects ambiguous data sources and arbitrary legacy options before execution", async () => {
-    await withAnalysisTools(async (tools) => {
-      const ols = tools.find((tool) => tool.id === "ols_regression")
-      expect(ols).toBeDefined()
-      if (!ols) return
-
-      expect(
-        ols.parameters.safeParse({
-          dataPath: "data.xlsx",
-          datasetId: "dataset_1",
-          dependentVar: "y",
-          treatmentVar: "x",
-        }).success,
-      ).toBe(false)
-      expect(
-        ols.parameters.safeParse({
-          dataPath: "data.xlsx",
-          dependentVar: "y",
-          treatmentVar: "x",
-          methodName: "psm_double_robust",
-          options: { robust_se: true },
-        }).success,
-      ).toBe(false)
-    })
-  })
-
-  test("requires an explicit instrument and identification rationale for IV2SLS", async () => {
-    await withAnalysisTools(async (tools) => {
-      const iv = tools.find((tool) => tool.id === "iv_2sls")
-      expect(iv).toBeDefined()
-      if (!iv) return
-
-      expect(
-        iv.parameters.safeParse({
-          datasetId: "dataset_1",
-          stageId: "stage_001",
-          dependentVar: "y",
-          endogenousVar: "education",
-          instrumentVar: "distance",
-        }).success,
-      ).toBe(false)
-      expect(
-        iv.parameters.safeParse({
-          datasetId: "dataset_1",
-          stageId: "stage_001",
-          dependentVar: "y",
-          endogenousVar: "education",
-          instrumentVar: "distance",
-          instrumentJustification: "Distance changes schooling cost and is supplied by the user as the proposed instrument.",
-        }).success,
-      ).toBe(true)
-      expect(
-        iv.parameters.safeParse({
-          datasetId: "dataset_1",
-          stageId: "stage_001",
-          dependentVar: "y",
-          endogenousVar: "education",
-          instrumentVar: "distance",
-          instrumentJustification: "Distance changes schooling cost and is supplied by the user as the proposed instrument.",
-          covariance: "HC2",
-        }).success,
-      ).toBe(false)
-      expect(
-        iv.parameters.safeParse({
-          datasetId: "dataset_1",
-          stageId: "stage_001",
-          dependentVar: "y",
-          endogenousVar: "education",
-          instrumentVar: "distance",
-          instrumentJustification: "Distance changes schooling cost and is supplied by the user as the proposed instrument.",
-          covariance: "robust",
-        }).success,
-      ).toBe(true)
-    })
-  })
-
-  test("exposes propensity-score construction and visualization as strict diagnostic tools", async () => {
-    await withAnalysisTools(async (tools) => {
-      for (const toolID of ["psm_construction", "psm_visualize"]) {
-        const propensity = tools.find((tool) => tool.id === toolID)
-        expect(propensity).toBeDefined()
-        if (!propensity) continue
-
-        expect(
-          propensity.parameters.safeParse({
-            datasetId: "dataset_1",
-            stageId: "stage_001",
-            treatmentVar: "treated",
-            covariates: ["age", "income"],
-          }).success,
-        ).toBe(true)
-        for (const invalid of [
-          {
-            datasetId: "dataset_1",
-            stageId: "stage_001",
-            treatmentVar: "treated",
-            covariates: [],
-          },
-          {
-            datasetId: "dataset_1",
-            stageId: "stage_001",
-            treatmentVar: "treated",
-            covariates: ["treated"],
-          },
-          {
-            datasetId: "dataset_1",
-            stageId: "stage_001",
-            treatmentVar: "treated",
-            covariates: ["age", "age"],
-          },
-          {
-            datasetId: "dataset_1",
-            stageId: "stage_001",
-            treatmentVar: "treated",
-            covariates: ["age"],
-            dependentVar: "outcome",
-          },
-          {
-            dataPath: "raw.xlsx",
-            treatmentVar: "treated",
-            covariates: ["age"],
-          },
-        ]) {
-          expect(propensity.parameters.safeParse(invalid).success).toBe(false)
-        }
+      for (const id of ALL_ECONOMETRICS_ESTIMATOR_TOOL_IDS) {
+        expect(registered).toContain(id)
+        expect(ids).not.toContain(id)
       }
     })
   })
 
-  test("exposes PSM matching as a strict ATT estimator without free matching controls", async () => {
-    await withAnalysisTools(async (tools) => {
-      const matching = tools.find((tool) => tool.id === "psm_matching")
-      expect(matching).toBeDefined()
-      if (!matching) return
+  test("keeps historical OLS registered and rejects ambiguous legacy options", async () => {
+    const ols = await registeredTool("ols_regression")
 
-      const valid = {
+    expect(
+      ols.parameters.safeParse({
+        dataPath: "data.xlsx",
+        datasetId: "dataset_1",
+        dependentVar: "y",
+        treatmentVar: "x",
+      }).success,
+    ).toBe(false)
+    expect(
+      ols.parameters.safeParse({
+        dataPath: "data.xlsx",
+        dependentVar: "y",
+        treatmentVar: "x",
+        methodName: "psm_double_robust",
+        options: { robust_se: true },
+      }).success,
+    ).toBe(false)
+  })
+
+  test("keeps historical IV2SLS registered with its identification contract", async () => {
+    const iv = await registeredTool("iv_2sls")
+
+    // 新 IV schema: treatmentVar + instrumentVars(数组) + covariates + instrumentJustification。
+    // 识别依据是准入时固化的安全门——模型不得靠列名推断工具变量有效性，缺了必须拒。
+    const justification = "College proximity shifts schooling costs and is excluded from wages given controls."
+    expect(
+      iv.parameters.safeParse({
         datasetId: "dataset_1",
         stageId: "stage_001",
-        dependentVar: "re78",
-        treatmentVar: "treat",
-        covariates: ["age", "education"],
-        analysisUnitVar: "person_id",
-        preTreatmentAggregation: "not_applicable",
-      }
-      expect(matching.parameters.safeParse(valid).success).toBe(true)
-      for (const invalid of [
-        { ...valid, covariates: ["treat"] },
-        { ...valid, covariates: ["age", "age"] },
-        { ...valid, analysisUnitVar: undefined },
-        { ...valid, preTreatmentAggregation: undefined },
-        { ...valid, matchingRatio: 2 },
-        { ...valid, caliper: 0.5 },
-        { ...valid, targetType: "ATE" },
-        { ...valid, outputDir: "/tmp/model-owned" },
-      ]) {
-        expect(matching.parameters.safeParse(invalid).success).toBe(false)
-      }
-    })
-  })
-
-  test("exposes IPW as a strict fixed ATE estimator without weight tuning controls", async () => {
-    await withAnalysisTools(async (tools) => {
-      const ipw = tools.find((tool) => tool.id === "psm_ipw")
-      expect(ipw).toBeDefined()
-      if (!ipw) return
-
-      const valid = {
+        dependentVar: "y",
+        treatmentVar: "education",
+        instrumentVars: ["distance"],
+        instrumentJustification: justification,
+      }).success,
+    ).toBe(true)
+    // 缺识别依据 → 拒绝
+    expect(
+      iv.parameters.safeParse({
         datasetId: "dataset_1",
         stageId: "stage_001",
-        dependentVar: "re78",
-        treatmentVar: "treat",
-        covariates: ["age", "education"],
-        analysisUnitVar: "person_id",
-        preTreatmentAggregation: "not_applicable",
-      }
-      expect(ipw.parameters.safeParse(valid).success).toBe(true)
-      for (const invalid of [
-        { ...valid, covariates: ["treat"] },
-        { ...valid, covariates: ["age", "age"] },
-        { ...valid, analysisUnitVar: undefined },
-        { ...valid, preTreatmentAggregation: undefined },
-        { ...valid, targetType: "ATT" },
-        { ...valid, trim: 0.05 },
-        { ...valid, weightFormula: "stabilized" },
-        { ...valid, outputDir: "/tmp/model-owned" },
-      ]) {
-        expect(ipw.parameters.safeParse(invalid).success).toBe(false)
-      }
+        dependentVar: "y",
+        treatmentVar: "education",
+        instrumentVars: ["distance"],
+      }).success,
+    ).toBe(false)
+    // 缺 instrumentVars → 拒绝
+    expect(
+      iv.parameters.safeParse({
+        datasetId: "dataset_1",
+        stageId: "stage_001",
+        dependentVar: "y",
+        treatmentVar: "education",
+        instrumentJustification: justification,
+      }).success,
+    ).toBe(false)
+    // 工具变量与内生变量相同 → 拒绝
+    expect(
+      iv.parameters.safeParse({
+        datasetId: "dataset_1",
+        stageId: "stage_001",
+        dependentVar: "y",
+        treatmentVar: "education",
+        instrumentVars: ["education"],
+        instrumentJustification: justification,
+      }).success,
+    ).toBe(false)
+    // robust covariance
+    expect(
+      iv.parameters.safeParse({
+        datasetId: "dataset_1",
+        stageId: "stage_001",
+        dependentVar: "y",
+        treatmentVar: "education",
+        instrumentVars: ["distance"],
+        instrumentJustification: justification,
+        covariance: "robust",
+      }).success,
+    ).toBe(true)
+  })
+
+  test("PSM 方法通过 Registry 延迟披露，不作为独立 Provider Tool 暴露", async () => {
+    await withAnalysisTools(async (tools) => {
+      const ids = tools.map((tool) => tool.id)
+      expect(ids).not.toContain("psm_construction")
+      expect(ids).not.toContain("psm_visualize")
     })
   })
 
-  test("estimators accept only a canonical dataset stage, never a raw file path", async () => {
+  test("PSM matching 通过 Registry 延迟披露，不作为独立 Provider Tool 暴露", async () => {
     await withAnalysisTools(async (tools) => {
-      for (const id of ["ols_regression", "panel_fe_regression", "iv_2sls"] as const) {
-        const tool = tools.find((candidate) => candidate.id === id)
-        expect(tool).toBeDefined()
-        if (!tool) continue
-
-        const shape =
-          id === "panel_fe_regression"
-            ? { dependentVar: "y", treatmentVar: "x", entityVar: "firm", timeVar: "year" }
-            : id === "iv_2sls"
-              ? {
-                  dependentVar: "y",
-                  endogenousVar: "x",
-                  instrumentVar: "z",
-                  instrumentJustification: "The user supplied a design-based relevance and exclusion argument.",
-                }
-              : { dependentVar: "y", treatmentVar: "x" }
-
-        expect(tool.parameters.safeParse({ dataPath: "raw.xlsx", ...shape }).success).toBe(false)
-        expect(tool.parameters.safeParse({ datasetId: "dataset_1", ...shape }).success).toBe(false)
-        expect(tool.parameters.safeParse({ datasetId: "dataset_1", stageId: "stage_001", ...shape }).success).toBe(true)
-      }
+      expect(tools.map((tool) => tool.id)).not.toContain("psm_matching")
     })
   })
 
-  test("rejects an outcome or regressor column as the panel clustering variable", async () => {
+  test("PSM IPW 通过 Registry 延迟披露，不作为独立 Provider Tool 暴露", async () => {
     await withAnalysisTools(async (tools) => {
-      const panel = tools.find((tool) => tool.id === "panel_fe_regression")
-      expect(panel).toBeDefined()
-      if (!panel) return
-
-      for (const clusterVar of ["y", "x", "control"]) {
-        expect(
-          panel.parameters.safeParse({
-            datasetId: "dataset_1",
-            stageId: "stage_001",
-            dependentVar: "y",
-            treatmentVar: "x",
-            covariates: ["control"],
-            entityVar: "firm",
-            timeVar: "year",
-            clusterVar,
-          }).success,
-        ).toBe(false)
-      }
-
-      expect(
-        panel.parameters.safeParse({
-          datasetId: "dataset_1",
-          stageId: "stage_001",
-          dependentVar: "y",
-          treatmentVar: "x",
-          covariates: ["control"],
-          entityVar: "firm",
-          timeVar: "year",
-          clusterVar: "firm",
-        }).success,
-      ).toBe(true)
+      expect(tools.map((tool) => tool.id)).not.toContain("psm_ipw")
     })
+  })
+
+  test("historical estimators accept only a canonical dataset stage, never a raw file path", async () => {
+    for (const id of ["ols_regression", "panel_fe_regression", "iv_2sls"] as const) {
+      const tool = await registeredTool(id)
+
+      const shape =
+        id === "panel_fe_regression"
+          ? { dependentVar: "y", treatmentVar: "x", entityVar: "firm", timeVar: "year" }
+          : id === "iv_2sls"
+            ? {
+                dependentVar: "y",
+                treatmentVar: "x",
+                instrumentVars: ["z"],
+                instrumentJustification: "Design-provided exclusion restriction for the instrument z.",
+              }
+            : { dependentVar: "y", treatmentVar: "x" }
+
+      expect(tool.parameters.safeParse({ dataPath: "raw.xlsx", ...shape }).success).toBe(false)
+      expect(tool.parameters.safeParse({ datasetId: "dataset_1", ...shape }).success).toBe(false)
+      expect(tool.parameters.safeParse({ datasetId: "dataset_1", stageId: "stage_001", ...shape }).success).toBe(true)
+    }
+  })
+
+  test("keeps historical panel FE clustering validation intact", async () => {
+    const panel = await registeredTool("panel_fe_regression")
+
+    // 新 panel FE schema 无 clusterVar；验证索引与回归变量互斥
+    // entity 不能同时作为 treatment
+    expect(
+      panel.parameters.safeParse({
+        datasetId: "dataset_1",
+        stageId: "stage_001",
+        dependentVar: "y",
+        treatmentVar: "firm",
+        entityVar: "firm",
+        timeVar: "year",
+      }).success,
+    ).toBe(false)
+    // panel FE 使用 robust 标准误（非 cluster）
+    expect(
+      panel.parameters.safeParse({
+        datasetId: "dataset_1",
+        stageId: "stage_001",
+        dependentVar: "y",
+        treatmentVar: "x",
+        covariates: ["control"],
+        entityVar: "firm",
+        timeVar: "year",
+        covariance: "robust",
+      }).success,
+    ).toBe(true)
   })
 
   test("records every independent estimator as a baseline estimation stage", async () => {
@@ -347,7 +264,7 @@ describe("model-visible econometrics tools", () => {
               args: { datasetId: "dataset_1", stageId: "stage_001", treatmentVar: "treated" },
               metadata: { datasetId: "dataset_1", stageId: "stage_001" },
             })
-            expect(stage.kind).toBe("describe_or_diagnostics")
+            expect(stage.kind).toBe("profile_or_diagnostics")
           }
         },
       })

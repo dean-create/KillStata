@@ -19,6 +19,8 @@ export type PromptInfo = {
             start: number
             end: number
             value: string
+            // "datafile" 走文件引用样式（橙字加粗、无底色）；缺省是普通粘贴，走带底色的 paste 样式。
+            kind?: "datafile"
           }
         }
       })

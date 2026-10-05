@@ -7,11 +7,7 @@ import { CUSTOM_API_KEY_ENV, CUSTOM_PROVIDER_ID } from "@/provider/model-policy"
 type SupportedAuth = Partial<Record<typeof DEEPSEEK_PROVIDER_ID | typeof CUSTOM_PROVIDER_ID, AuthType.Info | undefined>>
 const SUPPORTED_PROVIDER_IDS = [DEEPSEEK_PROVIDER_ID, CUSTOM_PROVIDER_ID] as const
 
-export function hasFirstRunCredential(input: {
-  deepSeekApiKey?: string
-  customApiKey?: string
-  auth: SupportedAuth
-}) {
+export function hasFirstRunCredential(input: { deepSeekApiKey?: string; customApiKey?: string; auth: SupportedAuth }) {
   if (input.deepSeekApiKey?.trim() || input.customApiKey?.trim()) return true
 
   return SUPPORTED_PROVIDER_IDS.some((providerID) => {

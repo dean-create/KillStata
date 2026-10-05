@@ -1,0 +1,14 @@
+{
+  "description": "时间索引被塞进控制变量",
+  "modelArgs": {
+    "datasetId": "wage_panel",
+    "stageId": "stage_000",
+    "dependentVar": "lwage",
+    "treatmentVar": "educ",
+    "covariates": ["year"],
+    "entityVar": "nr",
+    "timeVar": "year"
+  },
+  "expect": "reject",
+  "rejectHint": ["year", "索引"]
+}

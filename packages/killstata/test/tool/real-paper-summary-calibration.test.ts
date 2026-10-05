@@ -29,10 +29,7 @@ describe("real-paper grounded Chinese summary calibration", () => {
 
   test("rejects invented thresholds, missing facts, and overclaimed mechanism language", () => {
     const summaryCase = loadSummaryCases()[1]!
-    const result = scoreGroundedSummary(
-      summaryCase,
-      "系数为-0.0045，p值为0.0912，在10%水平显著，因此证明了中介机制。",
-    )
+    const result = scoreGroundedSummary(summaryCase, "系数为-0.0045，p值为0.0912，在10%水平显著，因此证明了中介机制。")
     expect(result.passed).toBe(false)
     expect(result.inventedNumbers).toContain("10")
     expect(result.missingFacts).toEqual(expect.arrayContaining(["0.0027", "4709"]))

@@ -6,7 +6,7 @@ import { Instance } from "../../project/instance"
 import { Project } from "../../project/project"
 import { MCP } from "../../mcp"
 import { errors } from "../error"
-import { lazy } from "../../util/lazy"
+import { lazy } from "@killstata/util/lazy"
 
 export const ExperimentalRoutes = lazy(() =>
   new Hono()

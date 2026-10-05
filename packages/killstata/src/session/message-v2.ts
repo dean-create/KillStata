@@ -4,14 +4,17 @@ import { NamedError } from "@killstata/util/error"
 import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessage, type UIMessage } from "ai"
 import type { JSONValue, SharedV2ProviderMetadata } from "@ai-sdk/provider"
 import { Identifier } from "../id/id"
-import { fn } from "@/util/fn"
+import { fn } from "@killstata/util/fn"
 import { Storage } from "@/storage/storage"
 import { ProviderTransform } from "@/provider/transform"
+import { Truncate } from "@/tool/truncation"
 import { STATUS_CODES } from "http"
-import { iife } from "@/util/iife"
+import { iife } from "@killstata/util/iife"
 import { type SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { summarizeToolError } from "@/runtime/tool-result-policy"
+import { ToolResultProjection } from "@/runtime/tool-result-projection"
+import { isDataFile } from "@/tool/data-file"
 
 export namespace MessageV2 {
   const SAFE_ERROR_RESPONSE_HEADERS = new Set([
@@ -66,7 +69,9 @@ export namespace MessageV2 {
     return false
   }
 
-  function sanitizeProviderMetadata(metadata: Record<string, unknown> | undefined): SharedV2ProviderMetadata | undefined {
+  function sanitizeProviderMetadata(
+    metadata: Record<string, unknown> | undefined,
+  ): SharedV2ProviderMetadata | undefined {
     if (!metadata) return undefined
 
     const filtered = Object.fromEntries(
@@ -229,10 +234,26 @@ export namespace MessageV2 {
   export const CompactionPart = PartBase.extend({
     type: z.literal("compaction"),
     auto: z.boolean(),
+    reason: z.enum(["manual", "threshold", "overflow"]).optional(),
+    customInstructions: z.string().max(4_000).optional(),
+    preCompactTokens: z.number().int().nonnegative().optional(),
+    lastMessageID: z.string().optional(),
   }).meta({
     ref: "CompactionPart",
   })
   export type CompactionPart = z.infer<typeof CompactionPart>
+
+  export const CompactionRestorePart = PartBase.extend({
+    type: z.literal("compaction-restore"),
+    summarySource: z.enum(["model", "fallback"]),
+    text: z.string(),
+    recoveryReferences: z.array(z.string()).default([]),
+    userMessageLedgerReference: z.string().optional(),
+    userMessageCount: z.number().int().nonnegative().optional(),
+  }).meta({
+    ref: "CompactionRestorePart",
+  })
+  export type CompactionRestorePart = z.infer<typeof CompactionRestorePart>
 
   export const SubtaskPart = PartBase.extend({
     type: z.literal("subtask"),
@@ -293,29 +314,32 @@ export namespace MessageV2 {
    * 自动将字符串输入转换为对象格式，兼容不同模型返回的格式
    * 某些模型可能返回 JSON 字符串而非对象
    */
-  const ToolInputSchema = z.preprocess((input) => {
-    // 如果已经是对象类型，直接返回
-    if (typeof input === "object" && input !== null && !Array.isArray(input)) {
-      return input
-    }
-    // 如果是字符串，尝试解析为 JSON
-    if (typeof input === "string") {
-      try {
-        const parsed = JSON.parse(input)
-        // 确保解析结果是对象
-        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-          return parsed
-        }
-        // 如果解析结果不是对象，包装成错误对象
-        return { _raw: input, _parseError: "Parsed value is not an object" }
-      } catch {
-        // JSON 解析失败，包装成错误对象
-        return { _raw: input, _parseError: "Invalid JSON" }
+  const ToolInputSchema = z.preprocess(
+    (input) => {
+      // 如果已经是对象类型，直接返回
+      if (typeof input === "object" && input !== null && !Array.isArray(input)) {
+        return input
       }
-    }
-    // 其他类型，包装成对象
-    return { _raw: String(input ?? ""), _parseError: "Unexpected input type" }
-  }, z.record(z.string(), z.any()))
+      // 如果是字符串，尝试解析为 JSON
+      if (typeof input === "string") {
+        try {
+          const parsed = JSON.parse(input)
+          // 确保解析结果是对象
+          if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+            return parsed
+          }
+          // 如果解析结果不是对象，包装成错误对象
+          return { _raw: input, _parseError: "Parsed value is not an object" }
+        } catch {
+          // JSON 解析失败，包装成错误对象
+          return { _raw: input, _parseError: "Invalid JSON" }
+        }
+      }
+      // 其他类型，包装成对象
+      return { _raw: String(input ?? ""), _parseError: "Unexpected input type" }
+    },
+    z.record(z.string(), z.any()),
+  )
 
   export const ToolStatePending = z
     .object({
@@ -349,6 +373,8 @@ export namespace MessageV2 {
       status: z.literal("completed"),
       input: ToolInputSchema,
       output: z.string(),
+      modelOutput: z.string().optional(),
+      outputReference: z.string().optional(),
       title: z.string(),
       metadata: z.record(z.string(), z.any()),
       time: z.object({
@@ -357,6 +383,7 @@ export namespace MessageV2 {
         compacted: z.number().optional(),
       }),
       attachments: FilePart.array().optional(),
+      modelAttachments: FilePart.array().optional(),
     })
     .meta({
       ref: "ToolStateCompleted",
@@ -429,6 +456,7 @@ export namespace MessageV2 {
     .discriminatedUnion("type", [
       TextPart,
       SubtaskPart,
+      CompactionRestorePart,
       ReasoningPart,
       FilePart,
       ToolPart,
@@ -494,6 +522,11 @@ export namespace MessageV2 {
   })
   export type Info = z.infer<typeof Info>
 
+  /** Internal compaction summaries belong to model context, not the researcher-visible transcript. */
+  export function isInternalSummary(info: Info | { role?: unknown; summary?: unknown; mode?: unknown }) {
+    return info.role === "assistant" && (info.summary === true || info.mode === "compaction")
+  }
+
   export const Event = {
     Updated: BusEvent.define(
       "message.updated",
@@ -531,11 +564,30 @@ export namespace MessageV2 {
   })
   export type WithParts = z.infer<typeof WithParts>
 
-  export function toModelMessages(input: WithParts[], model: Provider.Model): ModelMessage[] {
-    const result: UIMessage[] = []
-    const toolNames = new Set<string>()
+  function toolRecoveryMarker(part: ToolPart) {
+    if (part.state.status !== "completed") return undefined
+    const reference = Truncate.outputReference(part.state.outputReference, part.state.metadata?.outputPath)
+    if (!reference) return undefined
+    if (!Truncate.referenceExists(reference)) {
+      return `[工具 ${part.tool} 的完整输出引用 ${reference} 已失效；请重新运行该工具，不要继续承诺可分页恢复。]`
+    }
+    return `[Tool output for ${part.tool} is stored in ${reference}. Use Read with offset/limit to recover a needed section.]`
+  }
 
-    const toModelOutput = (output: unknown) => {
+  function isDataAttachment(part: FilePart) {
+    const mime = part.mime.toLowerCase()
+    return (
+      isDataFile(part.filename ?? "") ||
+      mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      mime === "application/vnd.ms-excel"
+    )
+  }
+
+  export function toolOutputForModel(
+    output: unknown,
+    model?: Provider.Model,
+    mediaBudget = ToolResultProjection.createMediaBudget(),
+  ) {
       if (typeof output === "string") {
         return { type: "text", value: output }
       }
@@ -545,15 +597,17 @@ export namespace MessageV2 {
           text: string
           attachments?: Array<{ mime: string; url: string }>
         }
-        const attachments = (outputObject.attachments ?? []).filter((attachment) => {
-          return attachment.url.startsWith("data:") && attachment.url.includes(",")
-        })
-
+        const capabilities = model?.capabilities?.input
+        const projected = ToolResultProjection.projectMediaAttachments(
+          outputObject.attachments,
+          { image: capabilities?.image === true, pdf: capabilities?.pdf === true },
+          mediaBudget,
+        )
         return {
           type: "content",
           value: [
             { type: "text", text: outputObject.text },
-            ...attachments.map((attachment) => ({
+            ...projected.attachments.map((attachment) => ({
               type: "media",
               mediaType: attachment.mime,
               data: iife(() => {
@@ -566,7 +620,13 @@ export namespace MessageV2 {
       }
 
       return { type: "json", value: output as never }
-    }
+  }
+
+  export function toModelMessages(input: WithParts[], model: Provider.Model): ModelMessage[] {
+    const result: UIMessage[] = []
+    const toolNames = new Set<string>()
+    const mediaBudget = ToolResultProjection.createMediaBudget()
+    const toModelOutput = (output: unknown) => toolOutputForModel(output, model, mediaBudget)
 
     for (const msg of input) {
       if (msg.parts.length === 0) continue
@@ -585,7 +645,12 @@ export namespace MessageV2 {
               text: part.text,
             })
           // text/plain and directory files are converted into text parts, ignore them
-          if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory")
+          if (
+            part.type === "file" &&
+            part.mime !== "text/plain" &&
+            part.mime !== "application/x-directory" &&
+            !isDataAttachment(part)
+          )
             userMessage.parts.push({
               type: "file",
               url: part.url,
@@ -596,13 +661,24 @@ export namespace MessageV2 {
           if (part.type === "compaction") {
             userMessage.parts.push({
               type: "text",
-              text: "What did we do so far?",
+              text: [
+                `[上下文压缩边界：${part.auto ? "自动" : "手动"}`,
+                part.reason ? `；原因=${part.reason}` : "",
+                part.preCompactTokens !== undefined ? `；压缩前估算Token=${part.preCompactTokens}` : "",
+                "；完整历史仍保留在磁盘。]",
+              ].join(""),
+            })
+          }
+          if (part.type === "compaction-restore") {
+            userMessage.parts.push({
+              type: "text",
+              text: part.text,
             })
           }
           if (part.type === "subtask") {
             userMessage.parts.push({
               type: "text",
-              text: "The following tool was executed by the user",
+              text: "用户已执行以下工具操作：",
             })
           }
         }
@@ -632,6 +708,11 @@ export namespace MessageV2 {
               text: part.text,
               ...(differentModel ? {} : { providerMetadata: sanitizeProviderMetadata(part.metadata) }),
             })
+          if (part.type === "compaction-restore")
+            assistantMessage.parts.push({
+              type: "text",
+              text: part.text,
+            })
           if (part.type === "step-start")
             assistantMessage.parts.push({
               type: "step-start",
@@ -639,14 +720,33 @@ export namespace MessageV2 {
           if (part.type === "tool") {
             toolNames.add(part.tool)
             if (part.state.status === "completed") {
-              const outputText = part.state.time.compacted ? "[Old tool result content cleared]" : part.state.output
-              const attachments = part.state.time.compacted ? [] : (part.state.attachments ?? [])
+              let outputText = part.state.time.compacted
+                ? toolRecoveryMarker(part) ?? "[Old tool result content cleared]"
+                : (part.state.modelOutput ? ToolResultProjection.boundModelOutput(part.state.modelOutput) : ToolResultProjection.legacy({
+                    toolName: part.tool,
+                    title: part.state.title,
+                    output: part.state.output,
+                    outputReference: Truncate.outputReference(part.state.outputReference, part.state.metadata?.outputPath),
+                  }))
+              const liveReference = Truncate.outputReference(part.state.outputReference, part.state.metadata?.outputPath)
+              if (!part.state.time.compacted && liveReference && !Truncate.referenceExists(liveReference)) {
+                outputText += `\n\n[完整输出引用 ${liveReference} 已失效；如需细节请重新运行原工具。]`
+              }
+              if (!part.state.time.compacted && part.state.attachments?.length && part.state.modelAttachments === undefined) {
+                outputText = ToolResultProjection.boundModelOutput(
+                  `${outputText}\n\n[旧 Session 的媒体附件缺少模型投影记录，已为安全起见省略；可重新运行原工具。]`,
+                )
+              }
+              // 持久化字段、失效引用和兼容提示都属于不可信磁盘输入；所有追加完成后
+              // 再执行最后一道单项收口，避免保护提示自身突破上下文预算。
+              outputText = ToolResultProjection.boundModelOutput(outputText)
+              const attachments = part.state.time.compacted ? [] : (part.state.modelAttachments ?? [])
               const output =
                 attachments.length > 0
                   ? {
-                    text: outputText,
-                    attachments,
-                  }
+                      text: outputText,
+                      attachments,
+                    }
                   : outputText
 
               assistantMessage.parts.push({
@@ -711,6 +811,32 @@ export namespace MessageV2 {
         sessionID,
         messageID: list[i][2],
       })
+    }
+  })
+
+  /**
+   * compact_boundary 锚点：从会话尾部往回读，遇到最近一次压缩边界即停，不再往前读盘。
+   *
+   * 与 stream() 的区别是**磁盘 I/O 量**：stream 会把整个会话的 message+part 全部读出来
+   * （长会话上千条），即使调用方（filterCompacted）只需要最近边界之后的那一段。
+   * 这里把"读到哪停"下沉到读盘循环里，边界之前的消息一次都不 get()。
+   * 磁盘上仍是 append-only 全量，只是不再每轮重建全文。
+   */
+  export const streamSinceCompactBoundary = fn(Identifier.schema("session"), async function* (sessionID) {
+    const list = await Array.fromAsync(await Storage.list(["message", sessionID]))
+    const completed = new Set<string>()
+    for (let i = list.length - 1; i >= 0; i--) {
+      const msg = await get({ sessionID, messageID: list[i][2] })
+      yield msg
+      // 与 filterCompacted 同一套边界判定：成功压缩的 summary 消息标记其 parentID，
+      // 读到那条被标记的 user 消息且它带 compaction part 时，边界之前的内容已被摘要覆盖。
+      if (
+        msg.info.role === "user" &&
+        completed.has(msg.info.id) &&
+        msg.parts.some((part) => part.type === "compaction")
+      )
+        return
+      if (msg.info.role === "assistant" && msg.info.summary && msg.info.finish) completed.add(msg.info.parentID)
     }
   })
 
@@ -787,35 +913,37 @@ export namespace MessageV2 {
           { cause: e },
         ).toObject()
       case APICallError.isInstance(e):
-        const message = summarizeToolError(iife(() => {
-          let msg = e.message
-          if (msg === "") {
-            if (e.responseBody) return e.responseBody
-            if (e.statusCode) {
-              const err = STATUS_CODES[e.statusCode]
-              if (err) return err
+        const message = summarizeToolError(
+          iife(() => {
+            let msg = e.message
+            if (msg === "") {
+              if (e.responseBody) return e.responseBody
+              if (e.statusCode) {
+                const err = STATUS_CODES[e.statusCode]
+                if (err) return err
+              }
+              return "Unknown error"
             }
-            return "Unknown error"
-          }
-          const transformed = ProviderTransform.error(ctx.providerID, e)
-          if (transformed !== msg) {
-            return transformed
-          }
-          if (!e.responseBody || (e.statusCode && msg !== STATUS_CODES[e.statusCode])) {
-            return msg
-          }
-
-          try {
-            const body = JSON.parse(e.responseBody)
-            // try to extract common error message fields
-            const errMsg = body.message || body.error || body.error?.message
-            if (errMsg && typeof errMsg === "string") {
-              return `${msg}: ${errMsg}`
+            const transformed = ProviderTransform.error(ctx.providerID, e)
+            if (transformed !== msg) {
+              return transformed
             }
-          } catch { }
+            if (!e.responseBody || (e.statusCode && msg !== STATUS_CODES[e.statusCode])) {
+              return msg
+            }
 
-          return `${msg}: ${e.responseBody}`
-        }).trim())
+            try {
+              const body = JSON.parse(e.responseBody)
+              // try to extract common error message fields
+              const errMsg = body.message || body.error || body.error?.message
+              if (errMsg && typeof errMsg === "string") {
+                return `${msg}: ${errMsg}`
+              }
+            } catch {}
+
+            return `${msg}: ${e.responseBody}`
+          }).trim(),
+        )
 
         const metadata = e.url ? { url: summarizeToolError(e.url, 2 * 1024) } : undefined
         return new MessageV2.APIError(

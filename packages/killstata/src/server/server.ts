@@ -11,7 +11,6 @@ import { Provider } from "../provider/provider"
 import { NamedError } from "@killstata/util/error"
 import { TuiRoutes } from "./routes/tui"
 import { Instance } from "../project/instance"
-import { Vcs } from "../project/vcs"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill/skill"
 import { Auth } from "../auth"
@@ -23,10 +22,11 @@ import { ProjectRoutes } from "./routes/project"
 import { SessionRoutes } from "./routes/session"
 import { McpRoutes } from "./routes/mcp"
 import { FileRoutes } from "./routes/file"
+import { DataRoutes } from "./routes/data"
 import { ConfigRoutes } from "./routes/config"
 import { ExperimentalRoutes } from "./routes/experimental"
 import { ProviderRoutes } from "./routes/provider"
-import { lazy } from "../util/lazy"
+import { lazy } from "@killstata/util/lazy"
 import { InstanceBootstrap } from "../project/bootstrap"
 import { Storage } from "../storage/storage"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
@@ -155,6 +155,7 @@ export namespace Server {
         .route("/question", QuestionRoutes())
         .route("/provider", ProviderRoutes())
         .route("/", FileRoutes())
+        .route("/data", DataRoutes())
         .route("/mcp", McpRoutes())
         .route("/tui", TuiRoutes())
         .post(
@@ -216,31 +217,6 @@ export namespace Server {
               config: Global.Path.config,
               worktree: Instance.worktree,
               directory: Instance.directory,
-            })
-          },
-        )
-        .get(
-          "/vcs",
-          describeRoute({
-            summary: "Get VCS info",
-            description:
-              "Retrieve version control system (VCS) information for the current project, such as git branch.",
-            operationId: "vcs.get",
-            responses: {
-              200: {
-                description: "VCS info",
-                content: {
-                  "application/json": {
-                    schema: resolver(Vcs.Info),
-                  },
-                },
-              },
-            },
-          }),
-          async (c) => {
-            const branch = await Vcs.branch()
-            return c.json({
-              branch,
             })
           },
         )

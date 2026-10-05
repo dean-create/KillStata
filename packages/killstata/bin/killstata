@@ -5,6 +5,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { fileURLToPath } from "url"
+import { installedBinaryPackageNames, linuxLibcFromNodeReport } from "./binary-candidates.js"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -32,7 +33,7 @@ function launch(runtime, entryFile) {
   const desktopClient = process.env.KILLSTATA_CLIENT === "desktop"
   const child = spawn(runtime, args, {
     stdio: desktopClient ? ["ignore", "pipe", "pipe"] : "inherit",
-    cwd: PACKAGE_ROOT,
+    cwd: process.cwd(),
     shell: false,
     windowsHide: true,
     env: {
@@ -57,20 +58,16 @@ function launch(runtime, entryFile) {
 }
 
 function installedBinaryCandidates() {
-  const platform = os.platform() === "win32" ? "windows" : os.platform()
-  const arch = os.arch() === "x64" || os.arch() === "arm64" ? os.arch() : "x64"
-  const names = [`${PACKAGE_NAME}-${platform}-${arch}`]
-  const nodeModulesRoots = [path.join(PACKAGE_ROOT, "node_modules"), path.resolve(PACKAGE_ROOT, "..")]
-
-  if (platform === "linux") {
-    names.push(
-      `${PACKAGE_NAME}-${platform}-${arch}-musl`,
-      `${PACKAGE_NAME}-${platform}-${arch}-baseline`,
-      `${PACKAGE_NAME}-${platform}-${arch}-baseline-musl`,
-    )
-  } else if (arch === "x64") {
-    names.push(`${PACKAGE_NAME}-${platform}-${arch}-baseline`)
+  let libc
+  if (os.platform() === "linux") {
+    try {
+      libc = linuxLibcFromNodeReport(process.report?.getReport?.())
+    } catch {
+      libc = undefined
+    }
   }
+  const names = installedBinaryPackageNames(os.platform(), os.arch(), { libc })
+  const nodeModulesRoots = [path.join(PACKAGE_ROOT, "node_modules"), path.resolve(PACKAGE_ROOT, "..")]
 
   return nodeModulesRoots.flatMap((root) =>
     names.flatMap((name) => {

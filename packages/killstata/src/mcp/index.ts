@@ -22,7 +22,6 @@ import { McpAuth } from "./auth"
 import { BusEvent } from "../bus/bus-event"
 import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
-import open from "open"
 
 export namespace MCP {
   const log = Log.create({ service: "mcp" })
@@ -495,11 +494,12 @@ export namespace MCP {
     const toolsResult = await withTimeout(mcpClient.listTools(), mcp.timeout ?? DEFAULT_TIMEOUT)
       .then((result) => ({ result }))
       .catch((error) => {
-        const detail = mcp.type === "local"
-          ? formatLocalMcpError(error, getLocalStderrOutput?.())
-          : error instanceof Error
-            ? error.message
-            : String(error)
+        const detail =
+          mcp.type === "local"
+            ? formatLocalMcpError(error, getLocalStderrOutput?.())
+            : error instanceof Error
+              ? error.message
+              : String(error)
         log.error("failed to get tools from client", { key, error: detail })
         return { error: detail }
       })
@@ -811,39 +811,36 @@ export namespace MCP {
 
   /**
    * Complete OAuth authentication after user authorizes in browser.
-   * Opens the browser and waits for callback.
+   *
+   * This is intentionally an explicit opt-in API. MCP discovery and normal
+   * model requests only report `needs_auth`; they never open a browser.
    */
-  export async function authenticate(mcpName: string): Promise<Status> {
+  export async function authenticate(mcpName: string, options: { openBrowser?: boolean } = {}): Promise<Status> {
     const { authorizationUrl } = await startAuth(mcpName)
 
     if (!authorizationUrl) {
-      // Already authenticated
       const s = await state()
       return s.status[mcpName] ?? { status: "connected" }
     }
 
-    // Get the state that was already generated and stored in startAuth()
-    const oauthState = await McpAuth.getOAuthState(mcpName)
-    if (!oauthState) {
-      throw new Error("OAuth state not found - this should not happen")
+    if (options.openBrowser !== true) {
+      throw new Error(
+        `MCP authentication requires user action. Open this URL manually, then call the callback endpoint: ${authorizationUrl}`,
+      )
     }
 
-    // The SDK has already added the state parameter to the authorization URL
-    // We just need to open the browser
-    log.info("opening browser for oauth", { mcpName, url: authorizationUrl, state: oauthState })
+    const oauthState = await McpAuth.getOAuthState(mcpName)
+    if (!oauthState) throw new Error("OAuth state not found - this should not happen")
 
-    // Register the callback BEFORE opening the browser to avoid race condition
-    // when the IdP has an active SSO session and redirects immediately
+    // Dynamic import keeps browser launching out of ordinary MCP startup and
+    // makes the side effect visible only to an explicit caller.
+    const { default: open } = await import("open")
+    log.info("opening browser for explicit oauth request", { mcpName, url: authorizationUrl, state: oauthState })
     const callbackPromise = McpOAuthCallback.waitForCallback(oauthState)
 
     try {
       const subprocess = await open(authorizationUrl)
-      // The open package spawns a detached process and returns immediately.
-      // We need to listen for errors which fire asynchronously:
-      // - "error" event: command not found (ENOENT)
-      // - "exit" with non-zero code: command exists but failed (e.g., no display)
       await new Promise<void>((resolve, reject) => {
-        // Give the process a moment to fail if it's going to
         const timeout = setTimeout(() => resolve(), 500)
         subprocess.on("error", (error) => {
           clearTimeout(timeout)
@@ -857,16 +854,11 @@ export namespace MCP {
         })
       })
     } catch (error) {
-      // Browser opening failed (e.g., in remote/headless sessions like SSH, devcontainers)
-      // Emit event so CLI can display the URL for manual opening
       log.warn("failed to open browser, user must open URL manually", { mcpName, error })
       Bus.publish(BrowserOpenFailed, { mcpName, url: authorizationUrl })
     }
 
-    // Wait for callback using the already-registered promise
     const code = await callbackPromise
-
-    // Validate and clear the state
     const storedState = await McpAuth.getOAuthState(mcpName)
     if (storedState !== oauthState) {
       await McpAuth.clearOAuthState(mcpName)
@@ -874,8 +866,6 @@ export namespace MCP {
     }
 
     await McpAuth.clearOAuthState(mcpName)
-
-    // Finish auth
     return finishAuth(mcpName, code)
   }
 

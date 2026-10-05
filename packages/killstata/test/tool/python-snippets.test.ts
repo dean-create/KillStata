@@ -7,11 +7,13 @@ import { resolveRuntimePythonCommand } from "../../src/killstata/runtime-config"
 import { PY_READ_CSV_FALLBACK } from "../../src/tool/python-snippets"
 
 async function supportsPandas() {
+  const configuredPython = process.env.KILLSTATA_PYTHON?.trim()
   try {
-    const pythonCommand = await resolveRuntimePythonCommand()
+    const pythonCommand = configuredPython ?? await resolveRuntimePythonCommand()
     execFileSync(pythonCommand, ["-c", "import pandas"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] })
     return pythonCommand
-  } catch {
+  } catch (error) {
+    if (configuredPython) throw error
     return undefined
   }
 }
@@ -19,7 +21,10 @@ async function supportsPandas() {
 describe("tool.python-snippets", () => {
   test("read_csv_with_fallback reads GBK-encoded CSVs and reports the encoding it used", async () => {
     const pythonCommand = await supportsPandas()
-    if (!pythonCommand) return
+    if (!pythonCommand) {
+      console.warn("[python-snippets] pandas 不可用，跳过真实数据断言")
+      return
+    }
 
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "killstata-csv-fallback-"))
     try {

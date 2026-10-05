@@ -12,10 +12,7 @@ import { userSkillsRoot } from "@/skill/manage"
 //
 // 这些断言锁住这个决策的两面：加载框架必须活着，硬编码的内置别名必须死透。
 
-async function withUserSkill<T>(
-  skill: { name: string; description: string; body: string },
-  fn: () => Promise<T>,
-) {
+async function withUserSkill<T>(skill: { name: string; description: string; body: string }, fn: () => Promise<T>) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "killstata-skill-")))
   const skillDir = path.join(userSkillsRoot(), skill.name)
   fs.mkdirSync(skillDir, { recursive: true })
@@ -91,7 +88,7 @@ describe("skill framework survives, builtin skills are gone", () => {
           const installed = await Skill.all()
           if (installed.length > 0) return // 本机装了 skill，跳过这条断言
           const tool = await SkillTool.init()
-          expect(tool.description).toContain("No skills are currently installed")
+          expect(tool.description).toContain("当前没有可用 Skill")
         },
       })
     } finally {

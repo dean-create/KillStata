@@ -36,11 +36,13 @@ export function createDialogProviderOptions() {
     const listed = pipe(
       sync.data.provider_next.all,
       (providers) =>
-        providers.filter((provider) => provider.id !== "killstata").filter((provider) => {
-          if (!isUserSelectableProvider(provider)) return false
-          const methods = sync.data.provider_auth[provider.id] ?? []
-          return supportsApiKeyProvider(provider, methods)
-        }),
+        providers
+          .filter((provider) => provider.id !== "killstata")
+          .filter((provider) => {
+            if (!isUserSelectableProvider(provider)) return false
+            const methods = sync.data.provider_auth[provider.id] ?? []
+            return supportsApiKeyProvider(provider, methods)
+          }),
       sortBy(
         (x) => providerPriority(x.id),
         (x) => providerDisplayName(x),
@@ -52,25 +54,25 @@ export function createDialogProviderOptions() {
           title: providerDisplayName(provider),
           value: provider.id,
           description: providerDisplayDescription(provider),
-          category: isPopularProvider(provider.id) ? "Popular" : "Other",
-          footer: isConnected ? `Connected${note ? ` | ${note}` : ""}` : note,
+          category: isPopularProvider(provider.id) ? "常用" : "其他",
+          footer: isConnected ? `已连接${note ? ` | ${note}` : ""}` : note,
           async onSelect() {
             const methods = (sync.data.provider_auth[provider.id] ?? []).filter((method) => method.type === "api")
             const apiMethods = methods.length
               ? methods
               : [
-              {
-                type: "api",
-                label: "API key",
-              },
-            ]
+                  {
+                    type: "api",
+                    label: "api key",
+                  },
+                ]
             let index: number | null = 0
             if (apiMethods.length > 1) {
               index = await new Promise<number | null>((resolve) => {
                 dialog.replace(
                   () => (
                     <DialogSelect
-                      title="Select auth method"
+                      title="选择认证方式"
                       options={apiMethods.map((x, index) => ({
                         title: x.label,
                         value: index,
@@ -99,28 +101,28 @@ export function createDialogProviderOptions() {
       }),
     )
     listed.push({
-      title: "Custom OpenAI-compatible provider",
+      title: "自定义 OpenAI 兼容提供商",
       value: "__custom__",
       description: "(API key + base URL)",
-      category: "Other",
+      category: "其他",
       footer: "",
       async onSelect() {
-        const providerName = await DialogPrompt.show(dialog, "Provider name", {
-          placeholder: "My Provider",
+        const providerName = await DialogPrompt.show(dialog, "提供商名称", {
+          placeholder: "我的提供商",
         })
         if (!providerName?.trim()) return
 
         const providerID = await DialogPrompt.show(dialog, "Provider id", {
           value: normalizeProviderID(providerName),
           placeholder: "my-provider",
-          description: () => <text>Use lowercase letters, numbers, and hyphens.</text>,
+          description: () => <text>只能用小写字母、数字和连字符。</text>,
         })
         const normalizedProviderID = normalizeProviderID(providerID ?? "")
         if (!normalizedProviderID) return
 
-        const baseURL = await DialogPrompt.show(dialog, "Provider base URL", {
+        const baseURL = await DialogPrompt.show(dialog, "提供商 base URL", {
           placeholder: "https://api.example.com/v1",
-          description: () => <text>Killstata treats this as an OpenAI-compatible API endpoint.</text>,
+          description: () => <text>killstata 会把它当作 OpenAI 兼容的 API 端点。</text>,
         })
         if (!baseURL?.trim()) return
 
@@ -131,15 +133,15 @@ export function createDialogProviderOptions() {
           return
         }
 
-        const modelID = await DialogPrompt.show(dialog, "Default model id", {
+        const modelID = await DialogPrompt.show(dialog, "默认模型 id", {
           placeholder: "gpt-4.1-mini",
-          description: () => <text>Use the exact model id provided by this vendor.</text>,
+          description: () => <text>填写该厂商提供的准确模型 id。</text>,
         })
         if (!modelID?.trim()) return
 
-        const key = await DialogPrompt.show(dialog, "API key", {
+        const key = await DialogPrompt.show(dialog, "api key", {
           placeholder: "sk-...",
-          description: () => <text>Subscription logins are disabled here. API key only.</text>,
+          description: () => <text>这里不支持订阅登录，只能用 api key。</text>,
         })
         const normalizedKey = normalizeApiKey(key ?? "")
         if (!normalizedKey) return
@@ -175,8 +177,8 @@ export function DialogProvider() {
   const options = createDialogProviderOptions()
   return (
     <DialogSelect
-      title={`Advanced provider settings (${options().length} options)`}
-      placeholder="Choose a provider"
+      title={`高级提供商设置（${options().length} 项）`}
+      placeholder="选择提供商"
       options={options()}
       scrollbarVisible
     />
@@ -200,7 +202,7 @@ function AutoMethod(props: AutoMethodProps) {
     if (evt.name === "c" && !evt.ctrl && !evt.meta) {
       const code = props.authorization.instructions.match(/[A-Z0-9]{4}-[A-Z0-9]{4}/)?.[0] ?? props.authorization.url
       Clipboard.copy(code)
-        .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+        .then(() => toast.show({ message: "已复制到剪贴板", variant: "info" }))
         .catch(toast.error)
     }
   })
@@ -255,7 +257,7 @@ function CodeMethod(props: CodeMethodProps) {
   return (
     <DialogPrompt
       title={props.title}
-      placeholder="Authorization code"
+      placeholder="授权码"
       onConfirm={async (value) => {
         const { error } = await sdk.client.provider.oauth.callback({
           providerID: props.providerID,
@@ -297,10 +299,10 @@ function ApiMethod(props: ApiMethodProps) {
   return (
     <DialogPrompt
       title={props.title}
-      placeholder="API key"
+      placeholder="api key"
       description={() => (
         <box gap={1}>
-          <text>Paste your API key. Subscription logins are not supported in this build.</text>
+          <text>粘贴你的 api key。此版本不支持订阅登录。</text>
           <Show when={props.description}>
             <text>{props.description}</text>
           </Show>

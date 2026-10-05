@@ -5,7 +5,12 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    "./*": "./src/*.ts"
+    "./binary": "./src/binary.ts",
+    "./error": "./src/error.ts",
+    "./fn": "./src/fn.ts",
+    "./iife": "./src/iife.ts",
+    "./lazy": "./src/lazy.ts",
+    "./slug": "./src/slug.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

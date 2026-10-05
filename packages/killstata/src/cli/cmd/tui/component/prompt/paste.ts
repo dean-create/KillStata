@@ -40,7 +40,7 @@ export function attachmentLabel(input: { mime: string; count: number }) {
   return input.mime === "application/pdf" ? `[PDF ${input.count + 1}]` : `[Image ${input.count + 1}]`
 }
 
-// 虚拟文本没有 CSS padding；在标签内留出空格，才能在终端里形成完整的附件底色。
+// 数据文件引用走文件样式（橙字加粗、无底色），不再需要为底色留出的首尾空格。
 export function dataFileLabel(filename: string) {
-  return `  数据文件 ${filename}  `
+  return `数据文件 ${filename}`
 }

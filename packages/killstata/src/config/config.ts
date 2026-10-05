@@ -1,13 +1,13 @@
 import { Log } from "../util/log"
 import path from "path"
-import { pathToFileURL } from "url"
 import os from "os"
 import z from "zod"
+import fsPromises from "fs/promises"
 import { Filesystem } from "../util/filesystem"
 import { ModelsDev } from "../provider/models"
 import { mergeDeep, pipe, unique } from "remeda"
 import { Global } from "../global"
-import { lazy } from "../util/lazy"
+import { lazy } from "@killstata/util/lazy"
 import { NamedError } from "@killstata/util/error"
 import { Flag } from "../flag/flag"
 import { Auth } from "../auth"
@@ -19,8 +19,6 @@ import {
   printParseErrorCode,
 } from "jsonc-parser"
 import { Instance } from "../project/instance"
-import { BunProc } from "@/bun"
-import { Installation } from "@/installation"
 import { ConfigMarkdown } from "./markdown"
 import { existsSync } from "fs"
 import { Bus } from "@/bus"
@@ -32,16 +30,9 @@ export namespace Config {
   const PROJECT_CONFIG_DIRS = [".killstata"] as const
   const PROJECT_CONFIG_FILES = ["killstata.jsonc", "killstata.json"] as const
 
-  // Custom merge function that concatenates array fields instead of replacing them
+  // 配置按层合并；动态规则不来自配置，而是固定的项目 AGENTS.md 文件。
   function mergeConfigConcatArrays(target: Info, source: Info): Info {
-    const merged = mergeDeep(target, source)
-    if (target.plugin && source.plugin) {
-      merged.plugin = Array.from(new Set([...target.plugin, ...source.plugin]))
-    }
-    if (target.instructions && source.instructions) {
-      merged.instructions = Array.from(new Set([...target.instructions, ...source.instructions]))
-    }
-    return merged
+    return mergeDeep(target, source)
   }
 
   export const state = Instance.state(async () => {
@@ -97,7 +88,6 @@ export namespace Config {
 
     result.agent = result.agent || {}
     result.mode = result.mode || {}
-    result.plugin = result.plugin || []
 
     const homeConfigDirs = await Array.fromAsync(
       Filesystem.up({
@@ -136,21 +126,12 @@ export namespace Config {
           // to satisfy the type checker
           result.agent ??= {}
           result.mode ??= {}
-          result.plugin ??= []
         }
-      }
-
-      const exists = existsSync(path.join(dir, "node_modules"))
-      const needsInstall = await needsDependencies(dir)
-      if (!exists && needsInstall) {
-        const installing = installDependencies(dir)
-        await installing
       }
 
       result.command = mergeDeep(result.command ?? {}, await loadCommand(dir))
       result.agent = mergeDeep(result.agent, await loadAgent(dir))
       result.agent = mergeDeep(result.agent, await loadMode(dir))
-      result.plugin.push(...(await loadPlugin(dir)))
     }
 
     // Migrate deprecated mode field to agent field
@@ -198,58 +179,11 @@ export namespace Config {
       result.compaction = { ...result.compaction, prune: false }
     }
 
-    result.plugin = deduplicatePlugins(result.plugin ?? [])
-
     return {
       config: result,
       directories,
     }
   })
-
-  export async function installDependencies(dir: string) {
-    const pkg = path.join(dir, "package.json")
-
-    if (!(await Bun.file(pkg).exists())) {
-      await Bun.write(pkg, "{}")
-    }
-
-    const gitignore = path.join(dir, ".gitignore")
-    const hasGitIgnore = await Bun.file(gitignore).exists()
-    if (!hasGitIgnore) await Bun.write(gitignore, ["node_modules", "package.json", "bun.lock", ".gitignore"].join("\n"))
-
-    await BunProc.run(
-      ["add", "@killstata/plugin@" + (Installation.isLocal() ? "latest" : Installation.VERSION), "--exact"],
-      {
-        cwd: dir,
-      },
-    ).catch(() => {})
-
-    // Install any additional dependencies defined in the package.json
-    // This allows local plugins and custom tools to use external packages
-    await BunProc.run(["install"], { cwd: dir }).catch(() => {})
-  }
-
-  async function needsDependencies(dir: string) {
-    const pkgPath = path.join(dir, "package.json")
-    if (await Bun.file(pkgPath).exists()) {
-      const raw = await Bun.file(pkgPath).text().catch(() => "")
-      if (raw.trim() && raw.trim() !== "{}") return true
-    }
-
-    for (const pattern of ["{tool,tools,plugin,plugins}/*.{js,ts,mjs,cjs}", "{tool,tools,plugin,plugins}/**/*.{js,ts,mjs,cjs}"]) {
-      const matches = await Array.fromAsync(
-        new Bun.Glob(pattern).scan({
-          cwd: dir,
-          absolute: false,
-          onlyFiles: true,
-          dot: true,
-        }),
-      ).catch(() => [])
-      if (matches.length > 0) return true
-    }
-
-    return false
-  }
 
   function rel(item: string, patterns: string[]) {
     for (const pattern of patterns) {
@@ -380,73 +314,6 @@ export namespace Config {
     return result
   }
 
-  const PLUGIN_GLOB = new Bun.Glob("{plugin,plugins}/*.{ts,js}")
-  async function loadPlugin(dir: string) {
-    const plugins: string[] = []
-
-    for await (const item of PLUGIN_GLOB.scan({
-      absolute: true,
-      followSymlinks: true,
-      dot: true,
-      cwd: dir,
-    })) {
-      plugins.push(pathToFileURL(item).href)
-    }
-    return plugins
-  }
-
-  /**
-   * Extracts a canonical plugin name from a plugin specifier.
-   * - For file:// URLs: extracts filename without extension
-   * - For npm packages: extracts package name without version
-   *
-   * @example
-   * getPluginName("file:///path/to/plugin/foo.js") // "foo"
-   * getPluginName("oh-my-killstata@2.4.3") // "oh-my-killstata"
-   * getPluginName("@scope/pkg@1.0.0") // "@scope/pkg"
-   */
-  export function getPluginName(plugin: string): string {
-    if (plugin.startsWith("file://")) {
-      return path.parse(new URL(plugin).pathname).name
-    }
-    const lastAt = plugin.lastIndexOf("@")
-    if (lastAt > 0) {
-      return plugin.substring(0, lastAt)
-    }
-    return plugin
-  }
-
-  /**
-   * Deduplicates plugins by name, with later entries (higher priority) winning.
-   * Priority order (highest to lowest):
-   * 1. Local plugin/ directory
-   * 2. Local killstata.json
-   * 3. Global plugin/ directory
-   * 4. Global killstata.json
-   *
-   * Since plugins are added in low-to-high priority order,
-   * we reverse, deduplicate (keeping first occurrence), then restore order.
-   */
-  export function deduplicatePlugins(plugins: string[]): string[] {
-    // seenNames: canonical plugin names for duplicate detection
-    // e.g., "oh-my-killstata", "@scope/pkg"
-    const seenNames = new Set<string>()
-
-    // uniqueSpecifiers: full plugin specifiers to return
-    // e.g., "oh-my-killstata@2.4.3", "file:///path/to/plugin.js"
-    const uniqueSpecifiers: string[] = []
-
-    for (const specifier of plugins.toReversed()) {
-      const name = getPluginName(specifier)
-      if (!seenNames.has(name)) {
-        seenNames.add(name)
-        uniqueSpecifiers.push(specifier)
-      }
-    }
-
-    return uniqueSpecifiers.toReversed()
-  }
-
   export const McpLocal = z
     .object({
       type: z.literal("local").describe("Type of MCP server connection"),
@@ -563,7 +430,6 @@ export namespace Config {
           todoread: PermissionAction.optional(),
           question: PermissionAction.optional(),
           webfetch: PermissionAction.optional(),
-          websearch: PermissionAction.optional(),
           doom_loop: PermissionAction.optional(),
         })
         .catchall(PermissionRule)
@@ -739,7 +605,7 @@ export namespace Config {
       agent_list: z.string().optional().default("<leader>a").describe("List agents"),
       agent_cycle: z.string().optional().default("tab").describe("Next agent"),
       agent_cycle_reverse: z.string().optional().default("shift+tab").describe("Previous agent"),
-      variant_cycle: z.string().optional().default("ctrl+t").describe("Cycle model variants"),
+      variant_cycle: z.string().optional().default("ctrl+t").describe("Open the model reasoning level selector"),
       input_clear: z.string().optional().default("none").describe("Clear input field"),
       input_paste: z.string().optional().default("ctrl+v").describe("Paste from clipboard"),
       data_file_picker: z
@@ -848,10 +714,6 @@ export namespace Config {
       })
       .optional()
       .describe("Scroll acceleration settings"),
-    diff_style: z
-      .enum(["auto", "stacked"])
-      .optional()
-      .describe("Control diff rendering style: 'auto' adapts to terminal width, 'stacked' always shows single column"),
     showAdvancedCommands: z
       .boolean()
       .optional()
@@ -956,7 +818,10 @@ export namespace Config {
 
   const KillstataWorkspace = z
     .object({
-      enabled: z.boolean().optional().describe("Whether killstata should use the global ~/.killstata/workspace directory"),
+      enabled: z
+        .boolean()
+        .optional()
+        .describe("Whether killstata should use the global ~/.killstata/workspace directory"),
       root: z.string().optional().describe("Absolute path to the global killstata workspace directory"),
     })
     .strict()
@@ -1023,12 +888,6 @@ export namespace Config {
         .array(z.string())
         .optional()
         .describe("Command names to suppress from slash-command registration, including custom commands"),
-      watcher: z
-        .object({
-          ignore: z.array(z.string()).optional(),
-        })
-        .optional(),
-      plugin: z.string().array().optional(),
       snapshot: z.boolean().optional(),
       share: z
         .enum(["manual", "auto", "disabled"])
@@ -1122,7 +981,6 @@ export namespace Config {
           ),
         ])
         .optional(),
-      instructions: z.array(z.string()).optional().describe("Additional instruction files or patterns to include"),
       layout: Layout.optional().describe("@deprecated Always uses stretch layout."),
       permission: Permission.optional(),
       tools: z.record(z.string(), z.boolean()).optional(),
@@ -1133,8 +991,8 @@ export namespace Config {
         .optional(),
       compaction: z
         .object({
-          auto: z.boolean().optional().describe("Enable automatic compaction when context is full (default: true)"),
-          prune: z.boolean().optional().describe("Enable pruning of old tool outputs (default: true)"),
+          auto: z.boolean().optional().describe("Enable automatic full-summary compaction; read-time projections remain enabled (default: true)"),
+          prune: z.boolean().optional().describe("Enable read-time microcompaction of old recoverable tool outputs (default: true)"),
         })
         .optional(),
       experimental: z
@@ -1162,6 +1020,10 @@ export namespace Config {
             })
             .optional(),
           chatMaxRetries: z.number().optional().describe("Number of retries for chat completions on failure"),
+          fallbackModel: z
+            .string()
+            .optional()
+            .describe("Model to switch to (format providerID/modelID) after repeated retryable failures, e.g. deepseek/deepseek-v4-flash"),
           disable_paste_summary: z.boolean().optional(),
           batch_tool: z.boolean().optional().describe("Enable the batch tool"),
           openTelemetry: z
@@ -1172,13 +1034,43 @@ export namespace Config {
             .array(z.string())
             .optional()
             .describe("Tools that should only be available to primary agents."),
-          continue_loop_on_deny: z.boolean().optional().describe("Continue the agent loop when a tool call is denied"),
+          continue_loop_on_deny: z
+            .boolean()
+            .default(true)
+            .describe("Continue the agent loop when a tool call is denied"),
           mcp_timeout: z
             .number()
             .int()
             .positive()
             .optional()
             .describe("Timeout in milliseconds for model context protocol (MCP) requests"),
+          // cwd/test/sandbox/logs/<sessionID>.jsonl per-session tool-call trace logger.
+          // 默认开（enabled: true），写入 cwd 下 test/sandbox/logs（隔离主项目 logs/）。
+          // KILLSTATA_TRACE_LOGGER=0 关闭，=路径 覆写 dir。
+          traceLogger: z
+            .object({
+              enabled: z
+                .boolean()
+                .optional()
+                .describe("Enable per-session tool-call trace JSONL logs (default true)"),
+              dir: z
+                .string()
+                .optional()
+                .describe("Override trace logger directory (default ${cwd}/test/sandbox/logs)"),
+              maxFiles: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe("LRU file cap (default 20)"),
+              maxFileBytes: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe("Per-file soft rotation threshold in bytes (default 50 MiB)"),
+            })
+            .optional(),
         })
         .optional(),
       killstata: Killstata.optional().describe("Killstata runtime configuration for Python and Stata"),
@@ -1309,18 +1201,9 @@ export namespace Config {
         parsed.data.$schema = "https://killstata.io/config.json"
         // Write the $schema to the original text to preserve variables like {env:VAR}
         const updated = original.replace(/^\s*\{/, '{\n  "$schema": "https://killstata.io/config.json",')
-        await Bun.write(configFilepath, updated).catch(() => {})
+        await atomicWrite(configFilepath, updated).catch(() => {})
       }
-      const data = parsed.data
-      if (data.plugin) {
-        for (let i = 0; i < data.plugin.length; i++) {
-          const plugin = data.plugin[i]
-          try {
-            data.plugin[i] = import.meta.resolve!(plugin, configFilepath)
-          } catch (err) {}
-        }
-      }
-      return data
+      return parsed.data
     }
 
     throw new InvalidError({
@@ -1362,17 +1245,30 @@ export namespace Config {
     return global()
   }
 
+  // 原子写配置（对齐 claude-code 的写保护）：
+  // 1. 写同目录临时文件 → fs.rename（POSIX 原子替换），写一半崩溃不会留下半截 JSON；
+  // 2. 写前把现有内容轮换为 .bak（保留最近一份，误覆盖后可找回）。
+  async function atomicWrite(filepath: string, content: string) {
+    const existing = await Bun.file(filepath)
+      .text()
+      .catch(() => undefined)
+    if (existing !== undefined) {
+      await Bun.write(filepath + ".bak", existing).catch(() => {})
+    }
+    const tmp = `${filepath}.tmp-${process.pid}`
+    await Bun.write(tmp, content)
+    await fsPromises.rename(tmp, filepath)
+  }
+
   export async function update(config: Info) {
     const filepath = path.join(Instance.directory, "killstata.json")
     const existing = await loadFile(filepath)
-    await Bun.write(filepath, JSON.stringify(mergeDeep(existing, config), null, 2))
+    await atomicWrite(filepath, JSON.stringify(mergeDeep(existing, config), null, 2))
     await Instance.dispose()
   }
 
   function globalConfigFile() {
-    const candidates = ["killstata.jsonc", "killstata.json"].map((file) =>
-      path.join(Global.Path.config, file),
-    )
+    const candidates = ["killstata.jsonc", "killstata.json"].map((file) => path.join(Global.Path.config, file))
     for (const file of candidates) {
       if (existsSync(file)) return file
     }
@@ -1445,11 +1341,11 @@ export namespace Config {
 
     if (!filepath.endsWith(".jsonc")) {
       const existing = parseConfig(before, filepath)
-      await Bun.write(filepath, JSON.stringify(mergeDeep(existing, config), null, 2))
+      await atomicWrite(filepath, JSON.stringify(mergeDeep(existing, config), null, 2))
     } else {
       const next = patchJsonc(before, config)
       parseConfig(next, filepath)
-      await Bun.write(filepath, next)
+      await atomicWrite(filepath, next)
     }
 
     global.reset()

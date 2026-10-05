@@ -1,0 +1,1 @@
+{"description":"连续结果(y)对核心解释变量加权重列的 WLS","modelArgs":{"datasetId":"panel_98","stageId":"stage_000","dependentVar":"y","treatmentVar":"x","weightsVar":"sample_weight"},"expect":"pass"}

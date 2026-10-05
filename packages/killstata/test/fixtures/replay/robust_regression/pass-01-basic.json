@@ -1,0 +1,1 @@
+{"description":"连续结果(y)对核心解释变量加控制变量，默认 Huber psi","modelArgs":{"datasetId":"panel_98","stageId":"stage_000","dependentVar":"y","treatmentVar":"x1","covariates":["x2"]},"expect":"pass"}

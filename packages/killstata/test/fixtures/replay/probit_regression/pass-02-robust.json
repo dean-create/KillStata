@@ -1,0 +1,12 @@
+{
+  "description": "稳健标准误的 Probit",
+  "modelArgs": {
+    "datasetId": "loans_11",
+    "stageId": "stage_000",
+    "dependentVar": "default",
+    "treatmentVar": "income",
+    "covariates": ["debt_ratio", "age"],
+    "covariance": "robust"
+  },
+  "expect": "pass"
+}

@@ -16,8 +16,34 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
 
-      - name: Typecheck
-        run: bun turbo typecheck
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Test
-        run: bun turbo test
+      - name: Install the locked econometrics-engine dependencies
+        run: python -m pip install -r packages/killstata-econometrics-engine/requirements.lock
+
+      - name: Typecheck all workspaces
+        run: |
+          bun run --cwd packages/killstata typecheck
+          bun run --cwd packages/script typecheck
+          bun run --cwd packages/sdk/js typecheck
+          bun run --cwd packages/util typecheck
+          bun run --cwd desktop typecheck
+
+      - name: Test KillStata Core
+        env:
+          KILLSTATA_PYTHON: python
+          PYTHONPATH: packages/killstata-econometrics-engine/src
+        working-directory: packages/killstata
+        run: bun test --timeout=20000
+
+      - name: Test Desktop and Web adapters
+        run: bun run --cwd desktop test
+
+      - name: Test Python econometrics engine
+        env:
+          KILLSTATA_PYTHON: python
+          PYTHONPATH: packages/killstata-econometrics-engine/src
+        run: python -m unittest discover -s packages/killstata-econometrics-engine/tests -p 'test_*.py'

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "coreVersion": "0.0.0-example",
+  "cliCommit": "0000000000000000000000000000000000000000",
+  "sourceRepository": "https://github.com/dean-create/KillStata",
+  "sourceDirty": false,
+  "protocolVersion": "v1",
+  "targetTriple": "aarch64-apple-darwin",
+  "binarySha256": "0000000000000000000000000000000000000000000000000000000000000000"
+}

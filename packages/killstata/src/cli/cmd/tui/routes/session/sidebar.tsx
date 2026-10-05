@@ -89,16 +89,16 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
               <box flexGrow={1} gap={1}>
                 <box flexDirection="row" justifyContent="space-between">
                   <text fg={theme.text}>
-                    <b>Getting started</b>
+                    <b>开始使用</b>
                   </text>
                   <text fg={theme.textMuted} onMouseDown={() => kv.set("dismissed_getting_started", true)}>
                     ✕
                   </text>
                 </box>
-                <text fg={theme.textMuted}>Restart KillStata to enter your DeepSeek API key.</text>
-                <text fg={theme.textMuted}>Advanced model settings are optional and not needed for analysis.</text>
+                <text fg={theme.textMuted}>重启 killstata 以填入你的 DeepSeek API key。</text>
+                <text fg={theme.textMuted}>高级模型设置是可选的，做分析用不到。</text>
                 <box flexDirection="row" gap={1} justifyContent="space-between">
-                  <text fg={theme.text}>Restart KillStata</text>
+                  <text fg={theme.text}>重启 killstata</text>
                 </box>
               </box>
             </box>

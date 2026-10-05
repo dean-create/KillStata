@@ -1,25 +1,11 @@
 import { Instance } from "@/project/instance"
-import { Plugin } from "../plugin"
-import { map, filter, pipe, fromEntries } from "remeda"
 import z from "zod"
-import { fn } from "@/util/fn"
-import type { AuthOuathResult, Hooks } from "@killstata/plugin"
-import { NamedError } from "@killstata/util/error"
+import { fn } from "@killstata/util/fn"
 import { Auth } from "../auth"
-import { DEEPSEEK_PROVIDER_ID, deepSeekEnvOnlyAuthMessage } from "./deepseek-policy"
+import { deepSeekEnvOnlyAuthMessage } from "./deepseek-policy"
 import { allowedProvidersMessage, isAllowedProvider } from "./model-policy"
 
 export namespace ProviderAuth {
-  const state = Instance.state(async () => {
-    const methods = pipe(
-      await Plugin.list(),
-      filter((x) => x.auth?.provider !== undefined),
-      map((x) => [x.auth!.provider, x.auth!] as const),
-      fromEntries(),
-    )
-    return { methods, pending: {} as Record<string, AuthOuathResult> }
-  })
-
   export const Method = z
     .object({
       type: z.union([z.literal("oauth"), z.literal("api")]),
@@ -31,17 +17,7 @@ export namespace ProviderAuth {
   export type Method = z.infer<typeof Method>
 
   export async function methods() {
-    const s = await state().then((x) => x.methods)
-    const deepSeek = s[DEEPSEEK_PROVIDER_ID]
-    if (!deepSeek) return {}
-    return {
-      [DEEPSEEK_PROVIDER_ID]: deepSeek.methods.map(
-        (y): Method => ({
-          type: y.type,
-          label: y.label,
-        }),
-      ),
-    }
+    return {}
   }
 
   export const Authorization = z
@@ -72,24 +48,7 @@ export namespace ProviderAuth {
       code: z.string().optional(),
     }),
     async (input) => {
-      const match = await state().then((s) => s.pending[input.providerID])
-      if (!match) throw new OauthMissing({ providerID: input.providerID })
-      let result
-
-      if (match.method === "code") {
-        if (!input.code) throw new OauthCodeMissing({ providerID: input.providerID })
-        result = await match.callback(input.code)
-      }
-
-      if (match.method === "auto") {
-        result = await match.callback()
-      }
-
-      if (result?.type === "success") {
-        throw new Error(deepSeekEnvOnlyAuthMessage(input.providerID))
-      }
-
-      throw new OauthCallbackFailed({})
+      throw new Error(deepSeekEnvOnlyAuthMessage(input.providerID))
     },
   )
 
@@ -110,19 +69,4 @@ export namespace ProviderAuth {
       await Instance.dispose()
     },
   )
-
-  export const OauthMissing = NamedError.create(
-    "ProviderAuthOauthMissing",
-    z.object({
-      providerID: z.string(),
-    }),
-  )
-  export const OauthCodeMissing = NamedError.create(
-    "ProviderAuthOauthCodeMissing",
-    z.object({
-      providerID: z.string(),
-    }),
-  )
-
-  export const OauthCallbackFailed = NamedError.create("ProviderAuthOauthCallbackFailed", z.object({}))
 }

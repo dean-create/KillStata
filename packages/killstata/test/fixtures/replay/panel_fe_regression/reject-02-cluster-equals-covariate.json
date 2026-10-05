@@ -1,15 +1,14 @@
 {
-  "description": "聚类变量和某个控制变量填成了同一列",
+  "description": "时间索引被塞进控制变量（索引列不能同时做回归变量）",
   "modelArgs": {
-    "datasetId": "grunfeld_08bce7a7",
+    "datasetId": "grunfeld",
     "stageId": "stage_000",
     "dependentVar": "invest",
     "treatmentVar": "value",
-    "covariates": ["capital"],
+    "covariates": ["year"],
     "entityVar": "firm",
-    "timeVar": "year",
-    "clusterVar": "capital"
+    "timeVar": "year"
   },
   "expect": "reject",
-  "rejectHint": ["clusterVar", "聚类列不能同时作为"]
+  "rejectHint": ["year", "索引"]
 }

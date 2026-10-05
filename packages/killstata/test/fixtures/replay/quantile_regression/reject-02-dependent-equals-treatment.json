@@ -1,0 +1,12 @@
+{
+  "description": "结果变量和核心解释变量填了同一列",
+  "modelArgs": {
+    "datasetId": "wage_88",
+    "stageId": "stage_000",
+    "dependentVar": "union",
+    "treatmentVar": "union",
+    "quantiles": [0.5]
+  },
+  "expect": "reject",
+  "rejectHint": ["dependentVar", "不能同时作为解释变量"]
+}

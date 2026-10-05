@@ -17,8 +17,6 @@ export const DEFAULT_EXEC_POLICY: ExecPolicy = {
   safePrefixes: [
     "pwd",
     "echo",
-    "git status",
-    "git diff",
     "python --version",
     "python -V",
     "py --version",
@@ -28,7 +26,16 @@ export const DEFAULT_EXEC_POLICY: ExecPolicy = {
     "dir",
     "ls",
   ],
-  askPrefixes: ["npm publish", "bun publish", "pip install", "uv pip install", "curl", "wget", "Invoke-WebRequest", "iwr"],
+  askPrefixes: [
+    "npm publish",
+    "bun publish",
+    "pip install",
+    "uv pip install",
+    "curl",
+    "wget",
+    "Invoke-WebRequest",
+    "iwr",
+  ],
   denyPatterns: ["git reset --hard", "git clean -fd", "format ", "shutdown ", "reg delete"],
   networkRequiresApproval: true,
   externalWriteRequiresApproval: true,
@@ -57,7 +64,9 @@ function commandUsesNetwork(command: string) {
 }
 
 function commandRunsAdHocRegression(command: string) {
-  return /\b(python|py|bun|node)\b/i.test(command) && /\b(PanelOLS|statsmodels|linearmodels|ols|regression)\b/i.test(command)
+  return (
+    /\b(python|py|bun|node)\b/i.test(command) && /\b(PanelOLS|statsmodels|linearmodels|ols|regression)\b/i.test(command)
+  )
 }
 
 export function evaluateExecPolicy(input: {

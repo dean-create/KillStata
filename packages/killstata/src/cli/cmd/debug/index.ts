@@ -7,6 +7,7 @@ import { RipgrepCommand } from "./ripgrep"
 import { ScrapCommand } from "./scrap"
 import { SkillCommand } from "./skill"
 import { AgentCommand } from "./agent"
+import { PromptCommand } from "./prompt"
 
 export const DebugCommand = cmd({
   command: "debug",
@@ -19,6 +20,7 @@ export const DebugCommand = cmd({
       .command(ScrapCommand)
       .command(SkillCommand)
       .command(AgentCommand)
+      .command(PromptCommand)
       .command(PathsCommand)
       .command({
         command: "wait",

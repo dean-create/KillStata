@@ -14,7 +14,7 @@ export const GenerateCommand = {
           {
             lang: "js",
             source: [
-              `import { createKillstataClient } from "@killstata/sdk`,
+              `import { createKillstataClient } from "@killstata/sdk/v2"`,
               ``,
               `const client = createKillstataClient()`,
               `await client.${operation.operationId}({`,

@@ -1,9 +1,17 @@
+import { Env } from "@/env"
 import fs from "fs"
 import path from "path"
 import os from "os"
 import crypto from "crypto"
-import { spawnSync } from "child_process"
-import { applyEdits, modify, parse as parseJsonc, printParseErrorCode, type ParseError as JsoncParseError } from "jsonc-parser"
+import { spawn, spawnSync } from "child_process"
+import { Database } from "bun:sqlite"
+import {
+  applyEdits,
+  modify,
+  parse as parseJsonc,
+  printParseErrorCode,
+  type ParseError as JsoncParseError,
+} from "jsonc-parser"
 import { Config } from "@/config/config"
 import { Global } from "@/global"
 
@@ -27,6 +35,15 @@ export type RuntimePythonSelection = {
   source: RuntimePythonSource
 }
 
+export type RuntimePythonSelectionInputs = {
+  environmentOverride?: string
+  configOverride?: string
+  managedExecutable?: string
+  preferredExecutable?: string
+  systemExecutable?: string
+  defaultExecutable: string
+}
+
 export type RuntimePythonStatus = RuntimePythonSelection & {
   version?: string
   ok: boolean
@@ -35,11 +52,10 @@ export type RuntimePythonStatus = RuntimePythonSelection & {
   installCommand: string
 }
 
-const WINDOWS_PREFERRED_PYTHON_CANDIDATES = [
-  "D:\\anaconda3\\envs\\trae_agent\\python.exe",
-]
+const WINDOWS_PREFERRED_PYTHON_CANDIDATES = ["D:\\anaconda3\\envs\\trae_agent\\python.exe"]
 
 export const REQUIRED_PYTHON_PACKAGES = [
+  "pydantic",
   "pandas",
   "numpy",
   "scipy",
@@ -48,16 +64,25 @@ export const REQUIRED_PYTHON_PACKAGES = [
   "matplotlib",
   "openpyxl",
   "pyarrow",
+  // KNN、缩放与 PowerTransformer 是 data_preprocess 的唯一算法核心的一部分，
+  // 不能依赖用户环境里恰好已安装 sklearn。
+  "scikit-learn",
   "python-docx",
   "pyfixest",
+  "rdrobust",
 ] as const
 
 export const PYFIXEST_VERSION = "0.60.0"
+export const RDROBUST_VERSION = "2.0.0"
+export const PYDANTIC_VERSION = "2.13.2"
 
 const PYTHON_PACKAGE_INSTALL_SPECS: Readonly<Record<string, string>> = {
   docx: "python-docx",
   "python-docx": "python-docx",
   pyfixest: `pyfixest==${PYFIXEST_VERSION}`,
+  pydantic: `pydantic==${PYDANTIC_VERSION}`,
+  // rdrobust 没有 __version__ 属性，不做运行时版本校验（避免误判缺失），仅在安装时 pin。
+  rdrobust: `rdrobust==${RDROBUST_VERSION}`,
 }
 
 export function pythonPackageInstallSpecs(packages: readonly string[]) {
@@ -136,6 +161,23 @@ export function managedPythonExecutable() {
     : path.join(managedPythonVenvRoot(), "bin", "python")
 }
 
+/** 返回引擎包根目录；源码、发布包和开发工作目录分别使用不同候选路径。 */
+export function econometricsEngineRoot() {
+  const override = process.env.KILLSTATA_ENGINE_ROOT?.trim()
+  const candidates = [
+    override,
+    path.resolve(import.meta.dir, "../../../killstata-econometrics-engine"),
+    path.resolve(import.meta.dir, "../../../engine"),
+    path.resolve(path.dirname(process.execPath), "engine"),
+    path.resolve(path.dirname(process.execPath), "../engine"),
+  ].filter((value): value is string => Boolean(value))
+  return candidates.find((value) => fs.existsSync(path.join(value, "src", "killstata_econometrics_engine"))) ?? candidates[0]
+}
+
+export function econometricsEngineRequirementsPath() {
+  return path.join(econometricsEngineRoot(), "requirements.lock")
+}
+
 export function userSkillRoot() {
   return path.join(userRoot(), "skills")
 }
@@ -170,6 +212,162 @@ function runProcess(command: string, args: string[], extraEnv: NodeJS.ProcessEnv
       ...extraEnv,
     },
   })
+}
+
+export type AsyncProcessOptions = { timeoutMs?: number; maxOutputBytes?: number }
+
+const RUNTIME_PROBE_TIMEOUT_MS = 30_000
+const RUNTIME_INSTALL_TIMEOUT_MS = 20 * 60_000
+// Managed setup allows three 20-minute subprocesses, five 30-second probes/checks, and a bounded download.
+const RUNTIME_INSTALL_LOCK_WAIT_MS = 70 * 60_000
+const MAX_RUNTIME_PROCESS_OUTPUT_BYTES = 1024 * 1024
+
+function signalProcessTree(child: ReturnType<typeof spawn>, signal: NodeJS.Signals) {
+  if (process.platform === "win32" && child.pid) {
+    const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    })
+    const fallback = () => { child.kill(signal) }
+    killer.once("error", fallback)
+    killer.once("close", (status) => { if (status !== 0) fallback() })
+    killer.unref()
+    return
+  }
+  if (child.pid) {
+    try {
+      process.kill(-child.pid, signal)
+      return
+    } catch {}
+  }
+  child.kill(signal)
+}
+
+/** Run Python/uv without blocking the Core request and event loop. */
+export function runProcessAsync(
+  command: string,
+  args: string[],
+  extraEnv: NodeJS.ProcessEnv = {},
+  options: AsyncProcessOptions = {},
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  const timeoutMs = options.timeoutMs ?? RUNTIME_PROBE_TIMEOUT_MS
+  const maxOutputBytes = options.maxOutputBytes ?? MAX_RUNTIME_PROCESS_OUTPUT_BYTES
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1) throw new Error("运行环境子进程超时设置无效")
+  if (!Number.isInteger(maxOutputBytes) || maxOutputBytes < 0) throw new Error("运行环境子进程输出上限无效")
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        PYTHONUTF8: "1",
+        PYTHONIOENCODING: "utf-8",
+        ...extraEnv,
+      },
+      detached: process.platform !== "win32",
+    })
+    const stdout: Buffer[] = []
+    const stderr: Buffer[] = []
+    let stdoutBytes = 0
+    let stderrBytes = 0
+    let timedOut = false
+    let settled = false
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined
+
+    const clearTimers = () => {
+      clearTimeout(timeoutTimer)
+      if (forceKillTimer) clearTimeout(forceKillTimer)
+    }
+    const fail = (error: Error) => {
+      if (settled) return
+      settled = true
+      clearTimers()
+      reject(error)
+    }
+    const capture = (target: Buffer[], currentBytes: number, chunk: Buffer) => {
+      const remaining = maxOutputBytes - currentBytes
+      if (remaining <= 0) return currentBytes
+      const bounded = chunk.subarray(0, remaining)
+      target.push(bounded)
+      return currentBytes + bounded.byteLength
+    }
+
+    child.stdout.on("data", (chunk: Buffer) => { stdoutBytes = capture(stdout, stdoutBytes, chunk) })
+    child.stderr.on("data", (chunk: Buffer) => { stderrBytes = capture(stderr, stderrBytes, chunk) })
+    child.once("error", fail)
+    child.once("close", (status) => {
+      if (settled) return
+      settled = true
+      clearTimers()
+      if (timedOut) {
+        reject(new Error(`运行环境子进程超时（${Math.ceil(timeoutMs / 1_000)} 秒）`))
+        return
+      }
+      resolve({ status, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") })
+    })
+
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true
+      signalProcessTree(child, "SIGTERM")
+      forceKillTimer = setTimeout(() => signalProcessTree(child, "SIGKILL"), 1_000)
+    }, timeoutMs)
+  })
+}
+
+function isSqliteBusy(error: unknown) {
+  const candidate = error as { code?: unknown; message?: unknown }
+  const code = typeof candidate?.code === "string" ? candidate.code : ""
+  const message = typeof candidate?.message === "string" ? candidate.message : String(error)
+  return code.includes("BUSY") || code.includes("LOCKED") || /database is locked/i.test(message)
+}
+
+/** Serialize Python environment mutation across both the CLI and Desktop processes. */
+export async function withRuntimePythonInstallLock<T>(pythonExecutable: string, operation: () => Promise<T>): Promise<T> {
+  const requestedTarget = path.resolve(pythonExecutable)
+  const physicalTarget = await fs.promises.realpath(requestedTarget).catch(() => requestedTarget)
+  const lockKeys = [...new Set([requestedTarget, physicalTarget].map((target) =>
+    process.platform === "win32" ? target.toLowerCase() : target,
+  ))].sort()
+  const lockDirectory = path.join(userRoot(), "runtime-install-locks")
+  await fs.promises.mkdir(lockDirectory, { recursive: true, mode: 0o700 })
+  if (process.platform !== "win32") await fs.promises.chmod(lockDirectory, 0o700)
+  const databases: Array<{ database: Database; locked: boolean }> = []
+  const deadline = Date.now() + RUNTIME_INSTALL_LOCK_WAIT_MS
+  try {
+    for (const lockKey of lockKeys) {
+      const lockPath = path.join(lockDirectory, `${crypto.createHash("sha256").update(lockKey).digest("hex")}.sqlite`)
+      const entry = { database: new Database(lockPath, { create: true }), locked: false }
+      databases.push(entry)
+      entry.database.exec("PRAGMA busy_timeout = 0")
+      while (true) {
+        try {
+          entry.database.exec("BEGIN EXCLUSIVE")
+          entry.locked = true
+          break
+        } catch (error) {
+          if (!isSqliteBusy(error)) throw error
+          if (Date.now() >= deadline) throw new Error("另一个 KillStata 进程正在准备相同的 Python 环境，请稍后重试。")
+          await Bun.sleep(200)
+        }
+      }
+    }
+    return await operation()
+  } finally {
+    const cleanupErrors: unknown[] = []
+    for (const entry of databases.reverse()) {
+      try {
+        if (entry.locked) entry.database.exec("ROLLBACK")
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+      try {
+        entry.database.close()
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+    }
+    if (cleanupErrors.length > 0) throw cleanupErrors[0]
+  }
 }
 
 export function resolveCommand(command: string) {
@@ -218,17 +416,34 @@ export function probePythonExecutable(command: string): PythonProbe {
   }
 }
 
+async function resolveCommandAsync(command: string) {
+  if (path.isAbsolute(command)) return command
+  const direct = Bun.which(command)
+  if (direct) return direct
+  if (process.platform !== "win32") return undefined
+  try {
+    const proc = await runProcessAsync("where.exe", [command], {}, { timeoutMs: 5_000 })
+    if (proc.status !== 0) return undefined
+    return proc.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean)
+  } catch {
+    return undefined
+  }
+}
+
+async function probePythonExecutableAsync(command: string): Promise<PythonProbe> {
+  const resolved = await resolveCommandAsync(command) ?? command
+  try {
+    const proc = await runProcessAsync(resolved, ["--version"], {}, { timeoutMs: RUNTIME_PROBE_TIMEOUT_MS })
+    const output = `${proc.stdout}\n${proc.stderr}`.trim()
+    if (proc.status !== 0) return { command, resolved, ok: false, error: output || `Exit code ${proc.status}` }
+    return { command, resolved, ok: true, version: output.split(/\r?\n/).find(Boolean)?.trim() }
+  } catch (error) {
+    return { command, resolved, ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 export function discoverSystemPython(): PythonProbe | undefined {
-  const candidates = process.platform === "win32"
-    ? [
-        "python",
-        "python3",
-        "py",
-      ]
-    : [
-        "python3",
-        "python",
-      ]
+  const candidates = process.platform === "win32" ? ["python", "python3", "py"] : ["python3", "python"]
 
   for (const candidate of candidates) {
     const args = candidate === "py" ? ["-3", "--version"] : ["--version"]
@@ -252,51 +467,50 @@ export function discoverSystemPython(): PythonProbe | undefined {
   return undefined
 }
 
-export async function resolveRuntimePythonSelection(): Promise<RuntimePythonSelection> {
-  const envOverride = process.env.KILLSTATA_PYTHON?.trim()
-  if (envOverride) {
-    return {
-      executable: envOverride,
-      source: "env",
+async function discoverSystemPythonAsync(): Promise<PythonProbe | undefined> {
+  const candidates = process.platform === "win32" ? ["python", "python3", "py"] : ["python3", "python"]
+
+  for (const candidate of candidates) {
+    const args = candidate === "py" ? ["-3", "--version"] : ["--version"]
+    const resolved = await resolveCommandAsync(candidate)
+    if (!resolved) continue
+    try {
+      const proc = await runProcessAsync(resolved, args, {}, { timeoutMs: RUNTIME_PROBE_TIMEOUT_MS })
+      const output = `${proc.stdout}\n${proc.stderr}`.trim()
+      if (proc.status === 0) {
+        return { command: candidate, resolved, ok: true, version: output.split(/\r?\n/).find(Boolean)?.trim() }
+      }
+    } catch {
+      continue
     }
   }
+}
 
-  if (fs.existsSync(managedPythonExecutable())) {
-    return {
-      executable: managedPythonExecutable(),
-      source: "managed",
-    }
+export function selectRuntimePythonSelection(input: RuntimePythonSelectionInputs): RuntimePythonSelection {
+  if (input.environmentOverride) return { executable: input.environmentOverride, source: "env" }
+  if (input.configOverride) return { executable: input.configOverride, source: "config" }
+  if (input.managedExecutable) return { executable: input.managedExecutable, source: "managed" }
+  if (input.preferredExecutable) return { executable: input.preferredExecutable, source: "trae_agent" }
+  if (input.systemExecutable) return { executable: input.systemExecutable, source: "system" }
+  return { executable: input.defaultExecutable, source: "default" }
+}
+
+export async function resolveRuntimePythonSelection(): Promise<RuntimePythonSelection> {
+  const environmentOverride = Env.get("KILLSTATA_PYTHON")?.trim()
+  if (environmentOverride) {
+    return selectRuntimePythonSelection({ environmentOverride, defaultExecutable: defaultPythonCommand() })
   }
 
   const config = await Config.get()
-  const configured = config.killstata?.python?.executable?.trim()
-  if (configured) {
-    return {
-      executable: configured,
-      source: "config",
-    }
-  }
+  const configOverride = config.killstata?.python?.executable?.trim()
+  const managedExecutable = fs.existsSync(managedPythonExecutable()) ? managedPythonExecutable() : undefined
+  const preferredExecutable = preferredLocalPythonExecutable()
+  const candidates = { configOverride, managedExecutable, preferredExecutable, defaultExecutable: defaultPythonCommand() }
+  const preferred = selectRuntimePythonSelection(candidates)
+  if (preferred.source !== "default") return preferred
 
-  const preferred = preferredLocalPythonExecutable()
-  if (preferred) {
-    return {
-      executable: preferred,
-      source: "trae_agent",
-    }
-  }
-
-  const system = discoverSystemPython()?.resolved
-  if (system) {
-    return {
-      executable: system,
-      source: "system",
-    }
-  }
-
-  return {
-    executable: defaultPythonCommand(),
-    source: "default",
-  }
+  const systemExecutable = (await discoverSystemPythonAsync())?.resolved
+  return selectRuntimePythonSelection({ ...candidates, systemExecutable })
 }
 
 export async function resolveConfiguredPythonExecutable() {
@@ -319,22 +533,25 @@ export function checkPythonPackages(
   pythonExecutable: string,
   packages: readonly string[] = [...REQUIRED_PYTHON_PACKAGES],
 ): PythonPackageReport {
+  const proc = runProcess(pythonExecutable, ["-c", packageCheckScript(packages)])
+  if (proc.status !== 0) {
+    throw new Error(`${proc.stdout}\n${proc.stderr}`.trim() || `Failed to inspect packages with ${pythonExecutable}`)
+  }
+
+  const parsed = JSON.parse(proc.stdout.trim() || "{}") as { missing?: string[] }
+  return {
+    checkedWith: pythonExecutable,
+    missing: parsed.missing ?? [],
+  }
+}
+
+function packageCheckScript(packages: readonly string[]) {
   const checks = packages.map((pkg) => {
-    if (pkg === "python-docx" || pkg === "docx") {
-      return {
-        package: "python-docx",
-        module: "docx",
-        documentClass: true,
-      }
-    }
-    return {
-      package: pkg,
-      module: pkg,
-      documentClass: false,
-      expectedVersion: pkg === "pyfixest" ? PYFIXEST_VERSION : undefined,
-    }
+    if (pkg === "python-docx" || pkg === "docx") return { package: "python-docx", module: "docx", documentClass: true }
+    if (pkg === "scikit-learn") return { package: pkg, module: "sklearn", documentClass: false }
+    return { package: pkg, module: pkg, documentClass: false, expectedVersion: pkg === "pyfixest" ? PYFIXEST_VERSION : undefined }
   })
-  const script = [
+  return [
     "import importlib, importlib.util, json",
     `checks = json.loads(${JSON.stringify(JSON.stringify(checks))})`,
     "missing = []",
@@ -354,17 +571,18 @@ export function checkPythonPackages(
     "        missing.append(item['package'])",
     "print(json.dumps({'missing': missing}))",
   ].join("\n")
+}
 
-  const proc = runProcess(pythonExecutable, ["-c", script])
+async function checkPythonPackagesAsync(
+  pythonExecutable: string,
+  packages: readonly string[] = [...REQUIRED_PYTHON_PACKAGES],
+): Promise<PythonPackageReport> {
+  const proc = await runProcessAsync(pythonExecutable, ["-c", packageCheckScript(packages)], {}, { timeoutMs: RUNTIME_PROBE_TIMEOUT_MS })
   if (proc.status !== 0) {
-    throw new Error((`${proc.stdout}\n${proc.stderr}`).trim() || `Failed to inspect packages with ${pythonExecutable}`)
+    throw new Error(`${proc.stdout}\n${proc.stderr}`.trim() || `Failed to inspect packages with ${pythonExecutable}`)
   }
-
   const parsed = JSON.parse(proc.stdout.trim() || "{}") as { missing?: string[] }
-  return {
-    checkedWith: pythonExecutable,
-    missing: parsed.missing ?? [],
-  }
+  return { checkedWith: pythonExecutable, missing: parsed.missing ?? [] }
 }
 
 type UvReleaseAsset = {
@@ -412,7 +630,8 @@ async function downloadVerifiedFile(url: string, destination: string) {
     fetch(`${url}.sha256`, { signal: AbortSignal.timeout(30_000) }),
   ])
   if (!archiveResponse.ok) throw new Error(`Unable to download the analysis runtime (${archiveResponse.status}).`)
-  if (!checksumResponse.ok) throw new Error(`Unable to verify the analysis runtime download (${checksumResponse.status}).`)
+  if (!checksumResponse.ok)
+    throw new Error(`Unable to verify the analysis runtime download (${checksumResponse.status}).`)
 
   const expected = (await checksumResponse.text()).trim().split(/\s+/)[0]?.toLowerCase()
   if (!expected || !/^[a-f0-9]{64}$/.test(expected)) throw new Error("The analysis runtime checksum was invalid.")
@@ -439,19 +658,23 @@ function findFile(root: string, filename: string): string | undefined {
   }
 }
 
-function extractUvArchive(input: { archive: string; destination: string; compressed: UvReleaseAsset["compressed"] }) {
-  const result =
+async function extractUvArchive(input: { archive: string; destination: string; compressed: UvReleaseAsset["compressed"] }) {
+  const result = await runProcessAsync(
+    input.compressed === "zip" ? "powershell.exe" : "tar",
     input.compressed === "zip"
-      ? runProcess("powershell.exe", [
+      ? [
           "-NoProfile",
           "-NonInteractive",
           "-Command",
           `Expand-Archive -LiteralPath ${quotePowerShell(input.archive)} -DestinationPath ${quotePowerShell(input.destination)} -Force`,
-        ])
-      : runProcess("tar", ["-xzf", input.archive, "-C", input.destination])
+        ]
+      : ["-xzf", input.archive, "-C", input.destination],
+    {},
+    { timeoutMs: RUNTIME_INSTALL_TIMEOUT_MS },
+  )
 
   if (result.status !== 0) {
-    throw new Error((`${result.stdout}\n${result.stderr}`).trim() || "Unable to unpack the analysis runtime.")
+    throw new Error(`${result.stdout}\n${result.stderr}`.trim() || "Unable to unpack the analysis runtime.")
   }
 }
 
@@ -465,21 +688,21 @@ async function ensureManagedUv() {
   const root = managedUvRoot()
   const archive = path.join(root, `uv-${UV_VERSION}.${asset.compressed === "zip" ? "zip" : "tar.gz"}`)
   const extraction = path.join(root, "extract")
-  fs.mkdirSync(root, { recursive: true })
-  fs.rmSync(extraction, { recursive: true, force: true })
-  fs.mkdirSync(extraction, { recursive: true })
+  await fs.promises.mkdir(root, { recursive: true })
+  await fs.promises.rm(extraction, { recursive: true, force: true })
+  await fs.promises.mkdir(extraction, { recursive: true })
 
   try {
     await downloadVerifiedFile(releaseUrl(asset), archive)
-    extractUvArchive({ archive, destination: extraction, compressed: asset.compressed })
+    await extractUvArchive({ archive, destination: extraction, compressed: asset.compressed })
     const extracted = findFile(extraction, asset.executable)
     if (!extracted) throw new Error("The downloaded analysis runtime did not contain its executable.")
-    fs.copyFileSync(extracted, executable)
-    if (process.platform !== "win32") fs.chmodSync(executable, 0o755)
+    await fs.promises.copyFile(extracted, executable)
+    if (process.platform !== "win32") await fs.promises.chmod(executable, 0o755)
     return executable
   } finally {
-    fs.rmSync(archive, { force: true })
-    fs.rmSync(extraction, { recursive: true, force: true })
+    await fs.promises.rm(archive, { force: true })
+    await fs.promises.rm(extraction, { recursive: true, force: true })
   }
 }
 
@@ -491,17 +714,11 @@ function managedRuntimeEnvironment(): NodeJS.ProcessEnv {
   }
 }
 
-function runUv(uv: string, args: string[]) {
-  const result = runProcess(uv, args, managedRuntimeEnvironment())
+async function runUv(uv: string, args: string[]) {
+  const result = await runProcessAsync(uv, args, managedRuntimeEnvironment(), { timeoutMs: RUNTIME_INSTALL_TIMEOUT_MS })
   if (result.status !== 0) {
-    throw new Error((`${result.stdout}\n${result.stderr}`).trim() || "Unable to prepare the data analysis environment.")
+    throw new Error(`${result.stdout}\n${result.stderr}`.trim() || "Unable to prepare the data analysis environment.")
   }
-}
-
-async function hasExplicitPythonOverride() {
-  if (process.env.KILLSTATA_PYTHON?.trim()) return true
-  const config = await Config.get()
-  return Boolean(config.killstata?.python?.executable?.trim())
 }
 
 let managedRuntimeProvision: Promise<RuntimePythonStatus> | undefined
@@ -511,13 +728,18 @@ async function provisionManagedRuntime(packages: readonly string[]): Promise<Run
   const executable = managedPythonExecutable()
 
   if (!fs.existsSync(executable)) {
-    fs.rmSync(managedPythonVenvRoot(), { recursive: true, force: true })
-    runUv(uv, ["venv", "--python", MANAGED_PYTHON_VERSION, "--managed-python", managedPythonVenvRoot()])
+    await fs.promises.rm(managedPythonVenvRoot(), { recursive: true, force: true })
+    await runUv(uv, ["venv", "--python", MANAGED_PYTHON_VERSION, "--managed-python", managedPythonVenvRoot()])
   }
 
-  const report = checkPythonPackages(executable, packages)
+  const report = await checkPythonPackagesAsync(executable, packages)
   if (report.missing.length > 0) {
-    runUv(uv, ["pip", "install", "--python", executable, "--upgrade", ...pythonPackageInstallSpecs(report.missing)])
+    const lockfile = econometricsEngineRequirementsPath()
+    if (fs.existsSync(lockfile)) {
+      await runUv(uv, ["pip", "install", "--python", executable, "--upgrade", "-r", lockfile])
+    } else {
+      await runUv(uv, ["pip", "install", "--python", executable, "--upgrade", ...pythonPackageInstallSpecs(report.missing)])
+    }
   }
 
   return getRuntimePythonStatus([...packages])
@@ -529,14 +751,14 @@ async function provisionManagedRuntime(packages: readonly string[]): Promise<Run
  * writes to or modifies a system Python installation.
  */
 export async function ensureRuntimePythonReady(packages: readonly string[] = [...REQUIRED_PYTHON_PACKAGES]) {
-  if (process.env.KILLSTATA_DISABLE_AUTO_RUNTIME === "true") return getRuntimePythonStatus([...packages])
-  if (await hasExplicitPythonOverride()) return getRuntimePythonStatus([...packages])
+  if (Env.get("KILLSTATA_DISABLE_AUTO_RUNTIME") === "true") return getRuntimePythonStatus([...packages])
 
   const current = await getRuntimePythonStatus([...packages])
+  if (current.source === "env" || current.source === "config") return current
   if (current.source === "managed" && current.ok && current.missing.length === 0) return current
 
   if (!managedRuntimeProvision) {
-    managedRuntimeProvision = provisionManagedRuntime(packages).finally(() => {
+    managedRuntimeProvision = withRuntimePythonInstallLock(managedPythonExecutable(), () => provisionManagedRuntime(packages)).finally(() => {
       managedRuntimeProvision = undefined
     })
   }
@@ -547,7 +769,7 @@ export async function getRuntimePythonStatus(
   packages: readonly string[] = [...REQUIRED_PYTHON_PACKAGES],
 ): Promise<RuntimePythonStatus> {
   const selection = await resolveRuntimePythonSelection()
-  const probe = probePythonExecutable(selection.executable)
+  const probe = await probePythonExecutableAsync(selection.executable)
   const executable = probe.resolved || selection.executable
   const installCommand = pythonInstallCommand(executable, packages)
 
@@ -563,7 +785,7 @@ export async function getRuntimePythonStatus(
   }
 
   try {
-    const report = checkPythonPackages(executable, packages)
+    const report = await checkPythonPackagesAsync(executable, packages)
     return {
       executable,
       source: selection.source,
@@ -585,7 +807,15 @@ export async function getRuntimePythonStatus(
   }
 }
 
-export function formatRuntimePythonSetupError(_toolName: string, _status: RuntimePythonStatus) {
+export function formatRuntimePythonSetupError(toolName: string, status: RuntimePythonStatus) {
+  // 只在"环境本身健康、仅缺依赖包"时给出可操作的安装指引；探测/网络失败等
+  // 无法定位到具体包的情形保持原有通用文案，不把英文技术细节透给用户。
+  if (status.ok && status.missing.length > 0) {
+    return (
+      `${toolName} 需要的数据分析环境不完整：缺少依赖包 ${status.missing.join("、")}。` +
+      (status.installCommand ? `可执行：${status.installCommand}。` : "请检查网络连接后重试当前分析。")
+    )
+  }
   return "KillStata 没能自动准备数据分析环境。请检查网络连接后重试当前分析。"
 }
 
@@ -595,7 +825,7 @@ export function ensureManagedPythonVenv(pythonExecutable: string) {
 
   const proc = runProcess(pythonExecutable, ["-m", "venv", managedPythonVenvRoot()])
   if (proc.status !== 0 || !fs.existsSync(managedPythonExecutable())) {
-    throw new Error((`${proc.stdout}\n${proc.stderr}`).trim() || "Failed to create managed Python virtual environment")
+    throw new Error(`${proc.stdout}\n${proc.stderr}`.trim() || "Failed to create managed Python virtual environment")
   }
   return managedPythonExecutable()
 }
@@ -603,13 +833,39 @@ export function ensureManagedPythonVenv(pythonExecutable: string) {
 export function installPythonPackages(pythonExecutable: string, packages = [...REQUIRED_PYTHON_PACKAGES]) {
   const upgradePip = runProcess(pythonExecutable, ["-m", "pip", "install", "--upgrade", "pip"])
   if (upgradePip.status !== 0) {
-    throw new Error((`${upgradePip.stdout}\n${upgradePip.stderr}`).trim() || "Failed to upgrade pip")
+    throw new Error(`${upgradePip.stdout}\n${upgradePip.stderr}`.trim() || "Failed to upgrade pip")
   }
 
   const install = runProcess(pythonExecutable, ["-m", "pip", "install", ...pythonPackageInstallSpecs(packages)])
   if (install.status !== 0) {
-    throw new Error((`${install.stdout}\n${install.stderr}`).trim() || "Failed to install Python packages")
+    throw new Error(`${install.stdout}\n${install.stderr}`.trim() || "Failed to install Python packages")
   }
+}
+
+export async function installPythonPackagesAsync(pythonExecutable: string, packages = [...REQUIRED_PYTHON_PACKAGES]) {
+  return await withRuntimePythonInstallLock(pythonExecutable, async () => {
+    const current = await checkPythonPackagesAsync(pythonExecutable, packages)
+    if (current.missing.length === 0) return
+    const upgradePip = await runProcessAsync(
+      pythonExecutable,
+      ["-m", "pip", "install", "--upgrade", "pip"],
+      {},
+      { timeoutMs: RUNTIME_INSTALL_TIMEOUT_MS },
+    )
+    if (upgradePip.status !== 0) {
+      throw new Error(`${upgradePip.stdout}\n${upgradePip.stderr}`.trim() || "Failed to upgrade pip")
+    }
+
+    const install = await runProcessAsync(
+      pythonExecutable,
+      ["-m", "pip", "install", ...pythonPackageInstallSpecs(current.missing)],
+      {},
+      { timeoutMs: RUNTIME_INSTALL_TIMEOUT_MS },
+    )
+    if (install.status !== 0) {
+      throw new Error(`${install.stdout}\n${install.stderr}`.trim() || "Failed to install Python packages")
+    }
+  })
 }
 
 type JsonPathValue = {
@@ -636,7 +892,9 @@ function formatJsoncErrors(text: string, filepath: string, errors: JsoncParseErr
 export async function writeUserConfigValues(values: JsonPathValue[]) {
   fs.mkdirSync(userRoot(), { recursive: true })
   const filepath = userConfigPath()
-  let text = await Bun.file(filepath).text().catch(() => "")
+  let text = await Bun.file(filepath)
+    .text()
+    .catch(() => "")
   if (!text.trim()) text = "{}"
 
   let next = text

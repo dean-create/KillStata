@@ -5,7 +5,17 @@ import path from "node:path"
 export const NPM_PUBLIC_REGISTRY = "https://registry.npmjs.org/"
 
 export const EXPECTED_NATIVE_PACKAGE_NAMES = [
+  "killstata-darwin-arm64",
+  "killstata-darwin-x64",
+  "killstata-darwin-x64-baseline",
+  "killstata-linux-arm64",
+  "killstata-linux-arm64-musl",
+  "killstata-linux-x64",
+  "killstata-linux-x64-baseline",
+  "killstata-linux-x64-baseline-musl",
+  "killstata-linux-x64-musl",
   "killstata-windows-x64",
+  "killstata-windows-x64-baseline",
 ] as const
 
 export interface ReleaseArtifact {
@@ -55,7 +65,6 @@ export interface NpmCommandResult {
 export type NpmCommandRunner = (args: string[]) => Promise<NpmCommandResult>
 
 const STABLE_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
-const DEFAULT_VERIFICATION_ATTEMPTS = 45
 
 export async function fileIntegrity(filepath: string) {
   const hash = createHash("sha512")
@@ -136,27 +145,13 @@ export class NpmRegistry implements ReleaseRegistry {
   }
 
   async getTag(name: string, tag: string) {
-    const result = await this.run([
-      "view",
-      name,
-      `dist-tags.${tag}`,
-      "--json",
-      "--registry",
-      NPM_PUBLIC_REGISTRY,
-    ])
+    const result = await this.run(["view", name, `dist-tags.${tag}`, "--json", "--registry", NPM_PUBLIC_REGISTRY])
     if (result.exitCode !== 0) throw new Error(`npm dist-tag lookup failed for ${name}: ${result.stderr.trim()}`)
     return jsonScalar(result.stdout)
   }
 
   async setTag(name: string, version: string, tag: string) {
-    const result = await this.run([
-      "dist-tag",
-      "add",
-      `${name}@${version}`,
-      tag,
-      "--registry",
-      NPM_PUBLIC_REGISTRY,
-    ])
+    const result = await this.run(["dist-tag", "add", `${name}@${version}`, tag, "--registry", NPM_PUBLIC_REGISTRY])
     if (result.exitCode !== 0) throw new Error(`npm dist-tag update failed for ${name}: ${result.stderr.trim()}`)
   }
 }
@@ -169,7 +164,8 @@ export function validateReleaseManifest(manifest: ReleaseManifest) {
   for (const artifact of manifest.artifacts) {
     if (names.has(artifact.name)) throw new Error(`duplicate release artifact: ${artifact.name}`)
     names.add(artifact.name)
-    if (artifact.version !== manifest.version) throw new Error(`mixed release versions are not allowed: ${artifact.name}`)
+    if (artifact.version !== manifest.version)
+      throw new Error(`mixed release versions are not allowed: ${artifact.name}`)
     if (!artifact.tarball.endsWith(".tgz")) throw new Error(`release artifact is not a tarball: ${artifact.name}`)
     const digest = artifact.integrity.match(/^sha512-([A-Za-z0-9+/]+={0,2})$/)?.[1]
     const decoded = digest ? Buffer.from(digest, "base64") : undefined
@@ -179,9 +175,9 @@ export function validateReleaseManifest(manifest: ReleaseManifest) {
   }
 
   const launchers = manifest.artifacts.filter((artifact) => artifact.role === "launcher")
-  const native = manifest.artifacts.filter((artifact) => artifact.role === "native").sort((a, b) =>
-    a.name.localeCompare(b.name),
-  )
+  const native = manifest.artifacts
+    .filter((artifact) => artifact.role === "native")
+    .sort((a, b) => a.name.localeCompare(b.name))
   if (launchers.length !== 1 || launchers[0]?.name !== "killstata") {
     throw new Error("release manifest must contain exactly one killstata launcher")
   }
@@ -221,7 +217,7 @@ export async function publishRelease(
   registry: ReleaseRegistry,
   options: PublishReleaseOptions = {},
 ) {
-  const verificationAttempts = options.verificationAttempts ?? DEFAULT_VERIFICATION_ATTEMPTS
+  const verificationAttempts = options.verificationAttempts ?? 5
   const verificationDelayMs = options.verificationDelayMs ?? 1_000
   if (options.verifyArtifact) {
     for (const artifact of artifacts) await options.verifyArtifact(artifact)

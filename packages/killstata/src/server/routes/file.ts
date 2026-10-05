@@ -4,7 +4,7 @@ import z from "zod"
 import { File } from "../../file"
 import { Ripgrep } from "../../file/ripgrep"
 import { Instance } from "../../project/instance"
-import { lazy } from "../../util/lazy"
+import { lazy } from "@killstata/util/lazy"
 
 export const FileRoutes = lazy(() =>
   new Hono()
@@ -136,28 +136,6 @@ export const FileRoutes = lazy(() =>
       async (c) => {
         const path = c.req.valid("query").path
         const content = await File.read(path)
-        return c.json(content)
-      },
-    )
-    .get(
-      "/file/status",
-      describeRoute({
-        summary: "Get file status",
-        description: "Get the git status of all files in the project.",
-        operationId: "file.status",
-        responses: {
-          200: {
-            description: "File status",
-            content: {
-              "application/json": {
-                schema: resolver(File.Info.array()),
-              },
-            },
-          },
-        },
-      }),
-      async (c) => {
-        const content = await File.status()
         return c.json(content)
       },
     ),

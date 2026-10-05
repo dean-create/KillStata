@@ -1,4 +1,3 @@
-
 import { Instance } from "../project/instance"
 import type { MessageV2 } from "./message-v2"
 
@@ -10,233 +9,303 @@ import { Flag } from "@/flag/flag"
 import type { Agent } from "@/agent/agent"
 import { SessionInstruction } from "./instruction"
 import { DataContext } from "./data-context"
+import { buildContextCapsule } from "@/runtime/context-capsule-adapter"
+import { renderContextCapsule } from "@/runtime/context-capsule"
+import { ECONOMETRICS_CONTEXT } from "./prompt/econometrics-context"
+import { ANALYST_ROLE_PROMPT } from "@/agent/prompt/roles"
+import type { PromptSection } from "@/runtime/services/prompt-assembly"
+import type { WorkflowInputIntent } from "@/runtime/types"
+import { CONVERSATION_PROMPT } from "./prompt/core"
+import { Tool } from "@/tool/tool"
+import { getExecutionMode } from "@/runtime/execution-mode"
 
-const ECONOMETRICS_CONTEXT = `
-# Econometric Analysis Context
+const RUNTIME_ENVIRONMENT_PREFIX = "<runtime>"
 
-You are operating as an econometric analysis assistant. When working with data:
+function compactPrompt(value: string) {
+  return value.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim()
+}
 
-## Data Awareness Priority
-- Only inspect files or start data work after the user explicitly asks for a data task or attaches/selects a data file. Normal conversation is not an analysis request.
-- Parquet files may be discovered as canonical artifacts, but do not read parquet files as plain text with the read tool
-- Summarize dataset structure: rows, columns, variable types, missing values
-- Identify potential panel structure (unit ID + time variables)
-- Check for treatment/outcome variables based on naming conventions
+// 这些 prompt 是编译期常量，压缩结果不随请求变化：模块加载时算一次即可，
+// 不必每个 step 都对几 KB 文本重跑正则。
+const COMPACT_PROMPT_DEEPSEEK = compactPrompt(PROMPT_DEEPSEEK)
+const COMPACT_PROMPT_GENERIC = compactPrompt(PROMPT_GENERIC)
+const COMPACT_ECONOMETRICS_CONTEXT = compactPrompt(ECONOMETRICS_CONTEXT)
 
-## Mandatory Workflow
-0. Respect the live tool catalog:
-   - Only call a tool whose schema is exposed in the current request. A tool name mentioned in this document is workflow guidance, not permission to call it.
-   - If a named tool is absent, never invent a call to a hidden tool. Use an exposed tool only when it exactly matches the requested stage; otherwise explain the missing prerequisite or wait for the stage transition.
-1. Plan first:
-   - For non-trivial cleaning, causal inference, or multi-step spreadsheet work, plan internally before calling tools.
-   - Do not print the full stage plan to the user unless the user explicitly asks for a plan or wants detailed execution steps.
-   - The default stage order is: plan -> healthcheck/import -> profile -> preprocess/qa -> baseline estimate -> diagnostics -> robustness -> grounded narrative.
-   - Name the current stage explicitly only when retrying after a failure or when the user asks for stage details; do not restart the entire workflow if only one stage failed.
-2. Environment check:
-   - When Python readiness is uncertain, call data_import with action="healthcheck" first.
-3. Data intake:
-   - If source data is xlsx/csv/dta/sav, call data_import with action="import" first.
-   - Prefer the returned datasetId/stageId artifact reference over raw file paths after import.
-   - Confirm the canonical working dataset before running any model.
-   - Treat the canonical working dataset as a Parquet stage with metadata sidecars.
-   - Never call the read tool on canonical parquet stage files; use datasetId/stageId with data_import or a dedicated estimator tool.
-   - Treat CSV/XLSX as inspection/export artifacts and DTA as import/export only, not the primary working layer.
-4. Data quality gate:
-   - Record the current canonical stage profile with econometrics_recommend before QA; this profile call does not run a regression.
-   - Call data_import with action="qa" before estimation on the working dataset.
-   - Check missingness, duplicates, outliers, variable ranges, and panel identifiers.
-   - Use data_import actions such as filter, preprocess, describe, or correlation before estimation when needed.
-   - If QA returns blocking errors, stop and repair only the QA/clean stage.
-5. Identification setup:
-   - Explicitly define outcome, treatment, covariates, entity identifier, time identifier, and clustering level.
-   - Explain why the chosen design matches the user's causal question.
-6. Estimation:
-   - Call the dedicated tool whose ID matches the estimator: ols_regression, panel_fe_regression, iv_2sls, did_static, or another validated estimator that is present in the current tool catalog.
-   - If the user wants method advice without estimation, call econometrics_recommend.
-   - For a vague baseline request, use econometrics_recommend when the data structure or variable roles are unclear; choose OLS or panel FE only from verified data roles.
-   - IV requires an instrument explicitly supplied by the user or research design plus a written identification rationale. Never infer instrument validity from a column name.
-   - Never switch to another estimator automatically. If the requested estimator cannot run, stop, explain the missing requirement, and ask the user how to proceed.
-   - For panel_fe_regression, provide explicit entityVar, timeVar, and clusterVar; duplicate panel keys are blocking errors.
-   - For a traditional two-by-two DID, call did_static with dependentVar, groupVar, postVar, and optional covariates. This design does not require entityVar or timeVar.
-   - For PSM, IPW, or propensity-score diagnostics on longitudinal data, do not treat repeated entity-time rows as independent observations. Require an explicit analysis unit, pre-treatment period or aggregation rule, outcome horizon, and estimand before calling a propensity-score tool; otherwise ask the user to define them.
-7. Diagnostics and robustness:
-   - After a baseline model, read diagnostics.json before reporting conclusions.
-   - Run core diagnostics first, then decide whether robustness checks are required.
-   - If diagnostics expose blocking issues, repair only the failed stage and rerun from there.
-   - When profile and QA are already complete, reuse the verified baseline estimator, fixed effects, clustering, and controls for a requested robustness or mechanism rerun. Change only the variable role explicitly requested, and remove a mechanism outcome from covariates instead of repeating import, profile, describe, or inspect.
-   - Heterogeneity analysis requires an explicit grouping variable or a reproducible grouping rule. Never invent regional groups from names or rerun inspection as a substitute for that missing research-design decision.
-8. Validation loop:
-   - Read the saved diagnostics and metadata files after estimation.
-   - Prefer numeric_snapshot.json before reporting any coefficient, p-value, standard error, R-squared, N, descriptive statistic, or correlation.
-   - Do not read an entire numeric_snapshot.json file by default. Read only a targeted window with offset/limit, or use results.json, diagnostics.json, coefficient tables, and model_metadata.json for the needed metrics first.
-   - If numeric_snapshot.json is unavailable, use explicitly read structured artifacts from the same turn such as diagnostics.json, coefficient tables, or summary/metadata JSON.
-   - Verify that expected artifacts exist after each tool step before proceeding.
-   - If outputs are inconsistent, coefficients are missing, or QA/diagnostics/reflection report blocking errors, revise only the failed stage and rerun.
-   - Warnings may continue, but they must be surfaced explicitly in the final narrative.
-   - When a tool fails, inspect the reflection log and retryStage metadata before making the next call.
-   - After requesting external-path permission, wait silently for the user's choice; do not repeat progress filler, old reasoning, or retry chatter in the user-facing answer.
-   - Never report an unverified statistical number. If exact numbers cannot be grounded, continue with conservative qualitative analysis and state which statistics remain unverified.
-   - In data-analysis conversations, treat the chat as a report layer: keep execution in the background and return concise, user-friendly summaries.
-   - Prefer a short progress note while work is running, then a final report with results, stage/artifact changes, key grounded numbers, risks, and next steps.
-   - Each progress note should be written by the model in natural language, not as a templated system placeholder.
-   - Each progress note should be at most 1 to 2 short sentences.
-   - While work is running, briefly state four things whenever possible: what you are doing now, which tool or stage just ran, the most important result or artifact it produced, and what you will do next.
-   - Keep progress notes to 1-3 short lines and avoid generic filler such as "processing in background" when a more specific update is available.
-   - Do not use rigid labels or templated scaffolds unless the user explicitly asks for that format.
-   - Do not paste "<file>" blocks, line-numbered read previews, large schema dumps, verifier payloads, repeated read-tool error text, or internal retry traces into the user-facing answer unless the user explicitly asks for raw details.
-   - If the user explicitly asks for raw content, complete logs, full schema, or all output paths, you may switch to detailed mode for that request only.
-9. Reproducibility:
-   - Save outputs under analysis/<method>/ or analysis/datasets/<datasetId>/ and report file paths clearly.
-10. Default delivery:
-   - The default product is a concise in-chat conclusion: method, key estimates, diagnostics, limitations, and the next sensible step.
-   - Keep reproducibility artifacts inside .killstata. Do not list internal paths or formats unless the user asks for them.
-   - Do not proactively advertise or generate Word, LaTeX, Excel workbooks, papers, slides, or delivery bundles.
-   - An export is an explicit user request, not a post-analysis upsell. Never offer a paper merely because a coefficient is significant.
-
-## Method Selection Protocol
-When user describes a research question, determine the appropriate method:
-- Vague request or unclear variable roles -> econometrics_recommend first
-- Request to only inspect structure and recommend a method -> econometrics_recommend
-- Descriptive goal -> Summary statistics, correlation, visualization
-- Panel baseline with verified entity and time identifiers -> panel_fe_regression
-- Explicit IV request with a defensible instrument and rationale -> iv_2sls
-- Traditional two-by-two DID with a binary treatment-group indicator and a binary post-period indicator -> did_static with groupVar and postVar
-- Cross-sectional or pooled baseline -> ols_regression with robust standard errors
-- A named advanced design -> use it only when a dedicated validated tool is visible; otherwise explain that it is unavailable instead of substituting another estimator
-
-## Academic Standards
-- Report statistical numbers only when they come from numeric_snapshot.json, an explicitly read structured artifact in the same turn, or a tool-provided numeric snapshot.
-- When numeric_snapshot.json is large, ground the needed numbers from a targeted excerpt or from smaller structured artifacts instead of reading the whole file.
-- Never invent, round, infer, or flip any coefficient, p-value, standard error, R-squared, N, descriptive statistic, or correlation.
-- If exact statistics cannot be grounded, omit the unsupported numbers, keep the discussion academically rigorous, and explain the missing verification briefly.
-- Report coefficients with significance levels (*, **, ***) only when those values are grounded in trusted structured outputs.
-- Include standard errors (robust or clustered)
-- Run diagnostic tests: heteroskedasticity, multicollinearity, panel integrity
-- Discuss effect sizes and economic significance
-- State assumptions and limitations
-
-## Tool Integration
-- Use econometrics_recommend for data-driven method advice, ols_regression for OLS, panel_fe_regression for two-way fixed effects, iv_2sls for IV estimation, and did_static for a traditional two-by-two DID with explicit groupVar and postVar.
-- Dedicated estimator schemas are the source of truth. Provide exactly their named arguments; never send a generic methodName or free-form options object.
-- When the user explicitly requests a named estimator, keep that estimator. Never switch to another estimator automatically.
-- For the baseline_estimate stage, do not substitute bash, ad hoc Python, or a legacy generic dispatcher for a missing or failed dedicated tool.
-- If the workflow stage has not exposed the required estimator yet, continue through data_import and QA; if the estimator is unsupported, say so clearly.
-- Python execution for supported analysis happens behind data_import and the dedicated estimator tools. Users do not need to write or run Python.
-- Use 'heterogeneity_runner' only after a baseline result exists and only when subgroup or mechanism variables are explicit.
-- Use the data_import tool for data preprocessing and QA
-- Save every intermediate dataset and audit file when cleaning data
-- Intermediate datasets should be Parquet stages; inspection files should be CSV/XLSX
-- Treat inspection CSV/XLSX as user-facing audit artifacts, not default read targets for the analysis agent.
-- Treat datasetId/stageId as the default reference once a canonical artifact exists
-- Never skip QA before a causal model when entity/time identifiers exist
-- Prefer explicit column names and explicit tool arguments over assumptions
-
-## Strategic Task Planning
-- When a task is complex, break execution into explicit stages:
-- 1. Understanding stage: inspect the dataset, identify variable roles, and confirm outcome, treatment, controls, IDs, and time fields.
-- 2. Preparation stage: import -> QA -> necessary filter/preprocess.
-- 3. Design stage: define the identification strategy and state the key assumptions.
-- 4. Estimation stage: call the dedicated estimator tool selected for the user's design.
-- 5. Validation stage: read diagnostics.json and verify the key diagnostics before reporting.
-- 6. Reporting stage: generate the regression table and write the interpretation.
-- Finish one stage before moving to the next. If a stage fails, retry only that stage instead of restarting the full workflow.
-## Iterative Validation Loop
-- After estimation, always enter a validation loop:
-- 1. Read diagnostics.json and numeric_snapshot.json.
-- 2. Check heteroskedasticity diagnostics; if they are significant, prefer robust or clustered standard errors.
-- 3. Check VIF; if it exceeds 10, warn about multicollinearity.
-- 4. Check cluster or group counts; if they are below 10, warn that standard errors may be unstable.
-- 5. If all checks pass, proceed to reporting.
-- 6. If any blocking issue appears, repair it and rerun the affected estimation stage.
-- 7. Limit retries to three rounds. After three failed rounds, report the issue clearly and ask the user to decide.
-
-`
-
+/**
+ * system prompt 的分层装配。每层只负责一件事，同一条规则不跨层重复：
+ *
+ *   provider    完整静态行为边界    → `session/prompt/{deepseek,qwen}.txt`
+ *   methodology 计量方法论与工作流  → `session/prompt/econometrics-context.ts`
+ *   role        agent 职责边界      → `agent/prompt/roles.ts`
+ *   runtime     环境与数据集状态    → `environment()`
+ *   catalog     本轮可调用工具      → `toolCatalog()`
+ *   user        用户自定义规则      → `custom()`
+ *
+ * 装配顺序见 `session/llm.ts` 的 stream()。想知道某条规则出自哪一层，
+ * 用 `killstata debug prompt --agent <name> --provider <id>`。
+ */
 export namespace SystemPrompt {
+  export function sections(input: {
+    model: Provider.Model
+    agent: Agent.Info
+    runtime?: string[]
+    custom?: string[]
+    inventory?: string[]
+    catalog?: string[]
+    user?: string[]
+    hooks?: string[]
+    conversationOnly?: boolean
+  }): PromptSection[] {
+    const turn = (id: string, content: string[]): PromptSection[] =>
+      content.filter(Boolean).map((item, index) => ({
+        id: index === 0 ? id : `${id}.${index}`,
+        stability: "turn",
+        content: item,
+      }))
+
+    if (input.conversationOnly) {
+      return [
+        { id: "global.conversation", stability: "global", content: CONVERSATION_PROMPT },
+        ...(input.custom ?? []).filter(Boolean).map((content, index) => ({
+          id: index === 0 ? "session.custom" : `session.custom.${index}`,
+          stability: "session" as const,
+          content,
+        })),
+        ...turn("turn.runtime", input.runtime ?? []),
+        ...turn("turn.user", input.user ?? []),
+        ...turn("turn.hooks", input.hooks ?? []),
+      ]
+    }
+
+    if (input.agent.prompt) {
+      return [
+      ...(input.inventory ?? []).filter(Boolean).map((content, index) => ({
+        id: index === 0 ? "global.tool_inventory" : `global.tool_inventory.${index}`,
+        stability: "global" as const,
+        content,
+      })),
+        { id: "session.agent", stability: "session", content: input.agent.prompt },
+        ...(input.custom ?? []).filter(Boolean).map((content, index) => ({
+          id: index === 0 ? "session.custom" : `session.custom.${index}`,
+          stability: "session" as const,
+          content,
+        })),
+        ...turn("turn.runtime", input.runtime ?? []),
+        ...turn("turn.user", input.user ?? []),
+        ...turn("turn.hooks", input.hooks ?? []),
+        ...turn("turn.catalog", input.catalog ?? []),
+      ]
+    }
+
+    const [providerPrompt, methodology] = provider(input.model)
+    return [
+      { id: "global.provider", stability: "global", content: providerPrompt },
+      { id: "global.methodology", stability: "global", content: methodology },
+      ...(input.inventory ?? []).filter(Boolean).map((content, index) => ({
+        id: index === 0 ? "global.tool_inventory" : `global.tool_inventory.${index}`,
+        stability: "global" as const,
+        content,
+      })),
+      ...agent(input.agent).map((content, index) => ({
+        id: index === 0 ? "session.agent" : `session.agent.${index}`,
+        stability: "session" as const,
+        content,
+      })),
+      ...(input.custom ?? []).filter(Boolean).map((content, index) => ({
+        id: index === 0 ? "session.custom" : `session.custom.${index}`,
+        stability: "session" as const,
+        content,
+      })),
+      ...turn("turn.runtime", input.runtime ?? []),
+      ...turn("turn.user", input.user ?? []),
+      ...turn("turn.hooks", input.hooks ?? []),
+      ...turn("turn.catalog", input.catalog ?? []),
+    ]
+  }
+
   export function agent(agent: Agent.Info) {
-    if (agent.name === "analyst") {
-      return [
-        [
-          "# Analyst Workflow",
-          "- You are the primary plan-driven econometric analysis agent.",
-          "- Before non-trivial empirical execution, first inspect the current canonical dataset, QA outputs, and workflow status.",
-          "- Present a concise user-visible checklist before execution. Use this stage order: Data readiness -> Identification & variables -> Baseline model -> Diagnostics & robustness -> Reporting.",
-          "- Ask for confirmation before running estimation or execution-heavy data steps. After approval, execute the checklist stage by stage instead of skipping straight to regression.",
-          "- Keep all user-visible workflow checklists, approval prompts, and follow-up execution guidance in the user's language. When the user is writing in Chinese, those workflow-facing texts must be Chinese too.",
-          "- Reuse Explorer-produced canonical datasets, QA evidence, and cleaning artifacts whenever they already exist.",
-          "- If the user asks for a reasonable baseline or asks you to choose, use econometrics_recommend when data roles are unclear, then call the matching dedicated estimator.",
-          "- If the user asks for recommendation only, without execution, use econometrics_recommend.",
-          "- If the user explicitly names an estimator, call that estimator's dedicated tool with explicit parameters.",
-          "- Never switch to another estimator automatically. If required variables or identifiers are missing, stop and ask for the missing research-design decision.",
-        ].join("\n"),
-      ]
-    }
-
-    if (agent.name === "explorer") {
-      return [
-        [
-          "# Explorer Workflow",
-          "- You are the data preparation agent for empirical workflows.",
-          "- You can provide targeted help in three common modes: analyze a dataset, design an empirical study, or solve an econometrics question.",
-          "- Keep user-visible workflow guidance in the user's language. If the user is speaking Chinese, checklist-style workflow prompts should also be Chinese.",
-          "- For dataset-analysis requests, inspect files, summarize structure, identify variable roles, surface QA issues, and perform non-destructive cleaning when useful.",
-          "- For empirical-study design requests, help shape the research question, outcomes, treatments, covariates, identification strategy, and required data work before execution.",
-          "- For econometrics-question requests, explain method choice, assumptions, diagnostics, tradeoffs, and what data preparation or workflow steps should come next.",
-          "- Your core job is to inspect raw data, import canonical datasets, run QA, engineer variables, and execute data cleaning before econometric estimation.",
-          "- You may directly run non-destructive data preparation steps such as import, describe, correlation, QA, standardization, interpolation, and feature engineering.",
-          "- Before any row deletion, filter removal, dropna, rollback, or other deletion-like data operation, ask the user to confirm.",
-          "- Do not run formal econometric estimation, regression tables, or report-generation tools by default; hand clean datasets and artifacts off to Analyst for the empirical study plan.",
-          "- Keep user-facing updates brief and report-like; emphasize dataset state, cleaning effects, QA findings, and produced artifacts.",
-        ].join("\n"),
-      ]
-    }
-
+    if (agent.name === "analyst" || agent.name === "explorer") return [ANALYST_ROLE_PROMPT]
     return []
+  }
+
+  export function conversation() {
+    return [CONVERSATION_PROMPT]
   }
 
   export function header(_providerID: string): string[] {
     return []
   }
 
-  export function toolCatalog(toolIDs: string[]) {
-    const exposed = [...new Set(toolIDs)].sort()
-    return [
-      [
-        "# Live Tool Catalog",
-        exposed.length
-          ? `The only callable tools in this request are: ${exposed.join(", ")}.`
-          : "No tools are callable in this request.",
-        "Never emit a tool call for any other name. If the needed tool is absent, explain the missing stage or prerequisite instead.",
-      ].join("\n"),
+  /**
+   * 第二层方法注册表的稳定索引。
+   *
+   * 稳定前缀只说明发现协议和跨语言职责，不枚举计量方法 ID 或方法级 Schema；
+   * 具体方法由 Python Registry 在 tool_search 时按需返回。这样方法增删不会使
+   * System Prompt 的稳定缓存前缀随之变化。
+   */
+  export function toolInventory(
+    _entries: Array<{ modelNamespace: Tool.ModelNamespace }>,
+  ) {
+    const lines = [
+      "# 工具发现",
+      "系统采用三级工具架构：本轮工具目录列出可直接调用的系统工具；具体计量方法由 Python Registry 按需检索，不预加载到稳定工具目录。",
+      "",
+      "## 计量方法发现",
+      "1. 数据或估计任务先调用 analysis_request 登记当前用户消息；登记完成后，再依据 data_import、数据质量检查和推荐结果确认数据事实；",
+      "2. 需要具体方法时调用 tool_search，Python Registry 会返回候选、适用边界和参数 Schema；",
+      "3. 使用 Python 返回的完整 Schema 调用 analysis_prepare(requestId, methodID, arguments)，由 Pydantic 校验参数并对当前数据阶段执行只读 preflight；",
+      "4. inspect 只报告可行性；estimate 只有返回当前任务的 ready specId、方法与数据阶段绑定仍有效，且用户已明确选择该方法后，才能调用 econometrics_execute(specId)。准备规格不是执行授权。",
+      "具体方法以按需加载的完整方法引用为准；不要猜测隐藏方法 ID 或参数。",
+      "Python 引擎只负责 Registry、参数校验、数据计算和结构化结果，不读取 Session、不调用模型、不决定权限或是否向用户提问；",
+      "TypeScript Harness 负责 Agent 循环、工具协议、数据血缘、权限、用户确认、上下文、结果展示和引擎进程生命周期。",
     ]
+    lines.push(
+      "",
+      "数据导入、预处理、状态查询等系统能力按当前工作流直接暴露，不要用 tool_search 搜索它们。",
+      "不要猜测方法 ID；若 Registry 没有匹配结果，说明当前能力缺口或需要补充研究设计。",
+    )
+    return [lines.join("\n")]
+  }
+
+  export function toolCatalog(
+    tools: Array<string | { id: string; modelNamespace: Tool.ModelNamespace }>,
+    deferred?: Array<{ modelNamespace: Tool.ModelNamespace; count: number }>,
+    methodReferences?: Array<{
+      toolID: string
+      modelNamespace: Tool.ModelNamespace
+      description: string
+      inputSchema: unknown
+    }>,
+  ) {
+    const deduplicated = new Map<string, Tool.ModelNamespace | undefined>()
+    for (const item of tools) {
+      if (typeof item === "string") deduplicated.set(item, undefined)
+      else deduplicated.set(item.id, item.modelNamespace)
+    }
+    const exposed = [...deduplicated.keys()].sort()
+    const lines = ["# 当前工具目录"]
+    if (!exposed.length) {
+      lines.push("本轮没有可调用工具。")
+    } else {
+      const grouped = new Map<string, string[]>()
+      for (const id of exposed) {
+        const namespace = deduplicated.get(id)
+        const label = namespace ? Tool.ModelNamespaceLabel[namespace] : "其他"
+        const values = grouped.get(label) ?? []
+        values.push(id)
+        grouped.set(label, values)
+      }
+      lines.push("本轮可调用工具按用途分组如下；工具 ID 保持稳定，详细边界以各工具 schema 为准：")
+      for (const namespace of Tool.ModelNamespaceOrder) {
+        const label = Tool.ModelNamespaceLabel[namespace]
+        const ids = grouped.get(label)
+        if (ids?.length) lines.push(`- ${label}：${ids.join(", ")}`)
+      }
+      const other = grouped.get("其他")
+      if (other?.length) lines.push(`- 其他：${other.join(", ")}`)
+    }
+    if (deferred?.some((item) => item.count > 0)) {
+      lines.push("延迟工具按用途汇总如下；此处不展开工具 ID 和 Schema：")
+      for (const namespace of Tool.ModelNamespaceOrder) {
+        const count = deferred
+          .filter((item) => item.modelNamespace === namespace)
+          .reduce((total, item) => total + Math.max(0, item.count), 0)
+        if (count > 0) lines.push(`- ${Tool.ModelNamespaceLabel[namespace]}：${count} 个`)
+      }
+      lines.push(
+        "需要延迟工具时，先调用 tool_search 描述具体任务或方法；搜索命中的完整 Schema 从下一轮模型请求开始可见。不要猜测隐藏工具 ID。",
+      )
+    }
+    // 已加载的方法引用已经在 tool_search 结果中携带 Schema；稳定 Provider 工具前缀
+    // 不随方法变化。方法字段先由 analysis_prepare 校验并生成 PreparedSpec，执行只传 specId。
+    if (methodReferences?.length) {
+      lines.push(
+        `已加载的计量方法引用（完整 Schema 已随搜索结果提供）：${methodReferences.map((reference) => reference.toolID).join("、")}。先调用 analysis_prepare(requestId, methodID, arguments)；仅当当前 estimate 请求获得 ready specId 且用户授权该方法后，调用 econometrics_execute(specId)。`,
+      )
+    }
+    lines.push(
+      "不得调用“本轮可调用”以外的工具。需要的工具缺失或未解锁时，说明所需阶段转换；不要把阶段限制说成工具未注册。",
+    )
+    lines.push(
+      "需要索引里的其他计量方法时，先用 tool_search 按方法 ID 加载 Schema，再用 analysis_prepare 做字段校验与数据 preflight；econometrics_execute 只接受准备成功的 specId。",
+    )
+    return [lines.join("\n")]
   }
 
   // provider 已锁定为 deepseek + custom 两家（见 provider/model-policy.ts），用户根本连不上
   // gpt / gemini / claude。原先按这些模型 id 分支的 codex/beast/gemini/anthropic prompt
   // 全是死路由，已删除。现在只有两条真实路径：
-  //   - deepseek → 针对它调优的人格 prompt（工具 JSON 纪律、数字只读不背）
-  //   - custom（qwen / kimi / glm / 本地 vLLM）→ 通用人格 prompt
-  // 计量方法学不写在这里——它统一由 ECONOMETRICS_CONTEXT 提供，避免多份决策树各自漂移。
+  //   - deepseek → 完整的中文静态行为 prompt，额外锁定工具参数必须为 JSON 对象
+  //   - custom（Qwen / Kimi / GLM / 本地 vLLM）→ 完整的通用中文静态行为 prompt
+  // 两份 Provider 文件自身都可独立审查；具体估计器路由仍只由 ECONOMETRICS_CONTEXT
+  // 提供，避免把同一套计量决策树复制两份后发生漂移。
   export function provider(model: Provider.Model) {
     const isDeepSeek = model.providerID === "deepseek" || model.api.id.includes("deepseek")
-    const basePrompt = isDeepSeek ? PROMPT_DEEPSEEK : PROMPT_GENERIC
-    return [basePrompt, ECONOMETRICS_CONTEXT]
+    return [isDeepSeek ? COMPACT_PROMPT_DEEPSEEK : COMPACT_PROMPT_GENERIC, COMPACT_ECONOMETRICS_CONTEXT]
   }
 
-  export async function environment(_input?: { messages?: MessageV2.WithParts[] }) {
+  export async function environment(input: {
+    sessionID: string
+    messages?: MessageV2.WithParts[]
+    inputIntent?: WorkflowInputIntent
+    confirmedToolIDs?: string[]
+    analysisRequestId?: string
+  }) {
     // <data-context> 让模型每轮都知道"当前在哪个数据集、哪个活跃阶段、已试几组设定"，
     // 而不必靠翻对话历史去回忆（压缩之后连历史都没了）。数据全部来自已落盘的 manifest，
     // 没有已导入数据集时返回 undefined，不塞空壳。
-    const dataContext = DataContext.build()
+    // sessionID 必传：**会话隔离**。dataset index 是项目级共享的，但只有本会话真正操作过
+    // 的数据集才允许进入模型可见面——新窗口绝不能背上别的会话留下的数据集，见
+    // DataContext.build() 的文档注释。
+    const capsule = buildContextCapsule(input.sessionID)
+    const dataContext = capsule ? renderContextCapsule(capsule) : DataContext.build(input.sessionID)
+    const dataReadiness = DataContext.readiness(input.sessionID)
+    // 执行模式声明。两种模式的工具**可见面完全一致**，差别在执行边界与提问倾向：
+    // - Plan：放行 data_import 的受管检查动作 + question/todowrite/skill，其余返回
+    //   PLAN_MODE_EXECUTION_BLOCKED；因为不执行分析，必须靠多轮 question 把研究设计问清楚。
+    // - Auto：全部放行；此时反复提问才是干扰，能推断的一律自己定。
+    const executionModeNotice =
+      getExecutionMode() === "plan"
+        ? [
+            "执行模式=Plan（规划与受管检查）",
+            "- 可以：data_import 的检查动作（import/profile/validate/correlation/frequency/healthcheck；只生成受管检查快照，不改用户原始文件）、读产物、tool_search 查看计量方法参数 Schema、用 question 向用户澄清、列出完整分析计划。",
+            "- 不可以：data_preprocess、任何估计器/诊断器、econometrics_recommend、data_import 的 export/rollback，以及除上述受管检查快照外的写文件/执行命令——这些会被 PLAN_MODE_EXECUTION_BLOCKED 拒绝。",
+            "- 收到 PLAN_MODE_EXECUTION_BLOCKED 时不要重试、不要换工具绕路：把要执行的方法名、完整参数、数据阶段和步骤顺序写进给用户的方案，并说明切到 Auto 后即可执行。",
+            "- 提问策略（Plan 模式要主动）：用户给了数据文件后，先导入并读画像，再基于真实列名逐轮用 question 澄清研究设计——分析目标、被解释变量、核心解释变量、控制变量、面板的个体与时间列、识别策略与样本范围。每轮只问一个核心决策，用户回答后再问下一个；把已确认的选择累积进最终方案。宁可多问一轮，也不要替用户假设研究设计。",
+          ].join("\n")
+        : [
+            "执行模式=Auto（自由执行）",
+            "- 默认自己把任务做完：能从数据画像、质检结果、schema 或用户已说明的内容推断出来的，直接推断并执行，不要为确认而确认。",
+            "- 只有在缺少这一项就无法继续、且任何假设都可能做出与用户意图相反的分析时，才用 question 询问一次；问完立刻继续执行。",
+            "- 变量角色、面板键、方法选择存在多个同样合理且结论方向不同的选项时，属于必须询问；仅仅是参数细节或可逆的默认值，自己定并在结果里说明。",
+          ].join("\n")
+    const interactionNotice = input.inputIntent === "status"
+      ? "本轮是只读进度查询：优先调用 pipeline 的 status 获取当前真实状态，然后用中文直接回答用户。不要重新导入、质检、读取外部化报告或调用计量工具；不要因为状态不完整而重启分析。"
+      : undefined
+    const analysisRequestNotice = input.analysisRequestId
+      ? `当前 AnalysisRequest requestId=${input.analysisRequestId}；仅在 analysis_prepare 的 requestId 字段使用此值，不要向用户展示。`
+      : undefined
+    const confirmedMethodNotice = input.confirmedToolIDs?.length
+      ? [
+          `本轮用户已明确选择的方法：${input.confirmedToolIDs.join("、")}`,
+          "优先按该方法检查前置条件并执行；不得回到此前失败的方法，也不得静默改用其他方法。",
+          "如果缺少研究设计前提，必须询问用户并说明具体缺口，不得猜测构造规则。",
+        ].join("\n")
+      : undefined
     return [
       [
-        `Here is some useful information about the environment you are running in:`,
-        `<env>`,
-        `  Working directory: ${Instance.directory}`,
-        `  Platform: ${process.platform}`,
-        `  Today's date: ${new Date().toDateString()}`,
-        `</env>`,
+        RUNTIME_ENVIRONMENT_PREFIX,
+        `主工作目录=${Instance.directory}`,
+        `平台=${process.platform}`,
+        `Shell=${process.env.SHELL?.split("/").pop() ?? "unknown"}`,
+        `日期=${new Date().toISOString().slice(0, 10)}`,
+        analysisRequestNotice,
+        interactionNotice,
+        confirmedMethodNotice,
+        executionModeNotice,
         dataContext,
+        dataReadiness,
+        "</runtime>",
       ]
         .filter(Boolean)
         .join("\n"),

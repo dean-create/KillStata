@@ -14,9 +14,19 @@ import { Agent } from "../../agent/agent"
 import { Log } from "../../util/log"
 import { PermissionNext } from "@/permission/next"
 import { errors } from "../error"
-import { lazy } from "../../util/lazy"
+import { lazy } from "@killstata/util/lazy"
+import { ContextManager } from "@/runtime/context-manager"
 
 const log = Log.create({ service: "server" })
+
+// 用户主动中断（点击停止 / esc）不是故障：cancel() 已优雅收尾并把会话置为 cancelled。
+// 被取消的 in-flight 请求随后会以 CancelledError reject 到路由层——若放任它冒进 hono 的
+// stream onError / 未处理拒绝，就会把 "Session prompt cancelled" 的堆栈打到用户界面。
+// 这里在路由边界把取消错误吞掉，真正的故障照旧抛出。
+function ignoreCancelled(error: unknown): undefined {
+  if (error instanceof Session.CancelledError) return undefined
+  throw error
+}
 
 export const SessionRoutes = lazy(() =>
   new Hono()
@@ -118,6 +128,31 @@ export const SessionRoutes = lazy(() =>
         log.info("SEARCH", { url: c.req.url })
         const session = await Session.get(sessionID)
         return c.json(session)
+      },
+    )
+    .get(
+      "/:sessionID/context",
+      describeRoute({
+        summary: "Get session context snapshot",
+        description: "Read the latest bounded context, token budget, compaction and workflow references for a session.",
+        operationId: "session.context",
+        responses: {
+          200: {
+            description: "Context snapshot",
+            content: {
+              "application/json": {
+                schema: resolver(z.record(z.string(), z.any())),
+              },
+            },
+          },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ sessionID: z.string() })),
+      async (c) => {
+        const sessionID = c.req.valid("param").sessionID
+        await Session.get(sessionID)
+        return c.json(ContextManager.snapshot({ sessionID }))
       },
     )
     .get(
@@ -280,6 +315,7 @@ export const SessionRoutes = lazy(() =>
           (session) => {
             if (updates.title !== undefined) {
               session.title = updates.title
+              session.titleSource = "manual"
             }
             if (updates.time?.archived !== undefined) session.time.archived = updates.time.archived
           },
@@ -437,11 +473,22 @@ export const SessionRoutes = lazy(() =>
       ),
       validator(
         "json",
-        z.object({
-          providerID: z.string(),
-          modelID: z.string(),
-          auto: z.boolean().optional().default(false),
-        }),
+        z
+          .object({
+            providerID: z.string(),
+            modelID: z.string(),
+            auto: z.boolean().optional().default(false),
+            instructions: z.string().trim().min(1).max(4_000).optional(),
+          })
+          .superRefine((input, ctx) => {
+            if (input.auto && input.instructions) {
+              ctx.addIssue({
+                code: "custom",
+                path: ["instructions"],
+                message: "自动压缩不接受用户自定义指令。",
+              })
+            }
+          }),
       ),
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
@@ -465,8 +512,10 @@ export const SessionRoutes = lazy(() =>
             modelID: body.modelID,
           },
           auto: body.auto,
+          instructions: body.instructions,
+          reason: body.auto ? "threshold" : "manual",
         })
-        await SessionPrompt.loop(sessionID)
+        await SessionPrompt.loop(sessionID).catch(ignoreCancelled)
         return c.json(true)
       },
     )
@@ -657,8 +706,8 @@ export const SessionRoutes = lazy(() =>
         return stream(c, async (stream) => {
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
-          const msg = await SessionPrompt.prompt({ ...body, sessionID })
-          stream.write(JSON.stringify(msg))
+          const msg = await SessionPrompt.prompt({ ...body, sessionID }).catch(ignoreCancelled)
+          if (msg) stream.write(JSON.stringify(msg))
         })
       },
     )
@@ -689,7 +738,7 @@ export const SessionRoutes = lazy(() =>
         return stream(c, async () => {
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
-          SessionPrompt.prompt({ ...body, sessionID })
+          void SessionPrompt.prompt({ ...body, sessionID }).catch(ignoreCancelled)
         })
       },
     )
@@ -726,8 +775,8 @@ export const SessionRoutes = lazy(() =>
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         const body = c.req.valid("json")
-        const msg = await SessionPrompt.command({ ...body, sessionID })
-        return c.json(msg)
+        const msg = await SessionPrompt.command({ ...body, sessionID }).catch(ignoreCancelled)
+        return c.json(msg ?? null)
       },
     )
     .post(
@@ -758,8 +807,8 @@ export const SessionRoutes = lazy(() =>
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         const body = c.req.valid("json")
-        const msg = await SessionPrompt.shell({ ...body, sessionID })
-        return c.json(msg)
+        const msg = await SessionPrompt.shell({ ...body, sessionID }).catch(ignoreCancelled)
+        return c.json(msg ?? null)
       },
     )
     .post(

@@ -17,6 +17,8 @@ export namespace Skill {
     description: z.string(),
     location: z.string(),
     source: SkillSource,
+    /** frontmatter 里可选声明的"本技能建议使用的工具"，加载时注入提示（非强制权限约束）。 */
+    recommendedTools: z.array(z.string()).optional(),
   })
   export type Info = z.infer<typeof Info>
 
@@ -55,7 +57,7 @@ export namespace Skill {
 
       if (!md) return
 
-      const parsed = Info.pick({ name: true, description: true }).safeParse(md.data)
+      const parsed = Info.pick({ name: true, description: true, recommendedTools: true }).safeParse(md.data)
       if (!parsed.success) return
 
       const existing = skills[parsed.data.name]
@@ -73,6 +75,7 @@ export namespace Skill {
         description: parsed.data.description,
         location: match,
         source,
+        recommendedTools: parsed.data.recommendedTools,
       }
     }
 

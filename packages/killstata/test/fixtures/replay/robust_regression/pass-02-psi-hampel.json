@@ -1,0 +1,1 @@
+{"description":"显式指定 Hampel psi 函数处理强离群","modelArgs":{"datasetId":"panel_98","stageId":"stage_000","dependentVar":"y","treatmentVar":"x1","covariates":["x2"],"psi":"hampel"},"expect":"pass"}

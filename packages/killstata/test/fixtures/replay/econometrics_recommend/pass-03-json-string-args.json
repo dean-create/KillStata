@@ -1,5 +1,5 @@
 {
-  "description": "模型把整个参数对象序列化成 JSON 字符串（已知模型失败模式），normalizeToolArgs 应当把它解回对象",
-  "modelArgs": "{\"datasetId\":\"grunfeld_08bce7a7\",\"stageId\":\"stage_000\"}",
+  "description": "模型把变量角色对象序列化成 JSON 字符串；Harness 解码后仍与 runtime 血缘分离",
+  "modelArgs": "{\"dependentVar\":\"investment\",\"treatmentVar\":\"value\"}",
   "expect": "pass"
 }

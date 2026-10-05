@@ -7,5 +7,5 @@
     "treatmentVar": "wage"
   },
   "expect": "reject",
-  "rejectHint": ["treatmentVar", "不能与"]
+  "rejectHint": ["dependentVar", "不能同时作为"]
 }

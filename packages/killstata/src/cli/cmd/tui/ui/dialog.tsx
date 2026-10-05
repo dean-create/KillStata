@@ -29,7 +29,7 @@ export function Dialog(
       paddingTop={dimensions().height / 4}
       left={0}
       top={0}
-      backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
+      backgroundColor={RGBA.fromInts(0, 0, 0, 60)}
     >
       <box
         onMouseUp={async (e) => {
@@ -142,7 +142,7 @@ export function DialogProvider(props: ParentProps) {
           const text = renderer.getSelection()?.getSelectedText()
           if (text && text.length > 0) {
             await Clipboard.copy(text)
-              .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+              .then(() => toast.show({ message: "已复制到剪贴板", variant: "info" }))
               .catch(toast.error)
             renderer.clearSelection()
           }

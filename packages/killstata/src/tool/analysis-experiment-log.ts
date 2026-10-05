@@ -24,6 +24,9 @@ export type ExperimentEntry = {
   method: string
   /** 这次回归用的是哪个数据阶段 */
   stageId?: string
+  /** branch/run 是 stage-scoped 事实，不能只按 stageId 跨分支合并。 */
+  branch?: string
+  runId?: string
   stageAction?: string
   stageLabel?: string
   rowCount?: number
@@ -92,9 +95,8 @@ function describeSampleChange(entry: ExperimentEntry) {
 function describeSpec(entry: ExperimentEntry) {
   const parts: string[] = []
   if (entry.dependentVar) {
-    const didTerms = entry.groupVar && entry.postVar
-      ? [entry.groupVar, entry.postVar, `${entry.groupVar}:${entry.postVar}`]
-      : []
+    const didTerms =
+      entry.groupVar && entry.postVar ? [entry.groupVar, entry.postVar, `${entry.groupVar}:${entry.postVar}`] : []
     const rhs = [entry.treatmentVar, ...didTerms, ...(entry.covariates ?? [])].filter(Boolean).join(" + ")
     parts.push(`\`${entry.dependentVar} ~ ${rhs || "—"}\``)
   }
@@ -113,7 +115,9 @@ function describeDelta(entry: ExperimentEntry, previous?: ExperimentEntry) {
   const coefBefore = previous.coefficient
   const coefNow = entry.coefficient
   const pct =
-    coefBefore !== 0 ? ` (${coefNow > coefBefore ? "+" : ""}${(((coefNow - coefBefore) / Math.abs(coefBefore)) * 100).toFixed(1)}%)` : ""
+    coefBefore !== 0
+      ? ` (${coefNow > coefBefore ? "+" : ""}${(((coefNow - coefBefore) / Math.abs(coefBefore)) * 100).toFixed(1)}%)`
+      : ""
   lines.push(`系数 ${fmt(coefBefore)} → **${fmt(coefNow)}**${pct}`)
 
   if (entry.pValue !== undefined && previous.pValue !== undefined) {
@@ -133,12 +137,14 @@ function describeDelta(entry: ExperimentEntry, previous?: ExperimentEntry) {
 
 function renderEntry(entry: ExperimentEntry, previous?: ExperimentEntry) {
   const lines: string[] = []
-  const label = entry.stageLabel || entry.stageAction || entry.stageId || "原始数据"
+  const label = entry.stageLabel || entry.stageAction || "原始数据"
   lines.push(`## 实验 ${entry.index} · ${label}`)
   lines.push("")
   lines.push(`- **时间**：${entry.createdAt}`)
-  lines.push(`- **数据**：${describeSampleChange(entry)}${entry.stageId ? ` · \`${entry.stageId}\`` : ""}`)
-  lines.push(`- **方法**：\`${entry.effectiveMethod || entry.method}\`${entry.degradedFrom ? `（自 \`${entry.degradedFrom}\` 降级）` : ""}`)
+  lines.push(`- **数据**：${describeSampleChange(entry)}`)
+  lines.push(
+    `- **方法**：\`${entry.effectiveMethod || entry.method}\`${entry.degradedFrom ? `（自 \`${entry.degradedFrom}\` 降级）` : ""}`,
+  )
   lines.push(`- **设定**：${describeSpec(entry)}`)
 
   const star = stars(entry.pValue)
@@ -169,7 +175,7 @@ function renderSummaryTable(entries: ExperimentEntry[]) {
   lines.push("| # | 数据阶段 | N | 方法 | 系数 | 标准误 | p 值 | 显著性 |")
   lines.push("|---|---|---|---|---|---|---|---|")
   for (const e of entries) {
-    const label = e.stageLabel || e.stageAction || e.stageId || "—"
+    const label = e.stageLabel || e.stageAction || "—"
     lines.push(
       `| ${e.index} | ${label} | ${fmtCount(e.rowsUsed ?? e.rowCount)} | ${e.effectiveMethod || e.method} ` +
         `| ${fmt(e.coefficient)} | ${fmt(e.stdError)} | ${fmtP(e.pValue)} | ${stars(e.pValue) || "n.s."} |`,
@@ -183,7 +189,7 @@ export function renderExperimentLog(input: { datasetId: string; entries: Experim
   const lines: string[] = []
   lines.push(`# 实证分析实验日志`)
   lines.push("")
-  lines.push(`数据集：\`${input.datasetId}\` · 共 ${input.entries.length} 次实验`)
+  lines.push(`共 ${input.entries.length} 次实验`)
   lines.push("")
 
   if (input.entries.length === 0) {
@@ -215,28 +221,45 @@ function readResultNumbers(outputPath?: string) {
   if (!outputPath || !fs.existsSync(outputPath)) return {}
   try {
     const parsed = JSON.parse(fs.readFileSync(outputPath, "utf-8")) as Record<string, any>
-    const primary = parsed.primary && typeof parsed.primary === "object"
-      ? parsed.primary as Record<string, unknown>
-      : {}
+    const primary =
+      parsed.primary && typeof parsed.primary === "object" ? (parsed.primary as Record<string, unknown>) : {}
     return {
-      coefficient: typeof parsed.coefficient === "number"
-        ? parsed.coefficient
-        : typeof primary.estimate === "number" ? primary.estimate : undefined,
-      stdError: typeof parsed.std_error === "number"
-        ? parsed.std_error
-        : typeof primary.stdError === "number" ? primary.stdError : undefined,
-      pValue: typeof parsed.p_value === "number"
-        ? parsed.p_value
-        : typeof primary.pValue === "number" ? primary.pValue : undefined,
-      rSquared: typeof parsed.r_squared === "number"
-        ? parsed.r_squared
-        : typeof parsed.rSquared === "number" ? parsed.rSquared : undefined,
-      rowsUsed: typeof parsed.rows_used === "number"
-        ? parsed.rows_used
-        : typeof parsed.rowsUsed === "number" ? parsed.rowsUsed : undefined,
-      effectiveMethod: typeof parsed.effective_method === "string"
-        ? parsed.effective_method
-        : typeof parsed.method === "string" ? parsed.method : undefined,
+      coefficient:
+        typeof parsed.coefficient === "number"
+          ? parsed.coefficient
+          : typeof primary.estimate === "number"
+            ? primary.estimate
+            : undefined,
+      stdError:
+        typeof parsed.std_error === "number"
+          ? parsed.std_error
+          : typeof primary.stdError === "number"
+            ? primary.stdError
+            : undefined,
+      pValue:
+        typeof parsed.p_value === "number"
+          ? parsed.p_value
+          : typeof primary.pValue === "number"
+            ? primary.pValue
+            : undefined,
+      rSquared:
+        typeof parsed.r_squared === "number"
+          ? parsed.r_squared
+          : typeof parsed.rSquared === "number"
+            ? parsed.rSquared
+            : undefined,
+      rowsUsed:
+        typeof parsed.rows_used === "number"
+          ? parsed.rows_used
+          : typeof parsed.rowsUsed === "number"
+            ? parsed.rowsUsed
+            : undefined,
+      effectiveMethod:
+        typeof parsed.effective_method === "string"
+          ? parsed.effective_method
+          : typeof parsed.method === "string"
+            ? parsed.method
+            : undefined,
       degradedFrom: typeof parsed.degraded_from === "string" ? parsed.degraded_from : undefined,
       warnings: Array.isArray(parsed.warnings) ? (parsed.warnings as string[]) : undefined,
     }
@@ -247,7 +270,7 @@ function readResultNumbers(outputPath?: string) {
 
 /** 只有真正跑出了估计结果的 artifact 才算一次"实验"——推荐/画像类的不算 */
 function isEstimationArtifact(artifact: DatasetArtifactRecord) {
-  const skip = new Set(["auto_recommend", "qa", "describe", "correlation", "profile"])
+  const skip = new Set(["auto_recommend", "validate", "profile", "correlation"])
   return !skip.has(artifact.action)
 }
 
@@ -277,6 +300,8 @@ export function buildExperimentEntries(manifest: DatasetManifest): ExperimentEnt
       createdAt: artifact.createdAt,
       method: artifact.action,
       stageId: stage?.stageId,
+      branch: stage?.branch,
+      runId: artifact.runId ?? stage?.runId,
       stageAction: stage?.action,
       stageLabel: stage?.label,
       rowCount: stage?.rowCount,

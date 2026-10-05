@@ -18,6 +18,7 @@ import path from "path"
 import { useRoute, useRouteData } from "@tui/context/route"
 import { useSync } from "@tui/context/sync"
 import { SplitBorder } from "@tui/component/border"
+import { analysisProgressText } from "./progress-text"
 import { useTheme } from "@tui/context/theme"
 import {
   BoxRenderable,
@@ -57,6 +58,7 @@ import { DialogConfirm } from "@tui/ui/dialog-confirm"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
+import { DialogModelSettings } from "../../component/dialog-model-settings"
 import { Sidebar } from "./sidebar"
 import { LANGUAGE_EXTENSIONS } from "@tui/util/language"
 import parsers from "../../../../../../parsers-config.ts"
@@ -72,8 +74,15 @@ import { Global } from "@/global"
 import { PermissionPrompt } from "./permission"
 import { QuestionPrompt } from "./question"
 import { DialogExportOptions } from "../../ui/dialog-export-options"
-import { formatTranscript } from "../../util/transcript"
-import { readToolDisplay, renderToolDisplay } from "@/tool/analysis-display"
+import { DialogContext } from "./dialog-context"
+import { formatTranscript, isInternalCompactionContinuation, isInternalCompactionSummary } from "../../util/transcript"
+import {
+  displayGlobPattern,
+  displayPath as sharedDisplayPath,
+  isInternalWorkspacePath,
+  readToolDisplay,
+  renderToolDisplay,
+} from "@/tool/analysis-display"
 import { readToolAnalysisView } from "@/tool/analysis-user-view"
 import {
   sanitizeAnalysisAssistantText,
@@ -82,8 +91,16 @@ import {
   type AnalysisToolPartLike,
 } from "@/runtime/analysis-text-sanitizer"
 import { isAnalysisTurn, pendingTaskLabel, shouldShowReasoning } from "@/runtime/analysis-user-view"
-import { WORKFLOW_ANALYSIS_TOOL_IDS, isWorkflowAnalysisTool, isWorkflowEstimateTool } from "@/runtime/tool-catalog"
+import { FailurePolicy } from "@/runtime/failure-policy"
+import {
+  WORKFLOW_ANALYSIS_TOOL_IDS,
+  isWorkflowAnalysisTool,
+  isWorkflowEstimateTool,
+  isWorkflowReadOnlyAction,
+} from "@/runtime/tool-catalog"
 import { isReasoningExpanded, toggleReasoningExpandedState } from "./reasoning-state"
+import { analysisToolErrorPresentation } from "@/cli/cmd/tool-error-display"
+import { ProviderTransform } from "@/provider/transform"
 
 addDefaultParsers(parsers.parsers)
 
@@ -100,6 +117,7 @@ class CustomSpeedScroll implements ScrollAcceleration {
 const ANALYSIS_INTERNAL_ERROR_PATTERNS = [
   /Cannot read .* as text/i,
   /Cannot read binary file/i,
+  /不能将.*按文本读取[：:]/,
   /Model tried to call unavailable tool/i,
   /\bartifactRefs\b/i,
   /\blatestTrustedArtifacts\b/i,
@@ -123,9 +141,11 @@ function analysisErrorDisplayText(input: {
   if (!message) return undefined
   const friendly = userFacingAnalysisErrorText(message)
   if (friendly) return friendly
+  if (ProviderTransform.isBalanceOrQuotaError(message)) return ProviderTransform.BALANCE_OR_QUOTA_ERROR_MESSAGE
   if (!input.isAnalysis) return message
   if (input.waitingForAccess) return undefined
-  if (/[A-Za-z]{3}/.test(message)) return "分析未完成，未生成可用结果。请检查任务参数后重试。"
+  // 用户输入的是自然语言，没有"参数"可查；这是未分类的内部错误兜底，只给中性、可操作的话。
+  if (/[A-Za-z]{3}/.test(message)) return "这一步分析没能完成，请重试，或换一种说法再试一次。"
   return isInternalAnalysisErrorText(message) ? undefined : message
 }
 
@@ -137,7 +157,6 @@ const context = createContext<{
   showTimestamps: () => boolean
   showDetails: () => boolean
   showGenericToolOutput: () => boolean
-  diffWrapMode: () => "word" | "none"
   reasoningExpanded: (partID: string) => boolean
   toggleReasoningExpanded: (partID: string) => void
   sync: ReturnType<typeof useSync>
@@ -163,7 +182,24 @@ export function Session() {
       .filter((x) => x.parentID === parentID || x.id === parentID)
       .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   })
-  const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
+  // 消息挂载上限：长会话不无限渲染（对齐 claude-code 的 MAX_MOUNTED_ITEMS）。
+  // 默认只渲染最近 MAX_RENDERED_MESSAGES 条；更早的折叠成顶部一行提示，点击展开全部。
+  // 展开后不再收回（会话继续增长时仍受上限保护）。
+  const MAX_RENDERED_MESSAGES = 150
+  const [showAllMessages, setShowAllMessages] = createSignal(false)
+  const allMessages = createMemo(() =>
+    (sync.data.message[route.sessionID] ?? []).filter((message) => {
+      if (isInternalCompactionSummary(message)) return false
+      return !isInternalCompactionContinuation({ info: message, parts: sync.data.part[message.id] ?? [] })
+    }),
+  )
+  const earlierHiddenCount = createMemo(() =>
+    showAllMessages() ? 0 : Math.max(0, allMessages().length - MAX_RENDERED_MESSAGES),
+  )
+  const messages = createMemo(() => {
+    if (showAllMessages()) return allMessages()
+    return allMessages().slice(-MAX_RENDERED_MESSAGES)
+  })
   const permissions = createMemo(() => {
     if (session()?.parentID) return []
     return children().flatMap((x) => sync.data.permission[x.id] ?? [])
@@ -174,7 +210,8 @@ export function Session() {
   })
 
   const pending = createMemo(() => {
-    return messages().findLast((x) => x.role === "assistant" && !x.time.completed)?.id
+    const last = messages().findLast((x) => x.role === "assistant" && !x.time.completed)
+    return last?.id
   })
 
   const lastAssistant = createMemo(() => {
@@ -185,14 +222,13 @@ export function Session() {
   const [sidebar, setSidebar] = kv.signal<"auto" | "hide">("sidebar", "hide")
   const [sidebarOpen, setSidebarOpen] = createSignal(false)
   const [conceal, setConceal] = createSignal(true)
-  const [showThinking, setShowThinking] = kv.signal("thinking_visibility", false)
+  const [showThinking, setShowThinking] = kv.signal("thinking_visibility", true)
   const [timestamps, setTimestamps] = kv.signal<"hide" | "show">("timestamps", "hide")
   const [showDetails, setShowDetails] = kv.signal("tool_details_visibility", false)
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
   const [showAssistantMetadata, setShowAssistantMetadata] = kv.signal("assistant_metadata_visibility", true)
   const [showScrollbar, setShowScrollbar] = kv.signal("scrollbar_visible", false)
   const [contentOverflows, setContentOverflows] = createSignal(false)
-  const [diffWrapMode, setDiffWrapMode] = createSignal<"word" | "none">("word")
   const [animationsEnabled, setAnimationsEnabled] = kv.signal("animations_enabled", true)
   const [reasoningExpandedState, setReasoningExpandedState] = createSignal<Record<string, boolean>>({})
 
@@ -231,7 +267,7 @@ export function Session() {
       .catch((e) => {
         console.error(e)
         toast.show({
-          message: `Session not found: ${route.sessionID}`,
+          message: `未找到会话：${route.sessionID}`,
           variant: "error",
         })
         return navigate({ type: "home" })
@@ -245,23 +281,6 @@ export function Session() {
   createEffect(() => {
     if (route.initialPrompt && prompt) {
       prompt.set(route.initialPrompt)
-    }
-  })
-
-  let lastSwitch: string | undefined = undefined
-  sdk.event.on("message.part.updated", (evt) => {
-    const part = evt.properties.part
-    if (part.type !== "tool") return
-    if (part.sessionID !== route.sessionID) return
-    if (part.state.status !== "completed") return
-    if (part.id === lastSwitch) return
-
-    if (part.tool === "plan_exit") {
-      local.agent.set("build")
-      lastSwitch = part.id
-    } else if (part.tool === "plan_enter") {
-      local.agent.set("plan")
-      lastSwitch = part.id
     }
   })
 
@@ -383,9 +402,6 @@ export function Session() {
       value: "session.timeline",
       keybind: "session_timeline",
       category: "会话",
-      slash: {
-        name: "timeline",
-      },
       onSelect: (dialog) => {
         dialog.replace(() => (
           <DialogTimeline
@@ -427,6 +443,18 @@ export function Session() {
           providerID: selectedModel.providerID,
         })
         dialog.clear()
+      },
+    },
+    {
+      title: "查看上下文占用",
+      description: "查看当前会话的上下文窗口、剩余预算与实际用量",
+      value: "session.context",
+      category: "会话",
+      slash: {
+        name: "context",
+      },
+      onSelect: (dialog) => {
+        dialog.replace(() => <DialogContext />)
       },
     },
     {
@@ -550,14 +578,10 @@ export function Session() {
     },
     {
       title: showDetails() ? "隐藏工具详情" : "显示工具详情",
-      description: "展开命令输出、文件正文与完整 diff（默认只显示做了什么）",
+      description: "展开命令输出、文件正文与完整diff（默认只显示做了什么）",
       value: "session.toggle.actions",
       keybind: "tool_details",
       category: "会话",
-      // 工具输出默认收敛成一行摘要，所以必须给一个好找的开关把正文调出来。
-      slash: {
-        name: "details",
-      },
       onSelect: (dialog) => {
         setShowDetails((prev) => !prev)
         dialog.clear()
@@ -591,6 +615,17 @@ export function Session() {
       category: "会话",
       onSelect: (dialog) => {
         setAnimationsEnabled((prev) => !prev)
+        dialog.clear()
+      },
+    },
+    {
+      title: local.executionMode.current() === "auto" ? "切换到 Plan 只读规划" : "切换到 Auto 自由执行",
+      description: local.executionMode.current() === "auto" ? "只允许读文件和列计划，不能写/执行" : "允许自由决策调工具完成任务",
+      value: "session.toggle.execution_mode",
+      category: "会话",
+      onSelect: (dialog) => {
+        const next = local.executionMode.toggle()
+        toast.show({ message: `已切换到 ${next === "auto" ? "Auto" : "Plan"} 模式`, variant: "info", duration: 2000 })
         dialog.clear()
       },
     },
@@ -741,7 +776,7 @@ export function Session() {
           (msg): msg is AssistantMessage => msg.role === "assistant" && (!revertID || msg.id < revertID),
         )
         if (!lastAssistantMessage) {
-          toast.show({ message: "No assistant messages found", variant: "error" })
+          toast.show({ message: "没有找到助手消息", variant: "error" })
           dialog.clear()
           return
         }
@@ -750,7 +785,7 @@ export function Session() {
         const text = copyableAssistantText(lastAssistantMessage, parts, sync)
         if (!text) {
           toast.show({
-            message: "No text content found in last assistant message",
+            message: "最后一条助手消息没有文本内容",
             variant: "error",
           })
           dialog.clear()
@@ -758,8 +793,8 @@ export function Session() {
         }
 
         Clipboard.copy(text)
-          .then(() => toast.show({ message: "Message copied to clipboard!", variant: "success" }))
-          .catch(() => toast.show({ message: "Failed to copy to clipboard", variant: "error" }))
+          .then(() => toast.show({ message: "消息已复制到剪贴板", variant: "success" }))
+          .catch(() => toast.show({ message: "复制到剪贴板失败", variant: "error" }))
         dialog.clear()
       },
     },
@@ -916,7 +951,14 @@ export function Session() {
   const promptHint = createMemo(() => {
     return undefined
   })
-  const promptRight = createMemo(() => undefined)
+  const promptRight = createMemo(() => {
+    const current = local.model.current()
+    const level = local.model.reasoningLevel.current()
+    if (!current) return undefined
+    // 输入框右侧只用原始 modelID（如 "deepseek-v4-flash"）小写展示，弱化视觉权重；
+    // 与 DialogModel 里展示的人类可读 Display Name（如 "DeepSeek V4 Flash"）区分开。
+    return `${current.modelID.toLowerCase()}${level ? ` ${level}` : ""}`
+  })
 
   // snap to bottom when session changes
   createEffect(on(() => route.sessionID, toBottom))
@@ -933,7 +975,6 @@ export function Session() {
         showTimestamps,
         showDetails,
         showGenericToolOutput,
-        diffWrapMode,
         reasoningExpanded: (partID) => isReasoningExpanded(reasoningExpandedState(), partID),
         toggleReasoningExpanded: (partID) =>
           setReasoningExpandedState((state) => toggleReasoningExpandedState(state, partID)),
@@ -964,6 +1005,21 @@ export function Session() {
               flexGrow={1}
               scrollAcceleration={scrollAcceleration()}
             >
+              <Show when={earlierHiddenCount() > 0}>
+                <box
+                  marginTop={1}
+                  paddingLeft={2}
+                  flexShrink={0}
+                  onMouseUp={() => {
+                    if (renderer.getSelection()?.getSelectedText()) return
+                    setShowAllMessages(true)
+                  }}
+                >
+                  <text fg={theme.textMuted}>
+                    ↑ 更早的 {earlierHiddenCount()} 条消息已折叠（点击展开全部）
+                  </text>
+                </box>
+              </Show>
               <For each={messages()}>
                 {(message, index) => (
                   <Switch>
@@ -976,8 +1032,8 @@ export function Session() {
                         const handleUnrevert = async () => {
                           const confirmed = await DialogConfirm.show(
                             dialog,
-                            "Confirm Redo",
-                            "Are you sure you want to restore the reverted messages?",
+                            "确认恢复",
+                            "确定要恢复已撤回的消息吗？",
                           )
                           if (confirmed) {
                             command.trigger("session.redo")
@@ -1008,7 +1064,7 @@ export function Session() {
                               <Show when={revert()!.dataset}>
                                 <box marginTop={1}>
                                   <text fg={theme.text}>
-                                    数据已回到 <span style={{ fg: theme.success }}>{revert()!.dataset!.stageId}</span>
+                                    数据已恢复到撤回前的状态
                                   </text>
                                   <text fg={theme.textMuted}>撤销的操作：{revert()!.dataset!.undoneAction}</text>
                                 </box>
@@ -1049,6 +1105,7 @@ export function Session() {
                   </Switch>
                 )}
               </For>
+              <RetryNotice sessionID={route.sessionID} />
             </scrollbox>
             <box flexShrink={0}>
               <Show when={permissions().length > 0}>
@@ -1075,6 +1132,7 @@ export function Session() {
                 sessionID={route.sessionID}
                 hint={promptHint()}
                 right={promptRight()}
+                onRightMouseDown={() => dialog.replace(() => <DialogModelSettings />)}
               />
               <Footer />
             </box>
@@ -1145,51 +1203,52 @@ function UserMessage(props: {
         <box
           id={props.message.id}
           onMouseUp={props.onMouseUp}
-          marginTop={props.index === 0 ? 0 : 2}
+          marginTop={props.index === 0 ? 0 : 1}
           paddingLeft={1}
           flexShrink={0}
         >
           <box flexDirection="row" gap={1}>
-            <text fg={color()} flexShrink={0}>●</text>
-            <text fg={theme.textMuted} flexShrink={0}>用户</text>
-            <text fg={theme.text}>{text()?.text}</text>
+            <text fg={color()} flexShrink={0}>
+              ●
+            </text>
+            <text fg={color()}>{text()?.text}</text>
           </box>
-            <Show when={files().length}>
-              <box flexDirection="row" paddingLeft={3} paddingTop={1} gap={1} flexWrap="wrap">
-                <For each={files()}>
-                  {(file) => {
-                    const bg = createMemo(() => {
-                      if (file.mime.startsWith("image/")) return theme.accent
-                      if (file.mime === "application/pdf") return theme.primary
-                      return theme.secondary
-                    })
-                    return (
-                      <text fg={theme.text}>
-                        <span style={{ bg: bg(), fg: theme.background }}> {MIME_BADGE[file.mime] ?? file.mime} </span>
-                        <span style={{ fg: theme.textMuted }}> {file.filename} </span>
-                      </text>
-                    )
-                  }}
-                </For>
-              </box>
-            </Show>
-            <Show
-              when={queued()}
-              fallback={
-                <Show when={ctx.showTimestamps()}>
-                  <text paddingLeft={3} fg={theme.textMuted}>
-                    {Locale.todayTimeOrDateTime(props.message.time.created)}
-                  </text>
-                </Show>
-              }
-            >
-              <box paddingLeft={3} flexDirection="row" gap={1} flexShrink={0}>
-                <Show when={queuedTask()} fallback={<text fg={theme.textMuted}>等待回复</text>}>
-                  <text fg={theme.primary}>{queuedTask()}</text>
-                  <ProgressDots />
-                </Show>
-              </box>
-            </Show>
+          <Show when={files().length}>
+            <box flexDirection="row" paddingLeft={3} paddingTop={1} gap={1} flexWrap="wrap">
+              <For each={files()}>
+                {(file) => {
+                  const bg = createMemo(() => {
+                    if (file.mime.startsWith("image/")) return theme.accent
+                    if (file.mime === "application/pdf") return theme.primary
+                    return theme.secondary
+                  })
+                  return (
+                    <text fg={theme.text}>
+                      <span style={{ bg: bg(), fg: theme.background }}> {MIME_BADGE[file.mime] ?? file.mime} </span>
+                      <span style={{ fg: theme.textMuted }}> {file.filename} </span>
+                    </text>
+                  )
+                }}
+              </For>
+            </box>
+          </Show>
+          <Show
+            when={queued()}
+            fallback={
+              <Show when={ctx.showTimestamps()}>
+                <text paddingLeft={3} fg={theme.textMuted}>
+                  {Locale.todayTimeOrDateTime(props.message.time.created)}
+                </text>
+              </Show>
+            }
+          >
+            <box paddingLeft={3} flexDirection="row" gap={1} flexShrink={0}>
+              <Show when={queuedTask()} fallback={<text fg={theme.textMuted}>等待回复</text>}>
+                <text fg={theme.primary}>{queuedTask()}</text>
+                <ProgressDots />
+              </Show>
+            </box>
+          </Show>
         </box>
       </Show>
       <Show when={compaction()}>
@@ -1222,15 +1281,21 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
     })
   })
 
+  // 思考过程必须排在正文之前：模型可能交错吐出 text/reasoning，按类型重排而不改内容顺序
+  const orderedParts = createMemo(() => [
+    ...props.parts.filter((part) => part.type === "reasoning"),
+    ...props.parts.filter((part) => part.type !== "reasoning"),
+  ])
+
   return (
     <>
-      <For each={props.parts}>
+      <For each={orderedParts()}>
         {(part, index) => {
           const component = createMemo(() => PART_MAPPING[part.type as keyof typeof PART_MAPPING])
           return (
             <Show when={component()}>
               <Dynamic
-                last={index() === props.parts.length - 1}
+                last={index() === orderedParts().length - 1}
                 component={component()}
                 part={part as any}
                 message={props.message}
@@ -1253,7 +1318,9 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
         </box>
       </Show>
       <Show when={props.message.error?.name === "MessageAbortedError"}>
-        <text paddingLeft={2} fg={theme.textMuted}>回答已停止</text>
+        <text paddingLeft={2} fg={theme.textMuted}>
+          回答已停止
+        </text>
       </Show>
     </>
   )
@@ -1282,7 +1349,7 @@ const INTERNAL_ANALYSIS_MESSAGE_TOOLS = new Set([
   "read",
   "write",
   "bash",
-  "workflow",
+  "pipeline",
   "skill",
   "invalid",
   "todowrite",
@@ -1384,12 +1451,31 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
   const ctx = use()
   const sync = useSync()
   const renderer = useRenderer()
-  const content = createMemo(() => {
-    const text = props.part.text.replace("[REDACTED]", "").trim()
-    return containsEngineInternalData(text) ? "" : text
+  // 聚合同一条 assistant 消息内的多段思考，避免 13 个折叠刷屏
+  const aggregatedContent = createMemo(() => {
+    const parts = (sync.data.part[props.message.id] ?? []).filter(
+      (p): p is ReasoningPart => p.type === "reasoning",
+    )
+    const combined = parts
+      .map((p) => p.text.replace("[REDACTED]", "").trim())
+      .filter((t) => t && !containsEngineInternalData(t))
+      .join("\n\n")
+    // 聚合渲染点固定在第一段：思考块必须排在同一条消息的正文之前
+    const isFirst = parts.length === 0 || parts[0]!.id === props.part.id
+    if (!isFirst) return ""
+    const single = props.part.text.replace("[REDACTED]", "").trim()
+    if (parts.length <= 1) return containsEngineInternalData(single) ? "" : single
+    return combined
   })
+  const content = aggregatedContent
   const expanded = createMemo(() => ctx.reasoningExpanded(props.part.id))
   const shouldShow = createMemo(() => {
+    // 只有第一段思考才渲染（内容已聚合），保证“先思考后回答”的顺序
+    const parts = (sync.data.part[props.message.id] ?? []).filter(
+      (p): p is ReasoningPart => p.type === "reasoning",
+    )
+    const isFirst = parts.length === 0 || parts[0]!.id === props.part.id
+    if (!isFirst) return false
     return shouldShowReasoning({
       hasContent: Boolean(content()),
       showThinking: ctx.showThinking(),
@@ -1415,7 +1501,7 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
         }}
       >
         <text fg={theme.textMuted} paddingLeft={1}>
-          {expanded() ? "收起分析过程" : "展开分析过程"}
+          {expanded() ? "▾ 思考过程" : "▸ 思考过程"}
         </text>
         <Show when={expanded()}>
           <code
@@ -1484,11 +1570,11 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
   })
   return (
     <Show when={content()}>
-      <box id={"text-" + props.part.id} paddingLeft={2} marginTop={2} flexShrink={0}>
+      <box id={"text-" + props.part.id} paddingLeft={2} marginTop={1} flexShrink={0}>
         <code
           filetype="markdown"
           drawUnstyledText={false}
-          streaming={false}
+          streaming={props.last && !props.message.time.completed}
           syntaxStyle={syntax()}
           content={content()}
           conceal={ctx.conceal()}
@@ -1515,17 +1601,36 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
       props.part.state.status !== "error" &&
       ([
         "data_import",
+        "data_preprocess",
+        "econometrics_execute",
+        "econometrics_recommend",
         "regression_table",
         "heterogeneity_runner",
         "research_brief",
         "paper_draft",
         "slide_generator",
-      ].includes(props.part.tool) || isWorkflowAnalysisTool(props.part.tool)),
+      ].includes(props.part.tool) ||
+        isWorkflowAnalysisTool(props.part.tool)),
   )
+  // classifyToolFailure 生成的结构化 reflection（failureType/repairAction），仅错误时存在。
+  const reflection = createMemo(() => {
+    const meta = metadata()
+    if (!meta || typeof meta.reflection !== "object" || meta.reflection === null) return undefined
+    const ref = meta.reflection as Record<string, unknown>
+    return {
+      failureType: typeof ref.failureType === "string" ? ref.failureType : undefined,
+      repairAction: typeof ref.repairAction === "string" ? ref.repairAction : undefined,
+    }
+  })
   const analysisToolErrorText = createMemo(() => {
     if (props.part.state.status !== "error" || !isAnalysisAssistantMessage(props.message, sync)) return undefined
+    if (props.part.state.metadata?.skippedAfterPriorToolFailure === true || props.part.state.metadata?.skippedAfterUserDecision === true) return undefined
+    const raw = props.part.state.error
+    // 计量工具错误经 classifyToolFailure 生成 reflection，已走安全消毒路径；
+    // 优先给用户可读文案（如 QA 门拦截），没有匹配时展示真实错误，避免泛化兜底吞掉可操作细节。
+    if (reflection()) return userFacingAnalysisErrorText(raw) ?? raw
     return analysisErrorDisplayText({
-      text: props.part.state.status === "error" ? props.part.state.error : undefined,
+      text: raw,
       isAnalysis: true,
       showDetails: ctx.showDetails(),
       waitingForAccess: waitingForAccess(),
@@ -1539,6 +1644,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
     // 分析详情只允许展开可读说明；内部工具、路径和原始产物永不展示。
     if (display()?.visibility === "internal_only") return true
     if (analysisTurn && INTERNAL_ANALYSIS_MESSAGE_TOOLS.has(props.part.tool)) return true
+    // pipeline 的只读子操作（artifacts/status/doctor 等）永远是内部记账调用，
+    // 不因当前轮是否被分类为"分析轮"而改变——不该出现在对话流里当工具调用卡片。
+    if (props.part.tool === "pipeline" && isWorkflowReadOnlyAction(props.part.state.input)) return true
     if (ctx.showDetails()) return false
     if (waitingForAccess()) {
       if (props.part.state.status !== "completed") return true
@@ -1571,55 +1679,63 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
   }
 
   return (
-    <Show when={!shouldHide()} fallback={<Show when={showProgress()}><AnalysisProgress part={props.part} /></Show>}>
+    <Show
+      when={!shouldHide()}
+      fallback={
+        <Show when={showProgress()}>
+          <AnalysisProgress part={props.part} />
+        </Show>
+      }
+    >
       <Show
         when={analysisToolErrorText()}
-        fallback={<Switch>
-        <Match when={props.part.tool === "bash" || props.part.tool === "shell"}>
-          <Bash {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "glob"}>
-          <Glob {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "read"}>
-          <Read {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "grep"}>
-          <Grep {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "list"}>
-          <List {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "webfetch"}>
-          <WebFetch {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "websearch"}>
-          <WebSearch {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "write"}>
-          <Write {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "edit"}>
-          <Edit {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "task"}>
-          <Task {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "todowrite"}>
-          <TodoWrite {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "question"}>
-          <Question {...toolprops} />
-        </Match>
-        <Match when={true}>
-          <GenericTool {...toolprops} />
-        </Match>
-      </Switch>}
+        fallback={
+          <Switch>
+            <Match when={props.part.tool === "bash" || props.part.tool === "shell"}>
+              <Bash {...toolprops} />
+            </Match>
+            <Match when={props.part.tool === "glob"}>
+              <Glob {...toolprops} />
+            </Match>
+            <Match when={props.part.tool === "read"}>
+              <Read {...toolprops} />
+            </Match>
+            <Match when={props.part.tool === "grep"}>
+              <Grep {...toolprops} />
+            </Match>
+            <Match when={props.part.tool === "list"}>
+              <List {...toolprops} />
+            </Match>
+            <Match when={props.part.tool === "webfetch"}>
+              <WebFetch {...toolprops} />
+            </Match>
+            <Match when={props.part.tool === "websearch"}>
+              <WebSearch {...toolprops} />
+            </Match>
+            <Match when={props.part.tool === "write"}>
+              <Write {...toolprops} />
+            </Match>
+            <Match when={props.part.tool === "edit"}>
+              <Edit {...toolprops} />
+            </Match>
+            <Match when={props.part.tool === "task"}>
+              <Task {...toolprops} />
+            </Match>
+            <Match when={props.part.tool === "todowrite"}>
+              <TodoWrite {...toolprops} />
+            </Match>
+            <Match when={props.part.tool === "question"}>
+              <Question {...toolprops} />
+            </Match>
+            <Match when={true}>
+              <GenericTool {...toolprops} />
+            </Match>
+          </Switch>
+        }
       >
-        <box marginTop={1} paddingLeft={2} flexDirection="row" gap={1} flexShrink={0}>
-          <text fg={theme.error}>×</text>
-          <text fg={theme.error}>{analysisToolErrorText()}</text>
-        </box>
+        <Show when={analysisToolErrorText()}>
+          <ToolErrorCard tool={props.part.tool} errorText={analysisToolErrorText()!} reflection={reflection()} />
+        </Show>
       </Show>
     </Show>
   )
@@ -1631,16 +1747,50 @@ function analysisProgressLabel(part: ToolPart) {
   const action = String(part.state.input?.action ?? "")
 
   if (step === "data_import(import)" || action === "import") return "导入数据"
-  if (step === "data_import(qa)" || action === "qa") return "检查数据质量"
-  if (step === "data_import(preprocess)" || action === "preprocess") return "清洗数据"
-  if (step === "data_import(filter)" || action === "filter") return "筛选样本"
-  if (step === "data_import(describe)" || action === "describe") return "生成描述统计"
+  if (step === "data_import(validate)" || action === "validate") return "检查数据质量"
+  if (step === "data_import(profile)" || action === "profile") return "生成描述统计"
   if (step === "data_import(correlation)" || action === "correlation") return "计算相关性"
   if (part.tool === "data_import") return "处理数据"
+  if (part.tool === "data_preprocess") return "清洗数据"
   if (part.tool === "econometrics_recommend") return "推荐计量方法"
+  if (part.tool === "econometrics_execute") {
+    const methodID = String((part.state.input as any)?.methodID ?? "")
+    if (methodID === "hdfe_regression") return "进行高维固定效应回归"
+    if (methodID === "did2s") return "进行两阶段双重差分"
+    if (methodID === "did_event_study_saturated") return "进行现代事件研究"
+    if (methodID === "did_static") return "进行传统双重差分"
+    if (methodID === "iv_2sls") return "进行工具变量回归"
+    if (methodID === "iv_test") return "进行工具变量诊断"
+    if (methodID === "ols_regression") return "拟合OLS回归"
+    if (methodID === "wls_regression") return "拟合加权最小二乘"
+    if (methodID === "quantile_regression") return "拟合分位数回归"
+    if (methodID === "panel_fe_regression") return "拟合面板固定效应"
+    if (methodID === "panel_random_effects") return "拟合面板随机效应"
+    if (methodID === "logit_regression" || methodID === "probit_regression") return "拟合二元选择模型"
+    if (methodID === "poisson_regression" || methodID === "negbin_regression") return "拟合计数模型"
+    if (methodID === "multinomial_logit") return "拟合多分类模型"
+    if (methodID === "rdd_sharp" || methodID === "rdd_fuzzy") return "进行断点回归"
+    if (methodID === "robust_regression") return "拟合稳健回归"
+    if (methodID.startsWith("psm_")) return "进行倾向得分分析"
+    if (methodID) return "进行计量分析"
+  }
   if (part.tool === "hdfe_regression") return "进行高维固定效应回归"
   if (part.tool === "did2s") return "进行两阶段双重差分"
   if (part.tool === "did_event_study_saturated") return "进行现代事件研究"
+  if (part.tool === "did_static") return "进行传统双重差分"
+  if (part.tool === "iv_2sls") return "进行工具变量回归"
+  if (part.tool === "iv_test") return "进行工具变量诊断"
+  if (part.tool === "ols_regression") return "拟合OLS回归"
+  if (part.tool === "wls_regression") return "拟合加权最小二乘"
+  if (part.tool === "quantile_regression") return "拟合分位数回归"
+  if (part.tool === "panel_fe_regression") return "拟合面板固定效应"
+  if (part.tool === "panel_random_effects") return "拟合面板随机效应"
+  if (part.tool === "logit_regression" || part.tool === "probit_regression") return "拟合二元选择模型"
+  if (part.tool === "poisson_regression" || part.tool === "negbin_regression") return "拟合计数模型"
+  if (part.tool === "multinomial_logit") return "拟合多分类模型"
+  if (part.tool === "rdd_sharp" || part.tool === "rdd_fuzzy") return "进行断点回归"
+  if (part.tool === "robust_regression") return "拟合稳健回归"
+  if (part.tool.startsWith("psm_")) return "进行倾向得分分析"
   if (isWorkflowEstimateTool(part.tool)) return "进行计量分析"
   if (part.tool === "regression_table") return "整理回归结果表"
   if (part.tool === "heterogeneity_runner") return "进行异质性分析"
@@ -1650,15 +1800,28 @@ function analysisProgressLabel(part: ToolPart) {
   return "处理请求"
 }
 
+// 进度行文案纯函数见 progress-text.ts：锁死「正在X，已用 Ns」输出格式（曾有终端渲染成「已已用」）。
 function AnalysisProgress(props: { part: ToolPart }) {
   const { theme } = useTheme()
   const completed = createMemo(() => props.part.state.status === "completed")
   const label = createMemo(() => analysisProgressLabel(props.part))
+  // 运行时长：从进入 running 起计时，Python 子进程常跑 3-60s，用户需要知道"已经多久了"。
+  const [elapsed, setElapsed] = createSignal(0)
+  createEffect(() => {
+    if (completed()) return
+    const startedAt = Date.now()
+    setElapsed(0)
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 250)
+    onCleanup(() => clearInterval(timer))
+  })
+  const progressText = createMemo(() =>
+    analysisProgressText({ label: label(), elapsed: elapsed(), completed: completed() }),
+  )
 
   return (
     <box marginTop={1} paddingLeft={2} flexDirection="row" gap={1} flexShrink={0}>
       <text fg={completed() ? theme.success : theme.primary}>{completed() ? "✓" : "·"}</text>
-      <text fg={theme.textMuted}>{completed() ? `已完成：${label()}` : `正在${label()}`}</text>
+      <text fg={theme.textMuted}>{progressText()}</text>
       <Show when={!completed()}>
         <ProgressDots />
       </Show>
@@ -1681,6 +1844,156 @@ function ProgressDots() {
         {(dot) => <span style={{ fg: activeDot() === dot ? theme.primary : theme.border }}>.</span>}
       </For>
     </text>
+  )
+}
+
+// 网络重连提示：跟在对话流末尾，网络/连接类瞬时故障时由 runtime 发 { type: "retry" } 状态触发。
+// 展示当前第几次、总共几次、以及距下次重试的倒计时；重试成功后 runtime 会把状态切回 busy/idle，
+// 本组件随之消失。上限对齐 FailurePolicy.MAX_TRANSIENT_NETWORK_RETRIES。
+function RetryNotice(props: { sessionID: string }) {
+  const { theme } = useTheme()
+  const sync = useSync()
+  const retry = createMemo(() => {
+    const status = sync.data.session_status?.[props.sessionID]
+    return status?.type === "retry" ? status : undefined
+  })
+  const [now, setNow] = createSignal(Date.now())
+  onMount(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    onCleanup(() => clearInterval(timer))
+  })
+  const text = createMemo(() => {
+    const r = retry()
+    if (!r) return ""
+    const lead = (r.message || "网络连接不稳定，正在重连").replace(/[。.]+$/, "")
+    const seconds = Math.max(0, Math.ceil((r.next - now()) / 1000))
+    const tail = seconds > 0 ? `，${seconds} 秒后重试` : "，正在重试…"
+    return `⚠ ${lead}（第 ${r.attempt}/${FailurePolicy.MAX_TRANSIENT_NETWORK_RETRIES} 次${tail}）`
+  })
+  return (
+    <Show when={retry()}>
+      <box marginTop={1} paddingLeft={2} flexShrink={0}>
+        <text fg={theme.warning}>{text()}</text>
+      </box>
+    </Show>
+  )
+}
+
+// Pending 动画：给正在执行的单条工具行加一个轻量字符动画（会话没有全局 spinner）。
+// 关键约束：必须返回合法的文本子节点（span），不能返回 <text>/<box>/<spinner>，否则作为
+// <text> 的子节点会在 OpenTUI Solid 中触发 Orphan/类型错误。
+function ToolSpinner() {
+  const { theme } = useTheme()
+  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+  const [frame, setFrame] = createSignal(0)
+  onMount(() => {
+    const timer = setInterval(() => setFrame((n) => (n + 1) % frames.length), 80)
+    onCleanup(() => clearInterval(timer))
+  })
+  return <span style={{ fg: theme.primary }}>{frames[frame()]}</span>
+}
+
+// classifyToolFailure 的 FailureType 中文标签（与 runtime/failure-reflection.ts 值域一一对应）。
+const FAILURE_TYPE_LABELS: Record<string, string> = {
+  python_missing: "python环境缺失",
+  process_timeout: "执行超时",
+  dependency_broken: "依赖损坏",
+  file_not_found: "数据文件未找到",
+  column_not_found: "列不存在",
+  validate_blocked: "数据需要处理",
+  estimation_failure: "估计失败",
+  panel_integrity_failure: "面板键需要确认",
+  tool_contract_failure: "参数契约错误",
+  result_contract_failure: "结果未通过校验",
+  data_snapshot_failure: "数据快照未就绪",
+  schema_mismatch: "数据模式不匹配",
+  encoding_or_locale_error: "编码/区域设置错误",
+  path_resolution_error: "路径解析错误",
+  planning_failure: "规划阶段错误",
+  unknown_failure: "执行未完成",
+}
+
+function ToolErrorCard(props: {
+  tool: string
+  errorText: string
+  reflection?: { failureType?: string; repairAction?: string }
+}) {
+  const { theme } = useTheme()
+  const failureLabel = () => {
+    const type = props.reflection?.failureType
+    return (type && FAILURE_TYPE_LABELS[type]) || "执行未完成"
+  }
+  const presentation = () =>
+    analysisToolErrorPresentation({
+      tool: props.tool,
+      failureType: props.reflection?.failureType,
+      failureLabel: failureLabel(),
+    })
+  const accentColor = () => (presentation().tone === "warning" ? theme.warning : theme.error)
+  // 错误文本可能很长（含 stderr 尾部），卡片只展示首行，完整文本仍在 state.error 中可查。
+  const firstLine = () => {
+    const line = props.errorText.split("\n")[0]?.trim() ?? props.errorText
+    return line.length > 180 ? `${line.slice(0, 177)}...` : line
+  }
+  return (
+    <box
+      marginTop={1}
+      paddingLeft={1}
+      paddingTop={0}
+      paddingBottom={0}
+      flexDirection="column"
+      border={["left"]}
+      customBorderChars={SplitBorder.customBorderChars}
+      borderColor={accentColor()}
+      flexShrink={0}
+    >
+      <text fg={accentColor()}>
+        <span style={{ bold: true }}>{presentation().title}</span>
+      </text>
+      <text fg={theme.text}>{firstLine()}</text>
+      <Show when={props.reflection?.repairAction}>
+        <text fg={theme.textMuted}>↳ {presentation().guidanceLabel}：{props.reflection?.repairAction}</text>
+      </Show>
+    </box>
+  )
+}
+
+// 有执行进度态的分析工具：completed 时以结果卡片展示（与 showProgress 的集合保持一致）。
+function isResultCardTool(tool: string) {
+  return (
+    isWorkflowAnalysisTool(tool) ||
+    [
+      "data_import",
+      "data_preprocess",
+      "regression_table",
+      "heterogeneity_runner",
+      "research_brief",
+      "paper_draft",
+      "slide_generator",
+    ].includes(tool)
+  )
+}
+
+function AnalysisResultCard(props: { part: ToolPart; summary: string }) {
+  const { theme } = useTheme()
+  const label = createMemo(() => analysisProgressLabel(props.part).replace(/^进行/, ""))
+  return (
+    <box
+      marginTop={1}
+      paddingLeft={1}
+      paddingTop={0}
+      paddingBottom={0}
+      flexDirection="column"
+      border={["left"]}
+      customBorderChars={SplitBorder.customBorderChars}
+      borderColor={theme.success}
+      flexShrink={0}
+    >
+      <text fg={theme.success}>
+        <span style={{ bold: true }}>{`✓ ${label()}完成`}</span>
+      </text>
+      <text fg={theme.text}>{props.summary}</text>
+    </box>
   )
 }
 
@@ -1742,8 +2055,11 @@ function GenericTool(props: ToolProps<any>) {
           </box>
         </BlockTool>
       </Match>
+      <Match when={isResultCardTool(props.tool) && summary()}>
+        <AnalysisResultCard part={props.part} summary={summary()} />
+      </Match>
       <Match when={true}>
-        <InlineTool icon="⚙" pending="Preparing tool..." complete={true} part={props.part}>
+        <InlineTool icon="⚙" pending="正在准备工具…" complete={true} part={props.part}>
           {summary()}
         </InlineTool>
       </Match>
@@ -1755,7 +2071,14 @@ function ToolTitle(props: { fallback: string; when: any; icon: string; children:
   const { theme } = useTheme()
   return (
     <text paddingLeft={3} fg={props.when ? theme.textMuted : theme.text}>
-      <Show fallback={<>~ {props.fallback}</>} when={props.when}>
+      <Show
+        fallback={
+          <>
+            ~ {props.fallback}
+          </>
+        }
+        when={props.when}
+      >
         <span style={{ bold: true }}>{props.icon}</span> {props.children}
       </Show>
     </text>
@@ -1786,15 +2109,15 @@ function InlineTool(props: {
     if (props.complete) return theme.textMuted
     return theme.text
   })
-  const assistantMessage = createMemo(
-    () =>
-      (sync.data.message[props.part.sessionID] ?? []).find(
-        (entry): entry is AssistantMessage => entry.id === props.part.messageID && entry.role === "assistant",
-      ),
+  const assistantMessage = createMemo(() =>
+    (sync.data.message[props.part.sessionID] ?? []).find(
+      (entry): entry is AssistantMessage => entry.id === props.part.messageID && entry.role === "assistant",
+    ),
   )
 
   const suppressError = createMemo(() => {
     const display = props.part.state.status === "pending" ? undefined : readToolDisplay(props.part.state.metadata ?? {})
+    const stateMetadata = props.part.state.status === "pending" ? undefined : props.part.state.metadata
     const message = assistantMessage()
     const errorText = analysisErrorDisplayText({
       text: props.part.state.status === "error" ? props.part.state.error : undefined,
@@ -1802,6 +2125,7 @@ function InlineTool(props: {
       showDetails: ctx.showDetails(),
       waitingForAccess: Boolean(message && isAnalysisAssistantWaitingForAccess(message, sync)),
     })
+    if (stateMetadata?.skippedAfterPriorToolFailure === true || stateMetadata?.skippedAfterUserDecision === true) return true
     const analysisTool =
       !ctx.showDetails() &&
       message &&
@@ -1861,7 +2185,14 @@ function InlineTool(props: {
       }}
     >
       <text paddingLeft={3} fg={fg()} attributes={denied() ? TextAttributes.STRIKETHROUGH : undefined}>
-        <Show fallback={<>~ {props.pending}</>} when={props.complete}>
+        <Show
+          fallback={
+            <>
+              <ToolSpinner /> {props.pending}
+            </>
+          }
+          when={props.complete}
+        >
           <span style={{ fg: props.iconColor }}>{props.icon}</span> {props.children}
         </Show>
       </text>
@@ -1913,13 +2244,14 @@ function BlockTool(props: { title: string; children: JSX.Element; onClick?: () =
     const part = props.part
     return part?.state.status === "error" ? part.state.error : undefined
   })
-  const visibleError = createMemo(() =>
-    analysisErrorDisplayText({
-      text: error(),
-      isAnalysis: Boolean(assistantMessage() && isAnalysisAssistantMessage(assistantMessage()!, sync)),
-      showDetails: ctx.showDetails(),
-      waitingForAccess: Boolean(assistantMessage() && isAnalysisAssistantWaitingForAccess(assistantMessage()!, sync)),
-    }) ?? error(),
+  const visibleError = createMemo(
+    () =>
+      analysisErrorDisplayText({
+        text: error(),
+        isAnalysis: Boolean(assistantMessage() && isAnalysisAssistantMessage(assistantMessage()!, sync)),
+        showDetails: ctx.showDetails(),
+        waitingForAccess: Boolean(assistantMessage() && isAnalysisAssistantWaitingForAccess(assistantMessage()!, sync)),
+      }) ?? error(),
   )
   return (
     <box
@@ -2005,13 +2337,13 @@ function Bash(props: ToolProps<typeof BashTool>) {
             <text fg={theme.text}>$ {props.input.command}</text>
             <text fg={theme.text}>{limited()}</text>
             <Show when={overflow()}>
-              <text fg={theme.textMuted}>{expanded() ? "Click to collapse" : "Click to expand"}</text>
+              <text fg={theme.textMuted}>{expanded() ? "点击收起" : "点击展开"}</text>
             </Show>
           </box>
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="$" pending="Writing command..." complete={props.input.command} part={props.part}>
+        <InlineTool icon="$" pending="正在写命令…" complete={props.input.command} part={props.part}>
           {props.input.description ?? props.input.command}
           <Show when={outputSummary()}> ({outputSummary()})</Show>
         </InlineTool>
@@ -2039,7 +2371,7 @@ function Write(props: ToolProps<typeof WriteTool>) {
   return (
     <Switch>
       <Match when={ctx.showDetails()}>
-        <BlockTool title={"# Wrote " + normalizePath(props.input.filePath!)} part={props.part}>
+        <BlockTool title={"# Wrote " + displayPath(props.input.filePath)} part={props.part}>
           <line_number fg={theme.textMuted} minWidth={3} paddingRight={1}>
             <code
               conceal={false}
@@ -2052,8 +2384,8 @@ function Write(props: ToolProps<typeof WriteTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="←" pending="Preparing write..." complete={props.input.filePath} part={props.part}>
-          Write {normalizePath(props.input.filePath!)}
+        <InlineTool icon="←" pending="正在准备写入…" complete={props.input.filePath} part={props.part}>
+          Write {displayPath(props.input.filePath)}
           <Show when={sizeSummary()}> ({sizeSummary()})</Show>
         </InlineTool>
       </Match>
@@ -2062,48 +2394,76 @@ function Write(props: ToolProps<typeof WriteTool>) {
 }
 
 function Glob(props: ToolProps<typeof GlobTool>) {
+  // 目标在内部工作区（.killstata）的探索调用对用户是纯噪声：模型在找自己的产物，
+  // 不是分析步骤。整行折叠（连报错一起），用户只看到关键步骤与最终结果。
+  // pattern 经 displayGlobPattern 折叠，避免内部目录与数据集 ID 泄漏给用户。
+  // pattern 在参数尚未流式解析完时可能为 undefined（pending 态）。
+  const pattern = createMemo(() => (props.input.pattern ? displayGlobPattern(props.input.pattern) : ""))
+  const internal = createMemo(() => {
+    const rawPattern = props.input.pattern
+    const pathArg = props.input.path
+    return Boolean(
+      (typeof rawPattern === "string" && isInternalWorkspacePath(rawPattern)) ||
+        (pathArg && isInternalWorkspacePath(pathArg)),
+    )
+  })
   return (
-    <InlineTool icon="✱" pending="Finding files..." complete={props.input.pattern} part={props.part}>
-      Glob "{props.input.pattern}" <Show when={props.input.path}>in {normalizePath(props.input.path)} </Show>
-      <Show when={props.metadata.count}>({props.metadata.count} matches)</Show>
-    </InlineTool>
+    <Show when={!internal()}>
+      <InlineTool icon="✱" pending="正在查找文件…" complete={pattern()} part={props.part}>
+        Glob "{pattern()}" <Show when={props.input.path}>in {displayPath(props.input.path)} </Show>
+        <Show when={props.metadata.count}>({props.metadata.count} matches)</Show>
+      </InlineTool>
+    </Show>
   )
 }
 
 function Read(props: ToolProps<typeof ReadTool>) {
+  // 读内部产物（describe/QA/结果 json）是模型找自己结果的过程，对用户折叠。
+  const internal = createMemo(() =>
+    props.input.filePath ? isInternalWorkspacePath(props.input.filePath) : false,
+  )
   return (
-    <InlineTool icon="→" pending="Reading file..." complete={props.input.filePath} part={props.part}>
-      Read {normalizePath(props.input.filePath!)} {input(props.input, ["filePath"])}
-    </InlineTool>
+    <Show when={!internal()}>
+      <InlineTool icon="→" pending="正在读取文件…" complete={displayPath(props.input.filePath)} part={props.part}>
+        Read {displayPath(props.input.filePath)} {input(props.input, ["filePath"])}
+      </InlineTool>
+    </Show>
   )
 }
 
 function Grep(props: ToolProps<typeof GrepTool>) {
+  // grep 目标在内部工作区时同样折叠（pattern 是搜索内容，不判；判 path）。
+  const internal = createMemo(() => Boolean(props.input.path && isInternalWorkspacePath(props.input.path)))
   return (
-    <InlineTool icon="✱" pending="Searching content..." complete={props.input.pattern} part={props.part}>
-      Grep "{props.input.pattern}" <Show when={props.input.path}>in {normalizePath(props.input.path)} </Show>
-      <Show when={props.metadata.matches}>({props.metadata.matches} matches)</Show>
-    </InlineTool>
+    <Show when={!internal()}>
+      <InlineTool icon="✱" pending="正在搜索内容…" complete={props.input.pattern} part={props.part}>
+        Grep "{props.input.pattern}" <Show when={props.input.path}>in {displayPath(props.input.path)} </Show>
+        <Show when={props.metadata.matches}>({props.metadata.matches} matches)</Show>
+      </InlineTool>
+    </Show>
   )
 }
 
 function List(props: ToolProps<typeof ListTool>) {
   const dir = createMemo(() => {
     if (props.input.path) {
-      return normalizePath(props.input.path)
+      return displayPath(props.input.path)
     }
     return ""
   })
+  const internal = createMemo(() => Boolean(props.input.path && isInternalWorkspacePath(props.input.path)))
   return (
-    <InlineTool icon="→" pending="Listing directory..." complete={props.input.path !== undefined} part={props.part}>
-      List {dir()}
-    </InlineTool>
+    <Show when={!internal()}>
+      <InlineTool icon="→" pending="正在列出目录…" complete={props.input.path !== undefined} part={props.part}>
+        List {dir()}
+      </InlineTool>
+    </Show>
   )
 }
 
 function WebFetch(props: ToolProps<typeof WebFetchTool>) {
   return (
-    <InlineTool icon="%" pending="Fetching from the web..." complete={(props.input as any).url} part={props.part}>
+    <InlineTool icon="%" pending="正在联网获取…" complete={(props.input as any).url} part={props.part}>
       WebFetch {(props.input as any).url}
     </InlineTool>
   )
@@ -2113,7 +2473,7 @@ function WebSearch(props: ToolProps<any>) {
   const input = props.input as any
   const metadata = props.metadata as any
   return (
-    <InlineTool icon="◈" pending="Searching web..." complete={input.query} part={props.part}>
+    <InlineTool icon="◈" pending="正在联网搜索…" complete={input.query} part={props.part}>
       Exa Web Search "{input.query}" <Show when={metadata.numResults}>({metadata.numResults} results)</Show>
     </InlineTool>
   )
@@ -2161,7 +2521,7 @@ function Task(props: ToolProps<typeof TaskTool>) {
         <InlineTool
           icon="◉"
           iconColor={color()}
-          pending="Delegating..."
+          pending="正在派发子任务…"
           complete={props.input.subagent_type ?? props.input.description}
           part={props.part}
         >
@@ -2174,68 +2534,10 @@ function Task(props: ToolProps<typeof TaskTool>) {
 }
 
 function Edit(props: ToolProps<typeof EditTool>) {
-  const ctx = use()
-  const { theme, syntax } = useTheme()
-
-  const view = createMemo(() => {
-    const diffStyle = ctx.sync.data.config.tui?.diff_style
-    if (diffStyle === "stacked") return "unified"
-    // Default to "auto" behavior
-    return ctx.width > 120 ? "split" : "unified"
-  })
-
-  const ft = createMemo(() => filetype(props.input.filePath))
-
-  const diffContent = createMemo(() => props.metadata.diff)
-
-  // 默认不铺 diff，只报告改动规模（+N -M），完整 diff 留给 /details。
-  const changeSummary = createMemo(() => {
-    const diff = diffContent()
-    if (!diff) return ""
-    let added = 0
-    let removed = 0
-    for (const line of diff.split("\n")) {
-      if (line.startsWith("+") && !line.startsWith("+++")) added++
-      else if (line.startsWith("-") && !line.startsWith("---")) removed++
-    }
-    if (!added && !removed) return ""
-    return `+${added} -${removed}`
-  })
-
   return (
-    <Switch>
-      <Match when={ctx.showDetails() && props.metadata.diff !== undefined}>
-        <BlockTool title={"← Edit " + normalizePath(props.input.filePath!)} part={props.part}>
-          <box paddingLeft={1}>
-            <diff
-              diff={diffContent()}
-              view={view()}
-              filetype={ft()}
-              syntaxStyle={syntax()}
-              showLineNumbers={true}
-              width="100%"
-              wrapMode={ctx.diffWrapMode()}
-              fg={theme.text}
-              addedBg={theme.diffAddedBg}
-              removedBg={theme.diffRemovedBg}
-              contextBg={theme.diffContextBg}
-              addedSignColor={theme.diffHighlightAdded}
-              removedSignColor={theme.diffHighlightRemoved}
-              lineNumberFg={theme.diffLineNumber}
-              lineNumberBg={theme.diffContextBg}
-              addedLineNumberBg={theme.diffAddedLineNumberBg}
-              removedLineNumberBg={theme.diffRemovedLineNumberBg}
-            />
-          </box>
-        </BlockTool>
-      </Match>
-      <Match when={true}>
-        <InlineTool icon="←" pending="Preparing edit..." complete={props.input.filePath} part={props.part}>
-          Edit {normalizePath(props.input.filePath!)}
-          <Show when={changeSummary()}> ({changeSummary()})</Show>
-        </InlineTool>
-      </Match>
-    </Switch>
+    <InlineTool icon="←" pending="正在准备编辑…" complete={props.input.filePath} part={props.part}>
+      Edit {displayPath(props.input.filePath)}
+    </InlineTool>
   )
 }
 
@@ -2252,7 +2554,7 @@ function TodoWrite(props: ToolProps<typeof TodoWriteTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="⚙" pending="Updating todos..." complete={false} part={props.part}>
+        <InlineTool icon="⚙" pending="正在更新待办…" complete={false} part={props.part}>
           Updating todos...
         </InlineTool>
       </Match>
@@ -2286,7 +2588,7 @@ function Question(props: ToolProps<typeof QuestionTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="→" pending="Asking questions..." complete={count()} part={props.part}>
+        <InlineTool icon="→" pending="正在提问…" complete={count()} part={props.part}>
           Asked {count()} question{count() !== 1 ? "s" : ""}
         </InlineTool>
       </Match>
@@ -2300,6 +2602,17 @@ function normalizePath(input?: string) {
     return path.relative(process.cwd(), input) || "."
   }
   return input
+}
+
+// 内部工作区（.killstata）路径对用户隐身：工具标题只显示文件名，不暴露内部目录结构。
+// 用户自己放进来的文件（data/*.xlsx 等）正常显示相对路径——两者区分让"内部细节不可见"
+// 但不伤害"用户文件可追踪"。判定与末段提取都复用 analysis-display 的单一真相源，
+// 这里只负责 TUI 特有的相对化基准（process.cwd()）。
+function displayPath(input?: string) {
+  const normalized = normalizePath(input)
+  if (!normalized) return ""
+  if (isInternalWorkspacePath(normalized)) return sharedDisplayPath(normalized)
+  return normalized
 }
 
 function input(input: Record<string, any>, omit?: string[]): string {

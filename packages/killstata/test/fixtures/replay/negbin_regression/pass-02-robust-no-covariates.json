@@ -1,0 +1,11 @@
+{
+  "description": "稳健标准误、无控制变量的双变量负二项",
+  "modelArgs": {
+    "datasetId": "health_21",
+    "stageId": "stage_000",
+    "dependentVar": "visits",
+    "treatmentVar": "insured",
+    "covariance": "robust"
+  },
+  "expect": "pass"
+}

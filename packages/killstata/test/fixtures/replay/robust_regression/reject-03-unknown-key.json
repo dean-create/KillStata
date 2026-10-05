@@ -1,0 +1,1 @@
+{"description":"模型多塞了一个未定义的 psi 值；strict 拒绝未知枚举值","modelArgs":{"datasetId":"panel_98","stageId":"stage_000","dependentVar":"y","treatmentVar":"x1","psi":"bisquare"},"expect":"reject","rejectHint":["psi"]}

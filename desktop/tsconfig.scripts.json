@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": false,
+    "resolveJsonModule": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "moduleDetection": "force",
+    "types": ["node", "bun-types"]
+  },
+  "include": ["scripts/**/*.ts", "engine/**/*.ts"],
+  "exclude": ["engine/**/*.test.ts"]
+}

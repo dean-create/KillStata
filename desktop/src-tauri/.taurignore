@@ -1,0 +1,5 @@
+# tauri dev 的文件监听会监听整个 src-tauri 目录树。
+# Core 的 TraceLogger 在运行期把每次工具调用写到 `cwd/test/sandbox/logs/<sessionID>.jsonl`，
+# 在 `tauri dev` 下 cwd 即 src-tauri，于是每发一条消息就会写 trace → 触发 cargo 重建 → 整个 App 重启，
+# 表现为"发送后 Desktop 崩溃重启、当前会话丢失"。这些是运行期产物，监听器应忽略。
+test/

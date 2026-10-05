@@ -1,0 +1,1661 @@
+from __future__ import annotations
+import warnings
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from linearmodels import PanelOLS
+from linearmodels.iv import IV2SLS
+import scipy.stats
+from statsmodels.stats.diagnostic import acorr_breusch_godfrey, het_breuschpagan, het_white
+from statsmodels.stats.outliers_influence import OLSInfluence, variance_inflation_factor
+from statsmodels.stats.stattools import durbin_watson, jarque_bera
+
+#%%
+
+def ordinary_least_square_regression(dependent_variable, treatment_variable, covariate_variables, weights = None, cov_info = "nonrobust", target_type = "final_model", output_tables = False):
+    
+    """
+    Use Ordinary Least Square Regression method to estimate Average Treatment Effect (ATE) of 
+    the treatment variable towards the dependent variable.
+    The estimated ATE is the parameter of the treatment variable in the regression model.
+    NOTE THAT THIS FUNCTION DOES NOT RETURN THE FINAL REGRESSION TABLE! All tables can (and only can) be printed out during the function.
+    If user specifies any fixed effect variable, in the OLS method this variable MUST BE transformed into dummy variables first (with one of the categories dropped to avoid multicollinearity with the constant term) and added into covariates.
+    The final return is some clearly specified parameter or statistic within the regressions, or some regression model object within the function (by adjusting the argument input "target_type").
+    
+    Args:
+        dependent_variable (pd.Series): Target dependent variable, which should not contain nan value.
+        treatment_variable (pd.Series): Target treatment variable, which should not contain nan value.
+        covariate_variables (pd.DataFrame or None): Proposed covariate variables. If user does not specify any covariate variable, this could be None. Otherwise, it should not contain nan value.
+        weights (pd.Series or None): Weights for data samples. If user does not specify any weight specification, the methodology will be standard OLS and this input should be None. If user specifies sample weights, the model will become Weighted Least Squares (WLS), a generalized version of OLS. 
+        cov_info (str or dict): The covariance estimator used in the results. Four covariance estimators are supported: If no adjustment, input "nonrobust"; If heteroskedasticity-consistent adjustment (allows "HC0", "HC1", "HC2", "HC3"), take "HC0" as example, input "HC0", and if user specifies to use "robust" standard errors, input "HC1"; If heteroskedasticity and autocorrelation consistent adjustment (HAC) with integer lag terms, take maxlags equal to 5 for example, input {"HAV": 5}; If cluster adjustment with the target groups variable named "groups" (pd.Series or pd.dataframe), input {"cluster": groups}.
+        target_type (str or None): Denote whether this function need to return any specific evaluation metric or any other content. If only want to print out regression tables, this should be None. Otherwise, three possible inputs are supported: "neg_pvalue" for the regression treatment variable coefficient p-value's negative value, "rsquared" for the adjusted R-squared value of the regression, and "final_model" for the final regression model.
+        output_tables (bool): Denote whether this function need to print out regression tables. If want to print out the tabels, this should be True. If only want the evaluation metric outputs, this should be False.
+    """
+    
+    # Check Input
+    if type(cov_info) == str and cov_info not in ["nonrobust", "HC0", "HC1", "HC2", "HC3"]:
+        raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
+    elif type(cov_info) == dict and list(cov_info.keys())[0] not in ["HAC", "cluster"]:
+        raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
+
+    # Adjust input type
+    dependent_variable = dependent_variable.astype(float)
+    treatment_variable = treatment_variable.astype(float)
+    if covariate_variables is not None:
+        covariate_variables = covariate_variables.astype(float)
+
+    # Run the regression
+    if covariate_variables is None:
+        X = treatment_variable
+    else:
+        X = pd.concat([treatment_variable, covariate_variables], axis = 1).astype(float)
+    if weights is None:
+        if type(cov_info) == str:
+            regression = sm.OLS(dependent_variable, sm.add_constant(X)).fit(cov_type = cov_info)
+        elif list(cov_info.keys())[0] == "HAC":
+            regression = sm.OLS(dependent_variable, sm.add_constant(X)).fit(cov_type = "HAC", cov_kwds = {"maxlags": cov_info["HAC"]})
+        elif list(cov_info.keys())[0] == "cluster":
+            regression = sm.OLS(dependent_variable, sm.add_constant(X)).fit(cov_type = "cluster", cov_kwds = {"groups": cov_info["cluster"]})
+    else:
+        if type(cov_info) == str:
+            regression = sm.WLS(dependent_variable, sm.add_constant(X), weights = weights).fit(cov_type = cov_info)
+        elif list(cov_info.keys())[0] == "HAC":
+            regression = sm.WLS(dependent_variable, sm.add_constant(X), weights = weights).fit(cov_type = "HAC", cov_kwds = {"maxlags": cov_info["HAC"]})
+        elif list(cov_info.keys())[0] == "cluster":
+            regression = sm.WLS(dependent_variable, sm.add_constant(X), weights = weights).fit(cov_type = "cluster", cov_kwds = {"groups": cov_info["cluster"]})
+
+    # Output the table if required
+    print("Estimated ATE: ", regression.params[treatment_variable.name])
+    if output_tables is True:
+        print(regression.summary())
+
+    # Return evaluation metric if needed
+    if target_type == "neg_pvalue":
+        return -regression.pvalues[treatment_variable.name]
+    elif target_type == "rsquared":
+        return regression.rsquared_adj
+    elif target_type == "final_model":
+        return regression
+    
+#%%
+
+def propensity_score_construction(treatment_variable, covariate_variables):
+    
+    """
+    Construct propensity score for each sample to receive binary treatment based on covariate variables, using binary Logistic regression.
+    
+    Args:
+        treatment_variable (pd.Series): Target treatment variable, which should be a binary variable (1 for treatment, 0 for control).
+        covariate_variables (pd.DataFrame): A dataframe of covariate variables, which should not contain nan value or intercept.
+
+    Returns:
+        pd.Series: The estimated propensity score for each sample, which will be named "propensity_score".
+    """
+    
+    if treatment_variable is None:
+        raise ValueError("Propensity-score construction requires a treatment variable")
+    if covariate_variables is None:
+        raise ValueError("Propensity-score construction requires at least one covariate")
+
+    treatment = pd.Series(treatment_variable, copy=True)
+    covariates = pd.DataFrame(covariate_variables).copy()
+    if covariates.shape[1] == 0:
+        raise ValueError("Propensity-score construction requires at least one covariate")
+    if not treatment.index.equals(covariates.index):
+        raise ValueError("Treatment and covariates must use the same row index")
+    if treatment.isna().any() or covariates.isna().any().any():
+        raise ValueError("Treatment and covariates contain missing values; preprocess the canonical stage first")
+
+    try:
+        treatment = pd.to_numeric(treatment, errors="raise").astype(float)
+        covariates = covariates.apply(pd.to_numeric, errors="raise").astype(float)
+    except Exception as exc:
+        raise ValueError(f"Treatment and covariates must be numeric: {exc}") from exc
+
+    if not np.isfinite(treatment.to_numpy(dtype=float)).all() or not np.isfinite(covariates.to_numpy(dtype=float)).all():
+        raise ValueError("Treatment and covariates must contain only finite numeric values")
+    treatment_values = set(treatment.unique().tolist())
+    if treatment_values != {0.0, 1.0}:
+        raise ValueError("Treatment must be binary 0/1 with both treated and control groups present")
+
+    constant_covariates = [str(column) for column in covariates.columns if covariates[column].nunique(dropna=False) <= 1]
+    if constant_covariates:
+        raise ValueError(f"Propensity-score covariates must vary; constant columns: {constant_covariates}")
+
+    design = sm.add_constant(covariates, has_constant="add").astype(float)
+    if len(design) <= design.shape[1]:
+        raise ValueError("Propensity-score model has too few observations for the requested covariates")
+    rank = int(np.linalg.matrix_rank(design.to_numpy(dtype=float)))
+    if rank < design.shape[1]:
+        raise ValueError(
+            f"Propensity-score design matrix is rank deficient (rank={rank}, columns={design.shape[1]})"
+        )
+
+    try:
+        from statsmodels.tools.sm_exceptions import PerfectSeparationError
+
+        with warnings.catch_warnings(record=True) as fit_warnings:
+            warnings.simplefilter("always")
+            clf = sm.Logit(treatment, design).fit(disp=False, maxiter=200)
+    except PerfectSeparationError as exc:
+        raise ValueError("Propensity-score Logit has perfect separation; revise the covariates") from exc
+    except np.linalg.LinAlgError as exc:
+        raise ValueError("Propensity-score Logit is singular; revise the covariates") from exc
+    except Exception as exc:
+        message = str(exc)
+        if "separation" in message.lower() or "singular" in message.lower():
+            raise ValueError(f"Propensity-score Logit failed: {message}") from exc
+        raise
+
+    if any(warning.category.__name__ == "PerfectSeparationWarning" for warning in fit_warnings):
+        raise ValueError("Propensity-score Logit has perfect separation; revise the covariates")
+    if not bool(getattr(clf, "mle_retvals", {}).get("converged", False)):
+        raise ValueError("Propensity-score Logit did not converge")
+
+    predicted = np.asarray(clf.predict(design), dtype=float)
+    if not np.isfinite(predicted).all():
+        raise ValueError("Propensity-score Logit returned non-finite scores")
+    if np.any(predicted <= 0.0) or np.any(predicted >= 1.0):
+        raise ValueError("Propensity-score Logit returned boundary scores; overlap is not estimable")
+
+    result_series = pd.Series(predicted, index=covariates.index)
+    result_series.name = "propensity_score"
+    result_series.attrs["converged"] = True
+    result_series.attrs["iterations"] = int(getattr(clf, "mle_retvals", {}).get("iterations", 0))
+    return result_series
+
+def propensity_score_visualize_propensity_score_distribution(treatment_variable, propensity_score):
+    from matplotlib import pyplot as plt
+
+    """Return a deterministic overlap diagnostic for treated and control scores."""
+    treatment = pd.to_numeric(pd.Series(treatment_variable), errors="coerce")
+    scores = pd.to_numeric(pd.Series(propensity_score), errors="coerce")
+    if not treatment.index.equals(scores.index):
+        raise ValueError("Treatment and propensity-score indexes must match")
+    if treatment.isna().any() or scores.isna().any():
+        raise ValueError("Treatment and propensity scores must not contain missing values")
+    if not np.isfinite(treatment.to_numpy(dtype=float)).all() or not np.isfinite(scores.to_numpy(dtype=float)).all():
+        raise ValueError("Treatment and propensity scores must contain only finite values")
+    if set(treatment.unique().tolist()) != {0, 1}:
+        raise ValueError("Treatment variable must contain both 0 and 1")
+    if ((scores <= 0.0) | (scores >= 1.0)).any():
+        raise ValueError("Propensity scores must lie strictly between 0 and 1")
+
+    treated_scores = scores[treatment == 1].to_numpy(dtype=float)
+    control_scores = scores[treatment == 0].to_numpy(dtype=float)
+    bins = np.linspace(0.0, 1.0, 21)
+    figure, axis = plt.subplots(figsize=(8, 5))
+    # 两组统一分箱并各自归一化为组内占比，避免样本量差异被误读为分布差异。
+    axis.hist(
+        control_scores,
+        bins=bins,
+        weights=np.full(control_scores.size, 1.0 / control_scores.size),
+        color="#4C78A8",
+        edgecolor="white",
+        alpha=0.65,
+        label="Control",
+    )
+    axis.hist(
+        treated_scores,
+        bins=bins,
+        weights=np.full(treated_scores.size, 1.0 / treated_scores.size),
+        color="#E45756",
+        edgecolor="white",
+        alpha=0.65,
+        label="Treated",
+    )
+    axis.set(xlim=(0.0, 1.0), xlabel="Propensity score", ylabel="Share within group")
+    axis.set_title("Propensity-score distribution by treatment group")
+    axis.grid(axis="y", alpha=0.2)
+    axis.legend(frameon=False)
+    figure.tight_layout()
+    return figure
+
+def propensity_score_matching(dependent_variable, treatment_variable, propensity_score, matched_num = 1, target_type = "ATE"):
+    
+    """
+    Use propensity score matching method to estimate the Average Treatment Effect (ATE), or 
+    Average Treatment Effect on the Treated (ATT) of the treatment variable towards the dependent variable. 
+    This method is formally called Propensity Score Matching (PSM) approach.
+    Note that the method allows sampling with replacement, as well as equal weighting when matched_num is larger than 1.
+    The final return is the final estimated ATE or ATT as is required.
+    Could refer to: https://www.stata.com/manuals/teteffectspsmatch.pdf
+    
+    Args:
+        dependent_variable (pd.Series): Target dependent variable, which should not contain nan value.
+        treatment_variable (pd.Series): Target treatment variable, which should be a binary variable with no nan value (1 for treatment, 0 for control).
+        propensity_score (pd.Series): Propensity score for each sample to receive treatment, which should not contain nan value.
+        matched_num (int): The amount of nearest neighbors considered for each treatment entity. Should be an positive integer no smaller than 1.
+        target_type (str): Target output type, which supports "ATE" and "ATT".
+    """
+    
+    # Check inputs
+    if target_type not in ["ATE", "ATT"]:
+        raise RuntimeError("Target Type Input Not Supported! Only ATE or ATT could be supported!")
+    
+    # Adjust input type
+    dependent_variable = dependent_variable.astype(float)
+    treatment_variable = treatment_variable.astype(float)
+    
+    # Process the ATE version
+    if target_type == "ATE":
+        
+        # Match the entities and construct the matched control group dependent variable
+        treatment_group_propensity_score_series = propensity_score.loc[treatment_variable[treatment_variable == 1].index]
+        control_group_propensity_score_series = propensity_score.loc[treatment_variable[treatment_variable == 0].index]
+        matched_control_dependent_variable_series = pd.Series(index = treatment_group_propensity_score_series.index)
+        matched_treatment_dependent_variable_series = pd.Series(index = control_group_propensity_score_series.index)
+        
+        # Match the treatment group
+        for each_index in treatment_group_propensity_score_series.index:
+            selected_distance_metric = (control_group_propensity_score_series - treatment_group_propensity_score_series.loc[each_index]).map(lambda x: abs(x))
+            selected_distance_metric = selected_distance_metric.sort_values()
+            selected_index = selected_distance_metric.head(matched_num)
+            selected_index = selected_distance_metric[selected_distance_metric.isin(list(selected_index.values))]
+            matched_control_dependent_variable_series.loc[each_index] = dependent_variable.loc[selected_index.index].mean()
+        
+        # Match the control group
+        for each_index in control_group_propensity_score_series.index:
+            selected_distance_metric = (treatment_group_propensity_score_series - control_group_propensity_score_series.loc[each_index]).map(lambda x: abs(x))
+            selected_distance_metric = selected_distance_metric.sort_values()
+            selected_index = selected_distance_metric.head(matched_num)
+            selected_index = selected_distance_metric[selected_distance_metric.isin(list(selected_index.values))]
+            matched_treatment_dependent_variable_series.loc[each_index] = dependent_variable.loc[selected_index.index].mean()
+    
+        # Calculate the ATE and return the value
+        ATE = pd.concat([dependent_variable.loc[treatment_group_propensity_score_series.index], matched_treatment_dependent_variable_series]).mean() - pd.concat([dependent_variable.loc[control_group_propensity_score_series.index], matched_control_dependent_variable_series]).mean()
+        return ATE
+    
+    # Process the ATT version
+    elif target_type == "ATT":
+        
+        # Match the entities and construct the matched control group dependent variable
+        treatment_group_propensity_score_series = propensity_score.loc[treatment_variable[treatment_variable == 1].index]
+        control_group_propensity_score_series = propensity_score.loc[treatment_variable[treatment_variable == 0].index]
+        matched_dependent_variable_series = pd.Series(index = treatment_group_propensity_score_series.index)
+        for each_index in treatment_group_propensity_score_series.index:
+            selected_distance_metric = (control_group_propensity_score_series - treatment_group_propensity_score_series.loc[each_index]).map(lambda x: abs(x))
+            selected_distance_metric = selected_distance_metric.sort_values()
+            selected_index = selected_distance_metric.head(matched_num)
+            selected_index = selected_distance_metric[selected_distance_metric.isin(list(selected_index.values))]
+            matched_dependent_variable_series.loc[each_index] = dependent_variable.loc[selected_index.index].mean()
+        
+        # Calculate the ATT and return the value
+        treatment_group_dependent_variable_series = dependent_variable.loc[treatment_group_propensity_score_series.index]
+        ATT = treatment_group_dependent_variable_series.mean() - matched_dependent_variable_series.mean()
+        return ATT
+
+def propensity_score_nearest_neighbor_att(dependent_variable, treatment_variable, propensity_score, covariate_variables):
+    """Estimate ATT for matched treated observations under KillStata's fixed PSM contract.
+
+    This deliberately is not a configurable general-purpose matcher: the model-facing tool
+    fixes 1:1 nearest-neighbour matching with replacement on the logit propensity score and
+    a 0.2-SD caliper. Exact nearest-distance ties share equal control weight, so a row order
+    can never change the estimate. The function rejects the run before publication when
+    post-match absolute SMD exceeds 0.10; it intentionally does not compute SE, p-values,
+    confidence intervals, or a bootstrap inference shortcut.
+    """
+    outcome = pd.Series(dependent_variable, copy=True)
+    treatment = pd.Series(treatment_variable, copy=True)
+    scores = pd.Series(propensity_score, copy=True)
+    covariates = pd.DataFrame(covariate_variables).copy()
+
+    if covariates.shape[1] == 0:
+        raise ValueError("PSM matching requires at least one pre-treatment covariate")
+    if not (outcome.index.equals(treatment.index) and outcome.index.equals(scores.index) and outcome.index.equals(covariates.index)):
+        raise ValueError("Outcome, treatment, propensity scores, and covariates must use the same row index")
+    if outcome.isna().any() or treatment.isna().any() or scores.isna().any() or covariates.isna().any().any():
+        raise ValueError("PSM matching does not accept missing values; preprocess the canonical stage first")
+
+    try:
+        outcome = pd.to_numeric(outcome, errors="raise").astype(float)
+        treatment = pd.to_numeric(treatment, errors="raise").astype(float)
+        scores = pd.to_numeric(scores, errors="raise").astype(float)
+        covariates = covariates.apply(pd.to_numeric, errors="raise").astype(float)
+    except Exception as exc:
+        raise ValueError(f"PSM matching requires numeric outcome, treatment, scores, and covariates: {exc}") from exc
+
+    if not (
+        np.isfinite(outcome.to_numpy()).all()
+        and np.isfinite(treatment.to_numpy()).all()
+        and np.isfinite(scores.to_numpy()).all()
+        and np.isfinite(covariates.to_numpy()).all()
+    ):
+        raise ValueError("PSM matching does not accept non-finite values")
+    treatment_values = set(treatment.unique().tolist())
+    if treatment_values != {0.0, 1.0}:
+        raise ValueError("PSM matching requires treatment coded exactly as 0 and 1 with both groups present")
+    if (scores <= 0).any() or (scores >= 1).any():
+        raise ValueError("PSM matching requires propensity scores strictly inside (0, 1)")
+
+    logit_scores = np.log(scores / (1.0 - scores))
+    logit_sd = float(np.std(logit_scores.to_numpy(), ddof=1))
+    if not np.isfinite(logit_sd) or logit_sd <= 0:
+        raise ValueError("PSM matching requires non-constant logit propensity scores to define its fixed caliper")
+    caliper = 0.2 * logit_sd
+
+    treated_index = treatment.index[treatment == 1]
+    control_index = treatment.index[treatment == 0]
+    control_logits = logit_scores.loc[control_index]
+    control_weights = pd.Series(0.0, index=control_index)
+    matched_treated_index = []
+    matched_effects = []
+    match_distances = []
+
+    for row_index in treated_index:
+        distances = (control_logits - logit_scores.loc[row_index]).abs()
+        nearest_distance = float(distances.min())
+        if nearest_distance > caliper:
+            continue
+        # Floating-point arithmetic may make mathematically equal distances differ by a few ULPs.
+        # This tight tolerance preserves exact-tie averaging without quietly admitting near matches.
+        nearest_controls = distances.index[np.isclose(distances.to_numpy(), nearest_distance, rtol=0.0, atol=1e-12)]
+        matched_control_outcome = float(outcome.loc[nearest_controls].mean())
+        control_weights.loc[nearest_controls] += 1.0 / len(nearest_controls)
+        matched_treated_index.append(row_index)
+        matched_effects.append(float(outcome.loc[row_index] - matched_control_outcome))
+        match_distances.append(nearest_distance)
+
+    if not matched_treated_index:
+        raise ValueError("PSM matching found no treated observation with a control inside the fixed caliper")
+
+    def standardized_mean_difference(treated_values, control_values, pooled_sd, control_weight=None):
+        treated_values = np.asarray(treated_values, dtype=float)
+        control_values = np.asarray(control_values, dtype=float)
+        treated_mean = float(np.mean(treated_values))
+        if control_weight is None:
+            control_mean = float(np.mean(control_values))
+        else:
+            control_weight = np.asarray(control_weight, dtype=float)
+            control_mean = float(np.average(control_values, weights=control_weight))
+        if pooled_sd == 0:
+            if np.isclose(treated_mean, control_mean, rtol=0.0, atol=1e-12):
+                return 0.0
+            raise ValueError("PSM matching cannot standardize a covariate with zero pooled variance and unequal means")
+        return (treated_mean - control_mean) / pooled_sd
+
+    pre_match_smd = {}
+    post_match_smd = {}
+    for column in covariates.columns:
+        values = covariates[column]
+        pre_treated_values = values.loc[treated_index].to_numpy(dtype=float)
+        pre_control_values = values.loc[control_index].to_numpy(dtype=float)
+        # The unmatched groups define one fixed denominator for pre/post SMD.  It remains
+        # well-defined when the caliper leaves a single matched treated observation.
+        treated_variance = np.var(pre_treated_values, ddof=1) if len(pre_treated_values) > 1 else 0.0
+        control_variance = np.var(pre_control_values, ddof=1) if len(pre_control_values) > 1 else 0.0
+        pooled_sd = float(np.sqrt((treated_variance + control_variance) / 2.0))
+        pre_match_smd[str(column)] = float(
+            standardized_mean_difference(pre_treated_values, pre_control_values, pooled_sd)
+        )
+        post_match_smd[str(column)] = float(
+            standardized_mean_difference(
+                values.loc[matched_treated_index],
+                values.loc[control_index],
+                pooled_sd,
+                control_weights.to_numpy(),
+            )
+        )
+
+    post_match_max_abs_smd = max(abs(value) for value in post_match_smd.values())
+    if post_match_max_abs_smd > 0.10:
+        raise ValueError(
+            f"PSM matching failed post-match balance: max absolute SMD={post_match_max_abs_smd:.4f} exceeds 0.10"
+        )
+
+    return {
+        "att": float(np.mean(matched_effects)),
+        "caliper": float(caliper),
+        "treated_count": int(len(treated_index)),
+        "control_count": int(len(control_index)),
+        "matched_treated_count": int(len(matched_treated_index)),
+        "unmatched_treated_count": int(len(treated_index) - len(matched_treated_index)),
+        "reused_control_count": int((control_weights > 1.0).sum()),
+        "max_match_distance": float(max(match_distances)),
+        "pre_match_smd": pre_match_smd,
+        "post_match_smd": post_match_smd,
+        "pre_match_max_abs_smd": float(max(abs(value) for value in pre_match_smd.values())),
+        "post_match_max_abs_smd": float(post_match_max_abs_smd),
+    }
+
+def propensity_score_hajek_ipw_ate(dependent_variable, treatment_variable, propensity_score, covariate_variables):
+    """Estimate a fixed Hájek IPW ATE under KillStata's model-facing contract.
+
+    The caller cannot select ATT, trimming, clipping, or a weight formula.  Scores outside
+    the declared overlap interval cause an explicit failure rather than silent clipping;
+    both group effective sample sizes and every supplied covariate's weighted SMD must pass
+    before an estimate is returned.  Inference is deliberately absent because this narrow
+    estimator has not yet admitted a validated variance procedure.
+    """
+    outcome = pd.Series(dependent_variable, copy=True)
+    treatment = pd.Series(treatment_variable, copy=True)
+    scores = pd.Series(propensity_score, copy=True)
+    covariates = pd.DataFrame(covariate_variables).copy()
+
+    if covariates.shape[1] == 0:
+        raise ValueError("IPW requires at least one pre-treatment covariate")
+    if not (outcome.index.equals(treatment.index) and outcome.index.equals(scores.index) and outcome.index.equals(covariates.index)):
+        raise ValueError("Outcome, treatment, propensity scores, and covariates must use the same row index")
+    if outcome.isna().any() or treatment.isna().any() or scores.isna().any() or covariates.isna().any().any():
+        raise ValueError("IPW does not accept missing values; preprocess the canonical stage first")
+
+    try:
+        outcome = pd.to_numeric(outcome, errors="raise").astype(float)
+        treatment = pd.to_numeric(treatment, errors="raise").astype(float)
+        scores = pd.to_numeric(scores, errors="raise").astype(float)
+        covariates = covariates.apply(pd.to_numeric, errors="raise").astype(float)
+    except Exception as exc:
+        raise ValueError(f"IPW requires numeric outcome, treatment, scores, and covariates: {exc}") from exc
+
+    if not (
+        np.isfinite(outcome.to_numpy()).all()
+        and np.isfinite(treatment.to_numpy()).all()
+        and np.isfinite(scores.to_numpy()).all()
+        and np.isfinite(covariates.to_numpy()).all()
+    ):
+        raise ValueError("IPW does not accept non-finite values")
+    if set(treatment.unique().tolist()) != {0.0, 1.0}:
+        raise ValueError("IPW requires treatment coded exactly as 0 and 1 with both groups present")
+    if (scores <= 0).any() or (scores >= 1).any():
+        raise ValueError("IPW requires propensity scores strictly inside (0, 1)")
+
+    overlap_lower, overlap_upper = 0.05, 0.95
+    if (scores < overlap_lower).any() or (scores > overlap_upper).any():
+        raise ValueError(
+            "IPW overlap failure: every propensity score must remain inside the fixed [0.05, 0.95] interval; weights are never clipped"
+        )
+
+    treated_index = treatment.index[treatment == 1]
+    control_index = treatment.index[treatment == 0]
+    treatment_weights = 1.0 / scores.loc[treated_index]
+    control_weights = 1.0 / (1.0 - scores.loc[control_index])
+
+    def effective_sample_size(weights):
+        values = np.asarray(weights, dtype=float)
+        return float(np.square(values.sum()) / np.square(values).sum())
+
+    treatment_ess = effective_sample_size(treatment_weights)
+    control_ess = effective_sample_size(control_weights)
+    if treatment_ess < 20.0 or control_ess < 20.0:
+        raise ValueError(
+            f"IPW effective sample size failure: treated ESS={treatment_ess:.2f}, control ESS={control_ess:.2f}; each must be at least 20"
+        )
+
+    # Keep one unmatched-sample pooled SD denominator for pre/post comparison.  The means
+    # below are Hájek-normalized within group, so the reported ATE cannot be altered by
+    # multiplying every group weight by the same constant.
+    weighted_smd = {}
+    for column in covariates.columns:
+        values = covariates[column]
+        treated_values = values.loc[treated_index].to_numpy(dtype=float)
+        control_values = values.loc[control_index].to_numpy(dtype=float)
+        treated_variance = np.var(treated_values, ddof=1) if len(treated_values) > 1 else 0.0
+        control_variance = np.var(control_values, ddof=1) if len(control_values) > 1 else 0.0
+        pooled_sd = float(np.sqrt((treated_variance + control_variance) / 2.0))
+        treated_mean = float(np.average(treated_values, weights=treatment_weights.to_numpy()))
+        control_mean = float(np.average(control_values, weights=control_weights.to_numpy()))
+        if pooled_sd == 0:
+            if np.isclose(treated_mean, control_mean, rtol=0.0, atol=1e-12):
+                weighted_smd[str(column)] = 0.0
+                continue
+            raise ValueError("IPW cannot standardize a covariate with zero pooled variance and unequal weighted means")
+        weighted_smd[str(column)] = float((treated_mean - control_mean) / pooled_sd)
+
+    weighted_max_abs_smd = max(abs(value) for value in weighted_smd.values())
+    if weighted_max_abs_smd > 0.10:
+        raise ValueError(
+            f"IPW failed weighted balance: max absolute SMD={weighted_max_abs_smd:.4f} exceeds 0.10"
+        )
+
+    treated_mean = float(np.average(outcome.loc[treated_index], weights=treatment_weights.to_numpy()))
+    control_mean = float(np.average(outcome.loc[control_index], weights=control_weights.to_numpy()))
+    return {
+        "ate": float(treated_mean - control_mean),
+        "treated_count": int(len(treated_index)),
+        "control_count": int(len(control_index)),
+        "treatment_ess": float(treatment_ess),
+        "control_ess": float(control_ess),
+        "min_propensity_score": float(scores.min()),
+        "max_propensity_score": float(scores.max()),
+        "max_weight": float(max(treatment_weights.max(), control_weights.max())),
+        "weighted_smd": weighted_smd,
+        "weighted_max_abs_smd": float(weighted_max_abs_smd),
+    }
+
+
+def _require_full_column_rank(design, label):
+    """Reject non-identifiable fixed outcome models instead of trusting a pseudo-inverse."""
+    matrix = np.asarray(design, dtype=float)
+    if matrix.ndim != 2 or matrix.shape[0] < matrix.shape[1] or np.linalg.matrix_rank(matrix) < matrix.shape[1]:
+        raise ValueError(f"{label} requires a full column rank outcome-model design")
+
+
+def propensity_score_regression_adjustment_ate(dependent_variable, treatment_variable, propensity_score, covariate_variables):
+    """Estimate a fixed homogeneous ATE using Y ~ 1 + T + e(X).
+
+    This is deliberately a narrow propensity-score regression adjustment rather than a
+    generic OLS wrapper. It first reuses the exact overlap, ESS, and weighted-balance
+    gates admitted for IPW, then returns only a point estimate: inference for an estimated
+    propensity-score regressor is not exposed until its variance contract is independently
+    validated.
+    """
+    diagnostics = propensity_score_hajek_ipw_ate(
+        dependent_variable,
+        treatment_variable,
+        propensity_score,
+        covariate_variables,
+    )
+    outcome = pd.to_numeric(pd.Series(dependent_variable, copy=True), errors="raise").astype(float)
+    treatment = pd.to_numeric(pd.Series(treatment_variable, copy=True), errors="raise").astype(float)
+    score = pd.to_numeric(pd.Series(propensity_score, copy=True), errors="raise").astype(float).rename("propensity_score")
+    design = sm.add_constant(pd.concat([treatment, score], axis=1), has_constant="add")
+    _require_full_column_rank(design, "propensity-score regression adjustment")
+    model = sm.OLS(outcome, design).fit()
+    if treatment.name not in model.params.index or not np.isfinite(model.params[treatment.name]):
+        raise ValueError("propensity-score regression adjustment did not identify the treatment effect")
+    return {
+        **diagnostics,
+        "ate": float(model.params[treatment.name]),
+    }
+
+
+def propensity_score_aipw_ate(dependent_variable, treatment_variable, propensity_score, covariate_variables):
+    """Estimate the fixed ATE with standard augmented inverse probability weighting.
+
+    m1(X) and m0(X) are separate linear outcome regressions. The returned estimand is the
+    sample average of m1-m0 + T/e*(Y-m1) - (1-T)/(1-e)*(Y-m0), which remains consistent
+    when either the propensity model or both outcome models are correctly specified.
+    """
+    diagnostics = propensity_score_hajek_ipw_ate(
+        dependent_variable,
+        treatment_variable,
+        propensity_score,
+        covariate_variables,
+    )
+    outcome = pd.to_numeric(pd.Series(dependent_variable, copy=True), errors="raise").astype(float)
+    treatment = pd.to_numeric(pd.Series(treatment_variable, copy=True), errors="raise").astype(float)
+    score = pd.to_numeric(pd.Series(propensity_score, copy=True), errors="raise").astype(float)
+    covariates = pd.DataFrame(covariate_variables).apply(pd.to_numeric, errors="raise").astype(float)
+    design = sm.add_constant(covariates, has_constant="add")
+    treated_design = design.loc[treatment == 1]
+    control_design = design.loc[treatment == 0]
+    _require_full_column_rank(treated_design, "AIPW treated outcome model")
+    _require_full_column_rank(control_design, "AIPW control outcome model")
+    treated_model = sm.OLS(outcome.loc[treatment == 1], treated_design).fit()
+    control_model = sm.OLS(outcome.loc[treatment == 0], control_design).fit()
+    m1 = np.asarray(treated_model.predict(design), dtype=float)
+    m0 = np.asarray(control_model.predict(design), dtype=float)
+    y = outcome.to_numpy(dtype=float)
+    t = treatment.to_numpy(dtype=float)
+    e = score.to_numpy(dtype=float)
+    contribution = m1 - m0 + t / e * (y - m1) - (1.0 - t) / (1.0 - e) * (y - m0)
+    if not np.isfinite(contribution).all():
+        raise ValueError("AIPW produced non-finite influence-function contributions")
+    return {
+        **diagnostics,
+        "ate": float(np.mean(contribution)),
+    }
+
+def propensity_score_inverse_probability_weighting(dependent_variable, treatment_variable, propensity_score, target_type = "ATE"):
+    
+    """
+    Use propensity score inverse probability weighting (IPW) method to estimate the Average Treatment Effect (ATE), 
+    or Average Treatment Effect on the Treated (ATT), of the treatment variable towards the dependent variable. 
+    This method is formally called Propensity Score Inverse Probability Weighting (IPW) approach.
+    The final return is the final estimated ATE or ATT as is required.
+    Could refer to: hhttps://psantanna.com/Econ520/Slides/15-ipw/15slides.html#1
+
+    Args:
+        dependent_variable (pd.Series): Target dependent variable, which should not contain nan value.
+        treatment_variable (pd.Series): Target treatment variable, which should be a binary variable with no nan value (1 for treatment, 0 for control).
+        propensity_score (pd.Series): Propensity score for each sample to receive treatment, which should not contain nan value.
+        target_type (str): Target output type, which supports "ATE" and "ATT".
+    """
+    
+    # Check inputs
+    if target_type not in ["ATE", "ATT"]:
+        raise RuntimeError("Target Type Input Not Supported! Only ATE or ATT could be supported!")
+    
+    # Adjust input type
+    dependent_variable = dependent_variable.astype(float)
+    treatment_variable = treatment_variable.astype(float)
+    
+    # Conduct calculation
+    if target_type == "ATE":
+        ATE_first_part = (dependent_variable * treatment_variable / propensity_score).sum() / (treatment_variable / propensity_score).sum()
+        ATE_second_part = (dependent_variable * (1 - treatment_variable) / (1 - propensity_score)).sum() / ((1 - treatment_variable) / (1 - propensity_score)).sum()
+        ATE = ATE_first_part - ATE_second_part
+        return ATE
+    else:
+        ATT_first_part = (treatment_variable / treatment_variable.mean() * dependent_variable).mean()
+        ATT_second_part_top = ((1 - treatment_variable) * propensity_score / (1 - propensity_score) * dependent_variable).mean()
+        ATT_second_part_down = ((1 - treatment_variable) * propensity_score / (1 - propensity_score)).mean()
+        return ATT_first_part - ATT_second_part_top / ATT_second_part_down
+
+def propensity_score_regression(dependent_variable, treatment_variable, propensity_score, cov_type = None, target_type = "final_model", output_tables = False):
+    
+    """
+    Use propensity score regression method to estimate Average Treatment Effect (ATE) of the treatment variable towards the dependent variable. 
+    This method is formally called Regression Adjustment or Outcome Regression approach. Also, this is the homogeneous version.
+    The estimated ATE is the parameter of the treatment variable in the regression model.
+    NOTE THAT THIS FUNCTION DOES NOT RETURN THE FINAL REGRESSION TABLE! All tables can (and only can) be printed out during the function.
+    Note that the method is the homogeneous version.
+    The final return is some clearly specified parameter or statistic within the regression model, or some regression model object within the function (by adjusting the argument input "target_type").
+    
+    Args:
+        dependent_variable (pd.Series): Target dependent variable, which should not contain nan value.
+        treatment_variable (pd.Series): Target treatment variable, which should be a binary variable with no nan value (1 for treatment, 0 for control).
+        propensity_score (pd.Series): Propensity score for each sample to receive treatment, which should not contain nan value.
+        cov_type (str or None): The covariance estimator used in the results. If not specified by user, this could be None. NOTE THAT if user specifies to use "robust" standard errors, this input should be "HC1"!
+        target_type (str or None): Denote whether this function need to return any specific evaluation metric or any other content. If only want to print out regression tables, this should be None. Otherwise, three possible inputs are supported: "neg_pvalue" for the regression treatment variable coefficient p-value's negative value, "rsquared" for the adjusted R-squared value of the regression, and "final_model" for the final regression model.
+        output_tables (bool): Denote whether this function need to print out regression tables. If want to print out the tabels, this should be True. If only want the evaluation metric outputs, this should be False.
+    """
+        
+    # Adjust input type
+    dependent_variable = dependent_variable.astype(float)
+    treatment_variable = treatment_variable.astype(float)
+    
+    # Run the OLS regression
+    if cov_type is None:
+        OLS_model = sm.OLS(dependent_variable, sm.add_constant(pd.concat([treatment_variable, propensity_score], axis = 1))).fit()
+    else:
+        OLS_model = sm.OLS(dependent_variable, sm.add_constant(pd.concat([treatment_variable, propensity_score], axis = 1))).fit(cov_type = cov_type)
+
+    # Output the table if required
+    print("ATE Estimation: ", OLS_model.params[treatment_variable.name])
+    if output_tables is True:
+        print(OLS_model.summary())
+    
+    # Return evaluation metric if needed
+    if target_type == "neg_pvalue":
+        return -OLS_model.pvalues[treatment_variable.name]
+    elif target_type == "rsquared":
+        return OLS_model.rsquared_adj
+    elif target_type == "final_model":
+        return OLS_model
+    
+def propensity_score_double_robust_estimator_augmented_IPW(dependent_variable, treatment_variable, propensity_score, covariate_variables, cov_type = None):
+    
+    """
+    Use propensity score double robust augmented IPW method to estimate Average Treatment Effect (ATE) of the treatment variable towards the dependent variable. 
+    This method is formally called Propensity Double Robust Estimator (Augmented IPW) approach. NOTE THAT this function is the DOUBLE ROBUST version!
+    NOTE THAT THIS FUNCTION DOES NOT RETURN THE FINAL REGRESSION TABLE! All tables can (and only can) be printed out during the function.
+    The final return is the final estimated ATE.
+    Can refer to: https://www.stata.com/manuals/teteffectsaipw.pdf
+    
+    Args:
+        dependent_variable (pd.Series): Target dependent variable, which should not contain nan value.
+        treatment_variable (pd.Series): Target treatment variable, which should be a binary variable with no nan value (1 for treatment, 0 for control).
+        covariate_variables (pd.DataFrame): A dataframe of covariate variables, which should not contain nan value or intercept.
+        propensity_score (pd.Series): Propensity score for each sample to receive treatment, which should not contain nan value.
+        cov_type (str or None): The covariance estimator used in the results. If not specified by user, this could be None. NOTE THAT if user specifies to use "robust" standard errors, this input should be "HC1"!
+    """
+    
+    # Adjust input type
+    dependent_variable = dependent_variable.astype(float)
+    treatment_variable = treatment_variable.astype(float)
+    if covariate_variables is not None:
+        covariate_variables = covariate_variables.astype(float)
+
+    # Run the regression
+    if covariate_variables is None:
+        X = treatment_variable
+    else:
+        X = pd.concat([treatment_variable, covariate_variables], axis = 1).astype(float)
+    if cov_type is None:
+        regression = sm.OLS(dependent_variable, sm.add_constant(X)).fit()
+    else:
+        regression = sm.OLS(dependent_variable, sm.add_constant(X)).fit(cov_type = cov_type)
+    
+    # Calculate the IPW
+    IPW = treatment_variable / propensity_score + (1 - treatment_variable) / (1 - propensity_score)
+    
+    # Output the control group treatment version output
+    selected_X = X.loc[treatment_variable[treatment_variable == 0].index]
+    selected_X[treatment_variable.name] = 1
+    control_group_constructed_output = pd.Series(regression.predict(sm.add_constant(selected_X, has_constant = "add")), index = selected_X.index)
+    treatment_group_output = dependent_variable.loc[treatment_variable[treatment_variable == 1].index]
+    
+    # Calculate the ATE
+    treatment_weighted = (treatment_group_output * IPW.loc[treatment_group_output.index] / IPW.loc[treatment_group_output.index].sum()).sum()
+    control_weighted = (control_group_constructed_output * IPW.loc[control_group_constructed_output.index] / IPW.loc[control_group_constructed_output.index].sum()).sum()
+    ATE = treatment_weighted - control_weighted
+    return ATE
+    
+def propensity_score_double_robust_estimator_IPW_regression_adjustment(dependent_variable, treatment_variable, covariate_variables, propensity_score, cov_type = None, target_type = "final_model", output_tables = False):
+    
+    """
+    Use propensity score double robust IPW regression adjustment method to estimate Average Treatment Effect (ATE) of the treatment variable towards the dependent variable. 
+    This method is formally called Propensity Double Robust Estimator (IPW Regression Adjustment) approach. NOTE THAT this function is the DOUBLE ROBUST version!
+    The ATE is the coefficient of the target treatment variable in the final OLS regression.
+    The estimated ATE is the parameter of the treatment variable in the regression model.
+    NOTE THAT THIS FUNCTION DOES NOT RETURN THE FINAL REGRESSION TABLE! All tables can (and only can) be printed out during the function.
+    The final return is some clearly specified parameter or statistic within the regressions, or some regression model object within the function (by adjusting the argument input "target_type").
+    Can refer to: https://www.stata.com/manuals/teteffectsipwra.pdf
+    
+    Args:
+        dependent_variable (pd.Series): Target dependent variable, which should not contain nan value.
+        treatment_variable (pd.Series): Target treatment variable, which should be a binary variable with no nan value (1 for treatment, 0 for control).
+        covariate_variables (pd.DataFrame): A dataframe of covariate variables, which should not contain nan value or intercept.
+        propensity_score (pd.Series): Propensity score for each sample to receive treatment, which should not contain nan value.
+        cov_type (str or None): The covariance estimator used in the results. If not specified by user, this could be None. NOTE THAT if user specifies to use "robust" standard errors, this input should be "HC1"!
+        target_type (str or None): Denote whether this function need to return any specific evaluation metric or any other content. If only want to print out regression tables, this should be None. Otherwise, three possible inputs are supported: "neg_pvalue" for the regression treatment variable coefficient p-value's negative value, "rsquared" for the adjusted R-squared value of the regression, and "final_model" for the final regression model.
+        output_tables (bool): Denote whether this function need to print out regression tables. If want to print out the tabels, this should be True. If only want the evaluation metric outputs, this should be False.
+    """
+    
+    # Adjust input type
+    dependent_variable = dependent_variable.astype(float)
+    treatment_variable = treatment_variable.astype(float)
+    if covariate_variables is not None:
+        covariate_variables = covariate_variables.astype(float)
+    
+    # Calculate the IPW
+    IPW = treatment_variable / propensity_score + (1 - treatment_variable) / (1 - propensity_score)
+    IPW = IPW ** 0.5
+        
+    # Run the regression
+    if covariate_variables is None:
+        X = treatment_variable
+    else:
+        X = pd.concat([treatment_variable, covariate_variables], axis = 1).astype(float)
+    if cov_type is None:
+        regression = sm.WLS(dependent_variable, sm.add_constant(X), weights = IPW).fit()
+    else:
+        regression = sm.WLS(dependent_variable, sm.add_constant(X), weights = IPW).fit(cov_type = cov_type)
+        
+    # Output the table if required
+    print("Estimated ATE: ", regression.params[treatment_variable.name])
+    if output_tables is True:
+        print(regression.summary())
+
+    # Return evaluation metric if needed
+    if target_type == "neg_pvalue":
+        return -regression.pvalues[treatment_variable.name]
+    elif target_type == "rsquared":
+        return regression.rsquared
+    elif target_type == "final_model":
+        return regression
+    
+#%%
+
+def IV_2SLS_regression(dependent_variable, treatment_variable, IV_variable, covariate_variables, cov_info = "nonrobust", target_type = "final_model", output_tables = False):
+    
+    """
+    Use Instrument Variable - Two Step Least Square (IV-2SLS) method to estimate Average Treatment Effect (ATE) of 
+    the treatment variable towards the dependent variable, while ruling out endogeneiry in the original model.
+    The estimated ATE is the parameter of the treatment variable in the second-step regression model.
+    NOTE THAT THIS FUNCTION DOES NOT RETURN THE FINAL REGRESSION TABLE! All tables can (and only can) be printed out during the function.
+    If user specifies any fixed effect variable, in the IV-2SLS method this variable MUST BE transformed into dummy variables first (with one of the categories dropped to avoid multicollinearity with the constant term) and added into covariates.
+    The final return is some clearly specified parameter or statistic within the regressions, or some regression model object within the function (by adjusting the argument input "target_type").
+
+    Args:
+        dependent_variable (pd.Series): Target dependent variable, which should not contain nan value.
+        treatment_variable (pd.Series): Target treatment variable, which should not contain nan value.
+        IV_variable (pd.Series or pd.DataFrame): Proposed instrument variable(s). Could have only one or multiple IVs. Should not contain nan value.
+        covariate_variables (pd.DataFrame or None): Proposed covariate variables. If user does not specify any covariate variable, this could be None. Otherwise, it should not contain nan value.
+        cov_info (str or dict): The covariance estimator used in the results. Four covariance estimators are supported: If no adjustment, input "nonrobust"; If heteroskedasticity-consistent adjustment (allows "HC0", "HC1", "HC2", "HC3"), take "HC0" as example, input "HC0", and if user specifies to use "robust" standard errors, input "HC1"; If heteroskedasticity and autocorrelation consistent adjustment (HAC) with integer lag terms, take maxlags equal to 5 for example, input {"HAV": 5}; If cluster adjustment with the target groups variable named "groups" (pd.Series or pd.dataframe), input {"cluster": groups}.
+        target_type (str or None): Denote whether this function need to return any specific evaluation metric or any other content. If only want to print out regression tables, this should be None. Otherwise, three possible inputs are supported: "neg_pvalue" for the regression treatment variable coefficient p-value's negative value, "rsquared" for the adjusted R-squared value of the regression, and "final_model" for the final second-step regression model.
+        output_tables (bool): Denote whether this function need to print out regression tables. If want to print out the tabels, this should be True. If only want the evaluation metric outputs, this should be False.
+    """
+    
+    # Check Input
+    if type(cov_info) == str and cov_info not in ["nonrobust", "robust", "HC0", "HC1", "HC2", "HC3"]:
+        raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
+    elif type(cov_info) == dict and list(cov_info.keys())[0] not in ["HAC", "cluster"]:
+        raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
+
+    # Adjust input type
+    dependent_variable = dependent_variable.astype(float)
+    treatment_variable = treatment_variable.astype(float)
+    IV_variable = IV_variable.astype(float)
+    if covariate_variables is not None:
+        covariate_variables = covariate_variables.astype(float)
+
+    # 必须用一次性的 IV2SLS 估计，不能手工跑「第一阶段拟合 -> 第二阶段 OLS」。
+    #
+    # 手工两阶段算出的**系数是对的**，但**标准误是错的**：第二阶段的 OLS 把拟合值
+    # predicted_treatment 当成了一个普通的、没有误差的回归元，用它算残差；而正确的 IV
+    # 方差必须基于**原始**内生变量的残差。这会让标准误偏离真值（Card 1995 数据上偏 +2.55%），
+    # 进而算错 t 值和显著性 —— 系数看着对，结论却可能反过来。
+    # 用 Card (1995) 复现测试验证：见 test/tool/iv-golden.test.ts。
+    exog = None if covariate_variables is None else sm.add_constant(covariate_variables)
+    if exog is None:
+        exog = pd.DataFrame({"const": 1.0}, index = dependent_variable.index)
+
+    endog = treatment_variable.to_frame() if isinstance(treatment_variable, pd.Series) else treatment_variable
+    instruments = IV_variable.to_frame() if isinstance(IV_variable, pd.Series) else IV_variable
+
+    model = IV2SLS(dependent_variable, exog, endog, instruments)
+
+    # 把本函数的 cov_info 约定映射到 linearmodels 的协方差类型。
+    if type(cov_info) == str:
+        if cov_info == "nonrobust":
+            iv_regression = model.fit(cov_type = "unadjusted")
+        else:
+            # linearmodels 的线性 IV 后端只区分 unadjusted 与 robust；
+            # HC0/HC1/HC2/HC3 仅为旧调用兼容，新模型工具只暴露 robust。
+            iv_regression = model.fit(cov_type = "robust")
+    elif list(cov_info.keys())[0] == "HAC":
+        iv_regression = model.fit(cov_type = "kernel", bandwidth = cov_info["HAC"])
+    elif list(cov_info.keys())[0] == "cluster":
+        iv_regression = model.fit(cov_type = "clustered", clusters = cov_info["cluster"])
+
+    treatment_name = endog.columns[0]
+
+    # Output the table if required. ATE is the coefficient of the endogenous treatment variable
+    print("Estimated ATE: ", iv_regression.params[treatment_name])
+    if output_tables is True:
+        print(iv_regression.summary)
+
+    # Return evaluation metric if needed
+    if target_type == "neg_pvalue":
+        return -iv_regression.pvalues[treatment_name]
+    elif target_type == "rsquared":
+        return iv_regression.rsquared_adj
+    elif target_type == "final_model":
+        return iv_regression
+    
+def IV_2SLS_IV_setting_test(dependent_variable, treatment_variable, IV_variable, covariate_variables, cov_type = None):
+
+    """
+    Test the fundamental assuptions that the proposed Instrument Variable should satisfy, which are:
+        1. Relevant Condition: In the proposed population model, the proposed IV should be relevant with the target treatment variable;
+        2. Exclusion Restriction: In the proposed population model, the proposed IV should not be relevant with the residual of this model.
+
+    Args:
+        dependent_variable (pd.Series): Target dependent variable, which should not contain nan value.
+        treatment_variable (pd.Series): Target treatment variable, which should not contain nan value.
+        IV_variable (pd.Series): Proposed instrument variable. Could have ONLY ONE IV in this test function. Should not contain nan value.
+        covariate_variables (pd.DataFrame or None): Proposed covariate variables. If user does not specify any covariate variable, this could be None. Otherwise, it should not contain nan value.
+        cov_type (str or None): The covariance estimator used in the results. If not specified by user, this could be None.
+    """
+
+    # First test Relevant Condition. The coefficient of IV should be significant if it passes Relevant Condition requirement.
+    if cov_type is None:
+        relevant_test_OLS = sm.OLS(treatment_variable, sm.add_constant(IV_variable)).fit()
+    else:
+        relevant_test_OLS = sm.OLS(treatment_variable, sm.add_constant(IV_variable)).fit(cov_type = cov_type)
+    print("Relevant Condition Test Result:")
+    print(relevant_test_OLS.summary())
+    
+    # First test Exclusion Restriction. The coefficient of IV should be insignificant if it passes Exclusion Restriction requirement.
+    if covariate_variables is None:
+        restriction_test_X = treatment_variable
+    else:
+        restriction_test_X = pd.concat([treatment_variable, covariate_variables], axis = 1).astype(float)
+    if cov_type is None:
+        restriction_test_OLS = sm.OLS(dependent_variable, sm.add_constant(restriction_test_X)).fit()
+    else:
+        restriction_test_OLS = sm.OLS(dependent_variable, sm.add_constant(restriction_test_X)).fit(cov_type = cov_type)
+    residual_series = pd.Series(restriction_test_OLS.resid, index = restriction_test_X.index)
+    if cov_type is None:
+        restriction_test_final_OLS = sm.OLS(residual_series, sm.add_constant(IV_variable)).fit()
+    else:
+        restriction_test_final_OLS = sm.OLS(residual_series, sm.add_constant(IV_variable)).fit(cov_type = cov_type)        
+    print("Exclusion Restriction Test Result:")
+    print(restriction_test_final_OLS.summary())
+    
+#%%
+
+def Static_Diff_in_Diff_regression(dependent_variable, 
+                                   treatment_entity_dummy, 
+                                   treatment_finished_dummy, 
+                                   covariate_variables, 
+                                   entity_effect = False, 
+                                   time_effect = False, 
+                                   other_effect = None, 
+                                   cov_type = "unadjusted", 
+                                   target_type = "final_model", 
+                                   output_tables = False):
+    
+    """
+    Use Difference-in-Difference Regression method to estimate Average Treatment Effect (ATE) of 
+    the treatment variable towards the dependent variable, in the PANEL DATA format. This is the STATIC version, 
+    denoting that there is only one time spot when all entities in the treatment group is being treated. In other word, it's not the staggered method.
+    The estimated ATE is the parameter of the interaction term (named "treatment_group_treated") in the regression model.
+    NOTE THAT THIS FUNCTION DOES NOT RETURN THE FINAL REGRESSION TABLE! All tables can (and only can) be printed out during the function.
+    The final return is some clearly specified parameter or statistic within the regressions, or some regression model object within the function (by adjusting the argument input "target_type").
+    
+    Args:
+        dependent_variable (pd.Series): Target dependent variable, which should not contain nan value. The index of the series should be entity-time multi-index.
+        treatment_entity_dummy (pd.Series): A dummy variables series denoting whether the entity is in the treatment group. This input should not contain nan value. The index of the series should be entity-time multi-index.
+        treatment_finished_dummy (pd.Series): A dummy variables series denoting whether the treatment HAS BEEN implemented towards the treatment group. This input should not contain nan value. The index of the series should be entity-time multi-index.
+        covariate_variables (pd.DataFrame or None): Proposed covariate variables. If user does not specify any covariate variable, this could be None. Otherwise, it should not contain nan value.
+        entity_effect (bool): Denote whether entity effect is included in the regression.
+        time_effect (bool): Denote whether time effect is included in the regression.
+        other_effect (pd.DataFrame or None): Denote whether other effects are included in the regression. If there are other effects required, this input should be a pd.DataFrame with the categorial variable column(s) and entity-time multi-index. If no other effects required, leave this input to be None.
+        cov_type (str): The covariance estimator used in the results. Five covariance estimators are supported: "unadjusted" for homoskedastic residual, "robust" for heteroskedasticity control, "cluster_entity" for entity clustering, "cluster_time" for time clustering, and "cluster_both" for entity-time two-way clustering.
+        target_type (str or None): Denote whether this function need to return any specific evaluation metric or any other content. If only want to print out regression tables, this should be None. Otherwise, three possible inputs are supported: "neg_pvalue" for the regression treatment variable coefficient p-value's negative value, "rsquared" for the adjusted R-squared value of the regression, and "final_model" for the final regression model.
+        output_tables (bool): Denote whether this function need to print out regression tables. If want to print out the tabels, this should be True. If only want the evaluation metric outputs, this should be False.
+    """
+    
+    # Check if inputs are proper formatted
+    if cov_type not in ["unadjusted", "robust", "cluster_entity", "cluster_time", "cluster_both"]:
+        raise RuntimeError("Covariance type input unsupported! This function supports 'unadjusted', 'robust', 'cluster_entity', 'cluster_time' and 'cluster_both' as possible inputs!")
+    count_effects = 0
+    if entity_effect is True:
+        count_effects += 1
+    if time_effect is True:
+        count_effects += 1
+    if other_effect is not None:
+        count_effects += other_effect.shape[1]
+    if count_effects > 2:
+        raise RuntimeError("At most two effects allowed! Please note that now there are " + str(count_effects) + " effects in total!")
+
+    # Adjust input type
+    dependent_variable = dependent_variable.astype(float)
+    treatment_entity_dummy = treatment_entity_dummy.astype(float)
+    treatment_finished_dummy = treatment_finished_dummy.astype(float)
+    if covariate_variables is not None:
+        covariate_variables = covariate_variables.astype(float)
+
+    # Check to ensure dummy variables
+    if list(treatment_entity_dummy.map(int).sort_values().unique()) != [0, 1]:
+        raise RuntimeError("treatment_entity_dummy Input Error! Please Check!")
+    if list(treatment_finished_dummy.map(int).sort_values().unique()) != [0, 1]:
+        raise RuntimeError("treatment_finished_dummy Input Error! Please Check!")
+        
+    # Prepare the dataset
+    treatment_entity_dummy.name = "treatment_group"
+    treatment_finished_dummy.name = "treated"
+    beta = treatment_entity_dummy * treatment_finished_dummy
+    beta.name = "treatment_group_treated"
+    if covariate_variables is None:
+        X = pd.concat([beta, treatment_entity_dummy, treatment_finished_dummy], axis = 1)
+    else:
+        X = pd.concat([beta, treatment_entity_dummy, treatment_finished_dummy, covariate_variables], axis = 1).astype(float)
+    if count_effects == 0:
+        X = sm.add_constant(X)
+    
+    # Run the regression
+    if cov_type in ["unadjusted", "robust"]:
+        regression = PanelOLS(dependent_variable, X, entity_effects = entity_effect, time_effects = time_effect, other_effects = other_effect, drop_absorbed = True).fit(cov_type = cov_type)
+    elif cov_type == "cluster_entity":
+        regression = PanelOLS(dependent_variable, X, entity_effects = entity_effect, time_effects = time_effect, other_effects = other_effect, drop_absorbed = True).fit(cov_type = "clustered", cluster_entity = True)
+    elif cov_type == "cluster_time":
+        regression = PanelOLS(dependent_variable, X, entity_effects = entity_effect, time_effects = time_effect, other_effects = other_effect, drop_absorbed = True).fit(cov_type = "clustered", cluster_time = True)
+    elif cov_type == "cluster_both":
+        regression = PanelOLS(dependent_variable, X, entity_effects = entity_effect, time_effects = time_effect, other_effects = other_effect, drop_absorbed = True).fit(cov_type = "clustered", cluster_entity = True, cluster_time = True)
+
+    # Output the table if required
+    print("Estimated ATE: ", regression.params[beta.name])
+    if output_tables is True:
+        print(regression)
+
+    # Return evaluation metric if needed
+    if target_type == "neg_pvalue":
+        return -regression.pvalues[beta.name]
+    elif target_type == "rsquared":
+        return regression.rsquared
+    elif target_type == "final_model":
+        return regression
+
+def Sharp_Regression_Discontinuity_Design_regression(dependent_variable, 
+                                                     entity_treatment_dummy, 
+                                                     running_variable, 
+                                                     covariate_variables, 
+                                                     running_variable_cutoff, 
+                                                     running_variable_bandwidth, 
+                                                     kernel_choice = "uniform", 
+                                                     cov_info = "nonrobust", 
+                                                     target_type = "final_model", 
+                                                     output_tables = False):
+    
+    """
+    Use Sharp Regression Discontinuity Design (Sharp RDD) Local Linear Regression approach to estimate Average Treatment Effect (ATE) of 
+    the treatment variable towards the dependent variable. This is the Sharp version, denoting that entities with treatment variable above the cutoff 
+    will receive the final treatment FOR SURE. In other word, it's not the Fuzzy method.
+    If user specifies any fixed effect variable, in the Sharp RDD method this variable MUST BE transformed into dummy variables first (with one of the categories dropped to avoid multicollinearity with the constant term) and added into covariates.
+    The estimated ATE is the parameter of the entity treatment dummy in the regression model.
+    NOTE THAT THIS FUNCTION DOES NOT RETURN THE FINAL REGRESSION TABLE! All tables can (and only can) be printed out during the function.
+    The final return is some clearly specified parameter or statistic within the regressions, or some regression model object within the function (by adjusting the argument input "target_type").
+    
+    Args:
+        dependent_variable (pd.Series): Target dependent variable, which should not contain nan value.
+        entity_treatment_dummy (pd.Series): A dummy variables series denoting whether the treatment is implemented towards the entity. This input should not contain nan value.
+        running_variable (pd.Series): Target running variable to determine the possibility for the entity to receive treatment, which should not contain nan value.
+        covariate_variables (pd.DataFrame or None): Proposed covariate variables. If user does not specify any covariate variable, this could be None. Otherwise, it should not contain nan value.
+        running_variable_cutoff (float): Denote the threshold of the treatment variable, above which the entity will have higher chance to receive the final treatment.
+        running_variable_bandwidth (float or None): Denote the bandwidth to consider in this study. If use full sample (i.e., no bandwidth selection in the task), this should be None.
+        kernel_choice (str): Denote the choice of kernel function used in this analysis. Default is "uniform" that gives equal weights to all samples in the dataset. Can also accept "triangle" and "Epanechnikov".
+        cov_info (str or dict): The covariance estimator used in the results. Four covariance estimators are supported: If no adjustment, input "nonrobust"; If heteroskedasticity-consistent adjustment (allows "HC0", "HC1", "HC2", "HC3"), take "HC0" as example, input "HC0", and if user specifies to use "robust" standard errors, input "HC1"; If heteroskedasticity and autocorrelation consistent adjustment (HAC) with integer lag terms, take maxlags equal to 5 for example, input {"HAV": 5}; If cluster adjustment with the target groups variable named "groups" (pd.Series or pd.dataframe), input {"cluster": groups}.
+        target_type (str or None): Denote whether this function need to return any specific evaluation metric or any other content. If only want to print out regression tables, this should be None. Otherwise, three possible inputs are supported: "neg_pvalue" for the regression treatment variable coefficient p-value's negative value, "rsquared" for the adjusted R-squared value of the regression, and "final_model" for the final regression model.
+        output_tables (bool): Denote whether this function need to print out regression tables. If want to print out the tabels, this should be True. If only want the evaluation metric outputs, this should be False.
+    """    
+    
+    # Check if inputs are proper formatted
+    if kernel_choice not in ["uniform", "triangle", "Epanechnikov"]:
+        raise RuntimeError("Kernel function choice currently only supports 'uniform', 'triangle' and 'Epanechnikov'!")
+    if type(cov_info) == str and cov_info not in ["nonrobust", "HC0", "HC1", "HC2", "HC3"]:
+        raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
+    elif type(cov_info) == dict and list(cov_info.keys())[0] not in ["HAC", "cluster"]:
+        raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
+    if running_variable_bandwidth is not None and running_variable_bandwidth <= 0:
+        raise RuntimeError("If consider running variable bandwidth, this input MUST BE LARGER THAN 0! PLEASE CHECK!")
+    if running_variable[running_variable > running_variable_cutoff].shape[0] == 0 or running_variable[running_variable < running_variable_cutoff].shape[0] == 0:
+        raise RuntimeError("Running variable cutoff is out of the range for all running variable values! PLEASE CHECK!")
+        
+    # Adjust input type
+    dependent_variable = dependent_variable.astype(float)
+    entity_treatment_dummy = entity_treatment_dummy.astype(float)
+    running_variable = running_variable.astype(float)
+    if covariate_variables is not None:
+        covariate_variables = covariate_variables.astype(float)
+
+    # =========================================================================
+    
+    # Construct variables
+    if running_variable_bandwidth is None:
+        running_variable_bandwidth = max(running_variable.max() - running_variable_cutoff, running_variable_cutoff - running_variable.min())
+    selected_running_variable = running_variable[(running_variable >= running_variable_cutoff - running_variable_bandwidth) & (running_variable <= running_variable_cutoff + running_variable_bandwidth)]
+    dependent_variable = dependent_variable.loc[selected_running_variable.index]
+    entity_treatment_dummy = entity_treatment_dummy.loc[selected_running_variable.index]
+    if covariate_variables is not None:
+        covariate_variables = covariate_variables.loc[selected_running_variable.index].astype(float)
+    if type(cov_info) == dict and list(cov_info.keys())[0] == "cluster":
+        cov_info["cluster"] = cov_info["cluster"].loc[selected_running_variable.index]
+    demeaned_selected_running_variable = selected_running_variable - running_variable_cutoff
+    demeaned_selected_running_variable.name = "demeaned_" + selected_running_variable.name
+    demeaned_selected_running_interaction_variable = demeaned_selected_running_variable * entity_treatment_dummy
+    demeaned_selected_running_interaction_variable.name = "demeaned_interaction_" + entity_treatment_dummy.name
+    
+    # Construct weightings
+    if kernel_choice == "uniform":
+        weight = pd.Series(index = selected_running_variable.index).fillna(1 / selected_running_variable.shape[0])
+    elif kernel_choice == "triangle":
+        weight =  1 - ((selected_running_variable - running_variable_cutoff) / running_variable_bandwidth).abs()
+    elif kernel_choice == "Epanechnikov":
+        weight = selected_running_variable.map(lambda x: 0.75 * (1 - np.abs(((x - running_variable_cutoff) / running_variable_bandwidth)) ** 2))
+
+    # Construct formula and dataset
+    if covariate_variables is not None:
+        regression_formula = dependent_variable.name + " ~ " + entity_treatment_dummy.name + " + " + demeaned_selected_running_variable.name + " + " + demeaned_selected_running_interaction_variable.name + " + " + " + ".join(list(covariate_variables.columns))
+        complete_dataset = pd.concat([dependent_variable, entity_treatment_dummy, demeaned_selected_running_variable, demeaned_selected_running_interaction_variable, covariate_variables], axis = 1)
+    else:
+        regression_formula = dependent_variable.name + " ~ " + entity_treatment_dummy.name + " + " + demeaned_selected_running_variable.name + " + " + demeaned_selected_running_interaction_variable.name
+        complete_dataset = pd.concat([dependent_variable, entity_treatment_dummy, demeaned_selected_running_variable, demeaned_selected_running_interaction_variable], axis = 1)
+
+    # =========================================================================
+
+    # Run the regressions
+    if type(cov_info) == str:
+        model = smf.wls(regression_formula, complete_dataset, weights = weight).fit(cov_type = cov_info)
+    elif list(cov_info.keys())[0] == "HAC":
+        model = smf.wls(regression_formula, complete_dataset, weights = weight).fit(cov_type = "HAC", cov_kwds = {"maxlags": cov_info["HAC"]})
+    elif list(cov_info.keys())[0] == "cluster":
+        model = smf.wls(regression_formula, complete_dataset, weights = weight).fit(cov_type = "cluster", cov_kwds = {"groups": cov_info["cluster"]})
+    
+    # Output the table if required
+    print("Sharp RD Estimator: ", model.params[entity_treatment_dummy.name])
+    if output_tables is True:
+        print(model.summary())
+
+    # Return evaluation metric if needed
+    if target_type == "neg_pvalue":
+        return -model.pvalues[entity_treatment_dummy.name]
+    elif target_type == "rsquared":
+        return model.rsquared
+    elif target_type == "final_model":
+        return model
+
+def Fuzzy_Regression_Discontinuity_Design_regression(dependent_variable, 
+                                                     entity_treatment_dummy, 
+                                                     running_variable, 
+                                                     covariate_variables, 
+                                                     running_variable_cutoff, 
+                                                     running_variable_bandwidth, 
+                                                     kernel_choice = "uniform", 
+                                                     cov_info = "nonrobust", 
+                                                     target_type = "estimator", 
+                                                     output_tables = False):
+    
+    """
+    Use Two-step Fuzzy Regression Discontinuity Design (Fuzzy RDD) Local Linear Regression approach to estimate Average Treatment Effect (ATE) of 
+    the treatment variable towards the dependent variable. This is the Fuzzy version, denoting that there could be higher possibility, 
+    but not for sure, for an entity with treatment variable above the cutoff to receive the final treatment. In other word, it's not the Sharp method.
+    If user specifies any fixed effect variable, in the Fuzzy RDD method this variable MUST BE transformed into dummy variables first (with one of the categories dropped to avoid multicollinearity with the constant term) and added into covariates.
+    NOTE THAT THIS FUNCTION DOES NOT RETURN THE FINAL REGRESSION TABLE! All tables can (and only can) be printed out during the function.
+    The final return is some clearly specified parameter or statistic within the regressions, or some regression model object within the function (by adjusting the argument input "target_type").
+    
+    Args:
+        dependent_variable (pd.Series): Target dependent variable, which should not contain nan value.
+        entity_treatment_dummy (pd.Series): A dummy variables series denoting whether the treatment is implemented towards the entity. This input should not contain nan value.
+        running_variable (pd.Series): Target running variable to determine the possibility for the entity to receive treatment, which should not contain nan value.
+        covariate_variables (pd.DataFrame or None): Proposed covariate variables. If user does not specify any covariate variable, this could be None. Otherwise, it should not contain nan value.
+        running_variable_cutoff (float): Denote the threshold of the treatment variable, above which the entity will have higher chance to receive the final treatment.
+        running_variable_bandwidth (float or None): Denote the bandwidth to consider in this study. If use full sample (i.e., no bandwidth selection in the task), this should be None.
+        kernel_choice (str): Denote the choice of kernel function used in this analysis. Default is "uniform" that gives equal weights to all samples in the dataset. Can also accept "triangle" and "Epanechnikov".
+        cov_info (str or dict): The covariance estimator used in the results. Four covariance estimators are supported: If no adjustment, input "nonrobust"; If heteroskedasticity-consistent adjustment (allows "HC0", "HC1", "HC2", "HC3"), take "HC0" as example, input "HC0", and if user specifies to use "robust" standard errors, input "HC1"; If heteroskedasticity and autocorrelation consistent adjustment (HAC) with integer lag terms, take maxlags equal to 5 for example, input {"HAV": 5}; If cluster adjustment with the target groups variable named "groups" (pd.Series or pd.dataframe), input {"cluster": groups}.
+        target_type (str or None): Denote whether this function need to return any specific evaluation metric or any other content. If only want to print out regression tables, this should be None. Otherwise, two possible inputs are supported: "estimator" for final Fuzzy RDD estimator towards the causal effect of the treatment variable, and "final_models" for the two-step regression models in a list, with the first one as the first-step model and the second one as the second-step model.
+        output_tables (bool): Denote whether this function need to print out regression tables. If want to print out the tabels, this should be True. If only want the evaluation metric outputs, this should be False.
+    """
+    
+    # Check if inputs are proper formatted
+    if kernel_choice not in ["uniform", "triangle", "Epanechnikov"]:
+        raise RuntimeError("Kernel function choice currently only supports 'uniform', 'triangle' and 'Epanechnikov'!")
+    if type(cov_info) == str and cov_info not in ["nonrobust", "HC0", "HC1", "HC2", "HC3"]:
+        raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
+    elif type(cov_info) == dict and list(cov_info.keys())[0] not in ["HAC", "cluster"]:
+        raise RuntimeError("Covariance type input unsupported! This function supports 'nonrobust', 'HC0', 'HC1', 'HC2', 'HC3', 'HAC' (with maxlags input) and 'cluster' (with target groups) as possible inputs!")
+    if running_variable_bandwidth is not None and running_variable_bandwidth <= 0:
+        raise RuntimeError("If consider running variable bandwidth, this input MUST BE LARGER THAN 0! PLEASE CHECK!")
+    if running_variable[running_variable > running_variable_cutoff].shape[0] == 0 or running_variable[running_variable < running_variable_cutoff].shape[0] == 0:
+        raise RuntimeError("Running variable cutoff is out of the range for all running variable values! PLEASE CHECK!")
+    
+    # Adjust input type
+    dependent_variable = dependent_variable.astype(float)
+    entity_treatment_dummy = entity_treatment_dummy.astype(float)
+    running_variable = running_variable.astype(float)
+    if covariate_variables is not None:
+        covariate_variables = covariate_variables.astype(float)
+    
+    # =========================================================================
+
+    # Construct variables
+    if running_variable_bandwidth is None:
+        running_variable_bandwidth = max(running_variable.max() - running_variable_cutoff, running_variable_cutoff - running_variable.min())
+    selected_running_variable = running_variable[(running_variable >= running_variable_cutoff - running_variable_bandwidth) & (running_variable <= running_variable_cutoff + running_variable_bandwidth)]
+    dependent_variable = dependent_variable.loc[selected_running_variable.index]
+    entity_treatment_dummy = entity_treatment_dummy.loc[selected_running_variable.index]
+    if covariate_variables is not None:
+        covariate_variables = covariate_variables.loc[selected_running_variable.index].astype(float)
+    if type(cov_info) == dict and list(cov_info.keys())[0] == "cluster":
+        cov_info["cluster"] = cov_info["cluster"].loc[selected_running_variable.index]
+    should_be_treated_dummy = selected_running_variable.map(lambda x: 1 if x >= running_variable_cutoff else 0)
+    should_be_treated_dummy.name = selected_running_variable.name + "_dummy"
+    demeaned_selected_running_variable = selected_running_variable - running_variable_cutoff
+    demeaned_selected_running_variable.name = "demeaned_" + selected_running_variable.name
+    demeaned_selected_running_interaction_variable = demeaned_selected_running_variable * should_be_treated_dummy
+    demeaned_selected_running_interaction_variable.name = "demeaned_interaction_" + selected_running_variable.name
+    
+    # Construct weightings
+    if kernel_choice == "uniform":
+        weight = pd.Series(index = selected_running_variable.index).fillna(1 / selected_running_variable.shape[0])
+    elif kernel_choice == "triangle":
+        weight =  1 - ((selected_running_variable - running_variable_cutoff) / running_variable_bandwidth).abs()
+    elif kernel_choice == "Epanechnikov":
+        weight = selected_running_variable.map(lambda x: 0.75 * (1 - np.abs(((x - running_variable_cutoff) / running_variable_bandwidth)) ** 2))
+
+    # Construct formula and dataset
+    if covariate_variables is not None:
+        regression_formula_1 = dependent_variable.name + " ~ " + should_be_treated_dummy.name + " + " + demeaned_selected_running_variable.name + " + " + demeaned_selected_running_interaction_variable.name + " + " + " + ".join(list(covariate_variables.columns))
+        regression_formula_2 = entity_treatment_dummy.name + " ~ " + should_be_treated_dummy.name + " + " + demeaned_selected_running_variable.name + " + " + demeaned_selected_running_interaction_variable.name + " + " + " + ".join(list(covariate_variables.columns))
+        complete_dataset = pd.concat([dependent_variable, entity_treatment_dummy, should_be_treated_dummy, demeaned_selected_running_variable, demeaned_selected_running_interaction_variable, covariate_variables], axis = 1)
+    else:
+        regression_formula_1 = dependent_variable.name + " ~ " + should_be_treated_dummy.name + " + " + demeaned_selected_running_variable.name + " + " + demeaned_selected_running_interaction_variable.name
+        regression_formula_2 = entity_treatment_dummy.name + " ~ " + should_be_treated_dummy.name + " + " + demeaned_selected_running_variable.name + " + " + demeaned_selected_running_interaction_variable.name
+        complete_dataset = pd.concat([dependent_variable, entity_treatment_dummy, should_be_treated_dummy, demeaned_selected_running_variable, demeaned_selected_running_interaction_variable], axis = 1)
+
+    # =========================================================================
+
+    # Run the regressions
+    if type(cov_info) == str:
+        model_1 = smf.wls(regression_formula_1, complete_dataset, weights = weight).fit(cov_type = cov_info)
+        model_2 = smf.wls(regression_formula_2, complete_dataset, weights = weight).fit(cov_type = cov_info)
+    elif list(cov_info.keys())[0] == "HAC":
+        model_1 = smf.wls(regression_formula_1, complete_dataset, weights = weight).fit(cov_type = "HAC", cov_kwds = {"maxlags": cov_info["HAC"]})
+        model_2 = smf.wls(regression_formula_2, complete_dataset, weights = weight).fit(cov_type = "HAC", cov_kwds = {"maxlags": cov_info["HAC"]})
+    elif list(cov_info.keys())[0] == "cluster":
+        model_1 = smf.wls(regression_formula_1, complete_dataset, weights = weight).fit(cov_type = "cluster", cov_kwds = {"groups": cov_info["cluster"]})
+        model_2 = smf.wls(regression_formula_2, complete_dataset, weights = weight).fit(cov_type = "cluster", cov_kwds = {"groups": cov_info["cluster"]})
+    
+    # Output the table if required
+    print("Fuzzy RD Estimator: ", model_1.params[should_be_treated_dummy.name] / model_2.params[should_be_treated_dummy.name])
+    if output_tables is True:
+        print(model_1.summary())
+        print(model_2.summary())
+
+    # Return evaluation metric if needed
+    if target_type == "estimator":
+        return model_1.params[should_be_treated_dummy.name] / model_2.params[should_be_treated_dummy.name]
+    elif target_type == "final_models":
+        return [model_1, model_2]
+
+def _safe_float(value):
+    try:
+        if value is None or pd.isna(value):
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _json_safe(value):
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    return value
+
+
+def _skip(reason):
+    return {"status": "skipped", "reason": reason}
+
+
+def _pass(payload):
+    return {"status": "ok", **_json_safe(payload)}
+
+
+def _as_frame(frame):
+    if frame is None:
+        return None
+    if isinstance(frame, pd.DataFrame):
+        return frame.copy()
+    if isinstance(frame, pd.Series):
+        return frame.to_frame()
+    return pd.DataFrame(frame).copy()
+
+
+def _as_series(values, name="series"):
+    if values is None:
+        return None
+    if isinstance(values, pd.Series):
+        return values.rename(values.name or name)
+    if isinstance(values, pd.DataFrame):
+        if values.shape[1] != 1:
+            raise ValueError("Expected one-column dataframe for series conversion")
+        return values.iloc[:, 0].rename(values.columns[0] or name)
+    return pd.Series(values, name=name)
+
+
+def _model_exog_frame(model):
+    exog = getattr(model.model, "exog", None)
+    names = list(getattr(model.model, "exog_names", []) or [])
+    if exog is None:
+        return None
+    if not names:
+        names = [f"x_{idx}" for idx in range(exog.shape[1])]
+    return pd.DataFrame(exog, columns=names)
+
+
+def _default_treatment_name(model, treatment_var=None):
+    if treatment_var:
+        return treatment_var
+    names = list(getattr(model.model, "exog_names", []) or [])
+    for candidate in names:
+        if candidate not in ["Intercept", "const"]:
+            return candidate
+    return names[1] if len(names) > 1 else None
+
+
+def breusch_pagan_test(model):
+    try:
+        residuals = getattr(model, "resid", None)
+        exog = getattr(model.model, "exog", None)
+        if residuals is None or exog is None:
+            return _skip("model does not expose residuals/exog")
+        lm_stat, lm_pvalue, f_stat, f_pvalue = het_breuschpagan(np.asarray(residuals), np.asarray(exog))
+        return _pass({
+            "lm_stat": _safe_float(lm_stat),
+            "lm_pvalue": _safe_float(lm_pvalue),
+            "f_stat": _safe_float(f_stat),
+            "f_pvalue": _safe_float(f_pvalue),
+        })
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def white_test(model):
+    try:
+        residuals = getattr(model, "resid", None)
+        exog = getattr(model.model, "exog", None)
+        if residuals is None or exog is None:
+            return _skip("model does not expose residuals/exog")
+        lm_stat, lm_pvalue, f_stat, f_pvalue = het_white(np.asarray(residuals), np.asarray(exog))
+        return _pass({
+            "lm_stat": _safe_float(lm_stat),
+            "lm_pvalue": _safe_float(lm_pvalue),
+            "f_stat": _safe_float(f_stat),
+            "f_pvalue": _safe_float(f_pvalue),
+        })
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def vif_report(frame):
+    try:
+        clean = _as_frame(frame)
+        if clean is None or clean.empty:
+            return _skip("empty frame")
+        clean = clean.apply(pd.to_numeric, errors="coerce").dropna()
+        if clean.shape[1] <= 1:
+            return _skip("need at least two numeric regressors")
+        rows = []
+        matrix = clean.to_numpy(dtype=float)
+        for idx, column in enumerate(clean.columns):
+            try:
+                vif_value = variance_inflation_factor(matrix, idx)
+            except Exception:
+                vif_value = None
+            rows.append({"variable": str(column), "vif": _safe_float(vif_value)})
+        return _pass({"rows": rows})
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def condition_number_report(model):
+    try:
+        exog = getattr(model.model, "exog", None)
+        if exog is None:
+            return _skip("model does not expose exog")
+        condition_number = np.linalg.cond(np.asarray(exog))
+        return _pass({"condition_number": _safe_float(condition_number)})
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def jarque_bera_test(model):
+    try:
+        residuals = getattr(model, "resid", None)
+        if residuals is None:
+            return _skip("model does not expose residuals")
+        jb_stat, jb_pvalue, skew, kurtosis = jarque_bera(np.asarray(residuals))
+        return _pass({
+            "jb_stat": _safe_float(jb_stat),
+            "jb_pvalue": _safe_float(jb_pvalue),
+            "skew": _safe_float(skew),
+            "kurtosis": _safe_float(kurtosis),
+        })
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def durbin_watson_test(model):
+    try:
+        residuals = getattr(model, "resid", None)
+        if residuals is None:
+            return _skip("model does not expose residuals")
+        return _pass({"durbin_watson": _safe_float(durbin_watson(np.asarray(residuals)))})
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def breusch_godfrey_test(model, nlags=1):
+    try:
+        stat, pvalue, f_stat, f_pvalue = acorr_breusch_godfrey(model, nlags=nlags)
+        return _pass({
+            "nlags": int(nlags),
+            "lm_stat": _safe_float(stat),
+            "lm_pvalue": _safe_float(pvalue),
+            "f_stat": _safe_float(f_stat),
+            "f_pvalue": _safe_float(f_pvalue),
+        })
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def influence_summary(model, top_n=5):
+    try:
+        influence = OLSInfluence(model)
+        leverage = influence.hat_matrix_diag
+        cooks = influence.cooks_distance[0]
+        studentized = influence.resid_studentized_external
+        ranking = np.argsort(np.nan_to_num(cooks, nan=-np.inf))[::-1][:max(1, int(top_n))]
+        top = []
+        for idx in ranking.tolist():
+            top.append({
+                "index": int(idx),
+                "cooks_distance": _safe_float(cooks[idx]),
+                "leverage": _safe_float(leverage[idx]),
+                "studentized_residual": _safe_float(studentized[idx]),
+            })
+        return _pass({
+            "n_obs": int(len(cooks)),
+            "top_influential": top,
+            "max_cooks_distance": _safe_float(np.nanmax(cooks)),
+            "max_leverage": _safe_float(np.nanmax(leverage)),
+        })
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def balance_test(treatment_variable, covariate_variables):
+    try:
+        treatment = _as_series(treatment_variable, name="treatment")
+        covariates = _as_frame(covariate_variables)
+        if treatment is None or covariates is None or covariates.empty:
+            return _skip("treatment/covariates not available")
+        joined = pd.concat([treatment, covariates], axis=1).dropna()
+        if joined.empty:
+            return _skip("no complete rows")
+        treatment_name = joined.columns[0]
+        if joined[treatment_name].nunique(dropna=True) < 2:
+            return _skip("treatment must have treated and control groups")
+        treated = joined[joined[treatment_name] == 1]
+        control = joined[joined[treatment_name] == 0]
+        if treated.empty or control.empty:
+            return _skip("treated/control group missing")
+        rows = []
+        for column in covariates.columns:
+            t_stat, p_value = scipy.stats.ttest_ind(
+                pd.to_numeric(treated[column], errors="coerce").dropna(),
+                pd.to_numeric(control[column], errors="coerce").dropna(),
+                equal_var=False,
+                nan_policy="omit",
+            )
+            rows.append({
+                "variable": str(column),
+                "treated_mean": _safe_float(pd.to_numeric(treated[column], errors="coerce").mean()),
+                "control_mean": _safe_float(pd.to_numeric(control[column], errors="coerce").mean()),
+                "std_diff": _safe_float(
+                    (
+                        pd.to_numeric(treated[column], errors="coerce").mean() -
+                        pd.to_numeric(control[column], errors="coerce").mean()
+                    ) /
+                    np.sqrt(
+                        (
+                            pd.to_numeric(treated[column], errors="coerce").var() +
+                            pd.to_numeric(control[column], errors="coerce").var()
+                        ) / 2
+                    )
+                ),
+                "p_value": _safe_float(p_value),
+            })
+        return _pass({"rows": rows})
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def common_support_report(treatment_variable, propensity_score, trim_quantiles=(0.01, 0.99)):
+    try:
+        treatment = _as_series(treatment_variable, name="treatment")
+        score = _as_series(propensity_score, name="propensity_score")
+        joined = pd.concat([treatment, score], axis=1).dropna()
+        if joined.empty:
+            return _skip("no complete rows")
+        treated = joined[joined.iloc[:, 0] == 1].iloc[:, 1]
+        control = joined[joined.iloc[:, 0] == 0].iloc[:, 1]
+        if treated.empty or control.empty:
+            return _skip("treated/control group missing")
+        lower = max(float(treated.min()), float(control.min()))
+        upper = min(float(treated.max()), float(control.max()))
+        in_support = joined.iloc[:, 1].between(lower, upper, inclusive="both")
+        q_low, q_high = trim_quantiles
+        return _pass({
+            "lower_bound": lower,
+            "upper_bound": upper,
+            "share_in_support": _safe_float(in_support.mean()),
+            "share_trimmed_low": _safe_float((joined.iloc[:, 1] < joined.iloc[:, 1].quantile(q_low)).mean()),
+            "share_trimmed_high": _safe_float((joined.iloc[:, 1] > joined.iloc[:, 1].quantile(q_high)).mean()),
+        })
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def alternative_covariance_check(model, covariances=("HC1", "HC3"), groups=None):
+    try:
+        rows = []
+        treatment_name = _default_treatment_name(model)
+        if treatment_name is None:
+            return _skip("unable to identify treatment coefficient")
+        for cov in covariances:
+            try:
+                if cov == "cluster":
+                    if groups is None:
+                        rows.append({"covariance": cov, "status": "skipped", "reason": "groups not provided"})
+                        continue
+                    robust = model.get_robustcov_results(cov_type="cluster", groups=groups)
+                else:
+                    robust = model.get_robustcov_results(cov_type=cov)
+                names = list(getattr(robust.model, "exog_names", []) or [])
+                idx = names.index(treatment_name) if treatment_name in names else 1
+                rows.append({
+                    "covariance": cov,
+                    "coefficient": _safe_float(robust.params[idx]),
+                    "std_error": _safe_float(robust.bse[idx]),
+                    "p_value": _safe_float(robust.pvalues[idx]),
+                    "status": "ok",
+                })
+            except Exception as exc:
+                rows.append({"covariance": cov, "status": "skipped", "reason": str(exc)})
+        return _pass({"rows": rows, "treatment_var": treatment_name})
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def leave_one_cluster_out(frame, outcome_var, treatment_var, covariates=None, cluster_var=None, cov_type="HC1"):
+    try:
+        data = _as_frame(frame)
+        if data is None or cluster_var is None or cluster_var not in data.columns:
+            return _skip("cluster_var not available")
+        covariates = list(covariates or [])
+        required = [outcome_var, treatment_var, cluster_var] + covariates
+        data = data[required].dropna()
+        clusters = data[cluster_var].dropna().unique().tolist()
+        if len(clusters) < 2:
+            return _skip("need at least two clusters")
+        rows = []
+        formula = outcome_var + " ~ " + treatment_var + (" + " + " + ".join(covariates) if covariates else "")
+        for cluster in clusters:
+            subset = data[data[cluster_var] != cluster]
+            if subset.empty:
+                continue
+            model = smf.ols(formula, data=subset).fit(cov_type=cov_type)
+            rows.append({
+                "excluded_cluster": _json_safe(cluster),
+                "coefficient": _safe_float(model.params.get(treatment_var)),
+                "std_error": _safe_float(model.bse.get(treatment_var)),
+                "p_value": _safe_float(model.pvalues.get(treatment_var)),
+                "n_obs": int(len(subset)),
+            })
+        return _pass({"rows": rows})
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def placebo_test(frame, outcome_var, placebo_var, covariates=None, cov_type="HC1"):
+    try:
+        data = _as_frame(frame)
+        covariates = list(covariates or [])
+        required = [outcome_var, placebo_var] + covariates
+        data = data[required].dropna()
+        if data.empty:
+            return _skip("no complete rows")
+        formula = outcome_var + " ~ " + placebo_var + (" + " + " + ".join(covariates) if covariates else "")
+        model = smf.ols(formula, data=data).fit(cov_type=cov_type)
+        return _pass({
+            "placebo_var": placebo_var,
+            "coefficient": _safe_float(model.params.get(placebo_var)),
+            "std_error": _safe_float(model.bse.get(placebo_var)),
+            "p_value": _safe_float(model.pvalues.get(placebo_var)),
+            "n_obs": int(len(data)),
+        })
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def alternative_specification_check(frame, outcome_var, treatment_var, base_covariates=None, alternative_sets=None, cov_type="HC1"):
+    try:
+        data = _as_frame(frame)
+        base_covariates = list(base_covariates or [])
+        alternative_sets = list(alternative_sets or [])
+        rows = []
+        for idx, covariates in enumerate(alternative_sets):
+            covariates = list(dict.fromkeys([*base_covariates, *list(covariates or [])]))
+            required = [outcome_var, treatment_var] + covariates
+            subset = data[required].dropna()
+            if subset.empty:
+                rows.append({"specification": idx, "status": "skipped", "reason": "no complete rows"})
+                continue
+            formula = outcome_var + " ~ " + treatment_var + (" + " + " + ".join(covariates) if covariates else "")
+            model = smf.ols(formula, data=subset).fit(cov_type=cov_type)
+            rows.append({
+                "specification": idx,
+                "covariates": covariates,
+                "coefficient": _safe_float(model.params.get(treatment_var)),
+                "std_error": _safe_float(model.bse.get(treatment_var)),
+                "p_value": _safe_float(model.pvalues.get(treatment_var)),
+                "n_obs": int(len(subset)),
+                "status": "ok",
+            })
+        return _pass({"rows": rows})
+    except Exception as exc:
+        return _skip(str(exc))
+
+
+def run_core_diagnostics(model, regressors=None, treatment_variable=None, propensity_score=None, panel_info=None):
+    diagnostics = {
+        "breusch_pagan": breusch_pagan_test(model),
+        "white": white_test(model),
+        "vif": vif_report(regressors),
+        "condition_number": condition_number_report(model),
+        "jarque_bera": jarque_bera_test(model),
+        "durbin_watson": durbin_watson_test(model),
+        "breusch_godfrey": breusch_godfrey_test(model),
+        "influence": influence_summary(model),
+    }
+    if treatment_variable is not None and regressors is not None:
+        diagnostics["balance"] = balance_test(treatment_variable, regressors)
+    if treatment_variable is not None and propensity_score is not None:
+        diagnostics["common_support"] = common_support_report(treatment_variable, propensity_score)
+    if panel_info is not None:
+        diagnostics["panel"] = _json_safe(panel_info)
+    return _json_safe(diagnostics)
+
+
+def run_robustness_checks(
+    model,
+    frame=None,
+    outcome_var=None,
+    treatment_var=None,
+    covariates=None,
+    cluster_var=None,
+    placebo_var=None,
+    alternative_sets=None,
+    groups=None,
+):
+    robustness = {
+        "alternative_covariance": alternative_covariance_check(model, groups=groups),
+        "leave_one_cluster_out": leave_one_cluster_out(
+            frame,
+            outcome_var=outcome_var,
+            treatment_var=treatment_var,
+            covariates=covariates,
+            cluster_var=cluster_var,
+        ) if frame is not None and outcome_var and treatment_var and cluster_var else _skip("frame/outcome/treatment/cluster unavailable"),
+        "placebo": placebo_test(
+            frame,
+            outcome_var=outcome_var,
+            placebo_var=placebo_var,
+            covariates=covariates,
+        ) if frame is not None and outcome_var and placebo_var else _skip("frame/outcome/placebo unavailable"),
+        "alternative_specification": alternative_specification_check(
+            frame,
+            outcome_var=outcome_var,
+            treatment_var=treatment_var,
+            base_covariates=covariates,
+            alternative_sets=alternative_sets,
+        ) if frame is not None and outcome_var and treatment_var and alternative_sets else _skip("frame/outcome/treatment/alternative specs unavailable"),
+    }
+    return _json_safe(robustness)

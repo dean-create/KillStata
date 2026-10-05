@@ -4,9 +4,9 @@
     "datasetId": "wage_survey",
     "stageId": "stage_000",
     "dependentVar": "wage",
-    "treatmentVar": "education",
-    "covariates": ["wage", "age"]
+    "treatmentVar": "union",
+    "covariates": ["wage"]
   },
   "expect": "reject",
-  "rejectHint": ["covariates", "已被用作"]
+  "rejectHint": ["dependentVar", "不能同时作为"]
 }

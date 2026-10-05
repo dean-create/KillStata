@@ -2,9 +2,7 @@ import fs from "fs"
 import path from "path"
 import z from "zod"
 import { generateText, jsonSchema, tool, type ToolSet } from "ai"
-import { Auth } from "@/auth"
 import { Instance } from "@/project/instance"
-import { DEEPSEEK_DEFAULT_MODEL_ID, DEEPSEEK_PROVIDER_ID } from "@/provider/deepseek-policy"
 import { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import { WORKFLOW_ANALYSIS_TOOL_IDS } from "@/runtime/tool-catalog"
@@ -147,7 +145,7 @@ function dataContext(fixture: RoutingFixture) {
   }
   if (fixture.id === "digital-fe-after-composite-key") {
     return [
-      "当前 canonical 数据集：datasetId=digital_repaired，stageId=stage_composite_key_qa_passed。",
+      "当前 canonical 数据集：datasetId=digital_repaired，stageId=stage_composite_key_validate_passed。",
       "省份_地区 派生列已经真实创建，econometrics_recommend 画像已完成，省份_地区+年份 QA=pass；当前处于 baseline_estimate 阶段，不要重复画像或 describe。",
       "已验证为数值列：数字普惠金融指数、每百人互联网用户数、计算机服务和软件从业人员占比、人均电信业务总量、每百人移动电话用户数；用户已要求执行，无需再次确认。",
     ].join("\n")
@@ -156,7 +154,7 @@ function dataContext(fixture: RoutingFixture) {
     "当前 canonical 数据集：datasetId=digital_real，stageId=stage_imported。",
     "econometrics_recommend 画像已经完成；data_import QA 已明确 block。重复画像不会修复该问题。",
     "Sheet1 共 9683 行，2000-2022 共 23 年。只用 地区+年份 会有 115 行超额重复，原因是 6 个省份都有 地区=其他；不得执行估计器。",
-    "省份+地区 可形成 421 个实体，但派生列 省份_地区 尚未创建；只有 repair 后的数据集 digital_repaired/stage_composite_key_qa_passed 才声明该列已通过唯一性 QA。",
+    "省份+地区 可形成 421 个实体，但派生列 省份_地区 尚未创建；只有 repair 后的数据集 digital_repaired/stage_composite_key_validate_passed 才声明该列已通过唯一性 QA。",
   ].join("\n")
 }
 
@@ -168,16 +166,12 @@ function calibrationStage(fixture: RoutingFixture): WorkflowStageKind {
 }
 
 async function modelVisibleTools(model: Provider.Model, currentStage: WorkflowStageKind) {
-  const infos = await ToolRegistry.tools(
-    { providerID: model.providerID, modelID: model.api.id },
-    undefined,
-    {
-      inputIntent: "analysis",
-      currentStage,
-      platformCapabilities: { mcp: false, images: false, remote: false },
-      modelCapabilities: { supportsTools: true, supportsImages: false },
-    },
-  )
+  const infos = await ToolRegistry.tools({ providerID: model.providerID, modelID: model.api.id }, undefined, {
+    inputIntent: "analysis",
+    currentStage,
+    platformCapabilities: { mcp: false, images: false, remote: false },
+    modelCapabilities: { supportsTools: true, supportsImages: false },
+  })
   return infos.filter((info) => MODEL_ALLOWED_TOOLS.has(info.id))
 }
 
@@ -197,13 +191,10 @@ function toAiTools(model: Provider.Model, infos: RegistryToolInfo[]) {
 }
 
 async function runCalibration() {
-  const auth = await Auth.get(DEEPSEEK_PROVIDER_ID)
-  if (!auth) throw new Error("未找到 DeepSeek 凭据；请先完成 KillStata 的 DeepSeek API Key 配置。")
-
   return Instance.provide({
     directory: ROOT,
     fn: async () => {
-      const model = await Provider.getModel(DEEPSEEK_PROVIDER_ID, DEEPSEEK_DEFAULT_MODEL_ID)
+      const model = await Provider.resolveModel()
       const language = await Provider.getLanguage(model)
       const fixtures = loadRoutingFixtures()
       const results = []
@@ -250,9 +241,8 @@ async function runCalibration() {
       const summary = {
         total: results.length,
         expectedCallTotal: expectedCalls.length,
-        exactExpectedCalls: expectedCalls.filter(
-          (item) => item.exactTool && item.schemaValid && item.requiredArgsMatch,
-        ).length,
+        exactExpectedCalls: expectedCalls.filter((item) => item.exactTool && item.schemaValid && item.requiredArgsMatch)
+          .length,
         negativeDecisionTotal: negativeDecisions.length,
         safeNegativeDecisions: negativeDecisions.filter((item) => !item.forbiddenSelected).length,
         schemaValidCalls: results.filter((item) => item.selectedTool && item.schemaValid).length,

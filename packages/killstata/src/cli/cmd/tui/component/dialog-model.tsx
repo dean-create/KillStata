@@ -3,6 +3,7 @@ import { useLocal } from "@tui/context/local"
 import { useSync } from "@tui/context/sync"
 import { map, pipe, flatMap, entries, filter, sortBy, take } from "remeda"
 import { DialogSelect, type DialogSelectRef } from "@tui/ui/dialog-select"
+import { DialogReasoning } from "./dialog-reasoning"
 import { useDialog } from "@tui/ui/dialog"
 import { createDialogProviderOptions, DialogProvider } from "./dialog-provider"
 import { useKeybind } from "../context/keybind"
@@ -60,7 +61,7 @@ export function DialogModel(props: { providerID?: string }) {
               },
               title: model.name ?? item.modelID,
               description: providerDisplayName(provider),
-              category: "Favorites",
+              category: "收藏",
               onSelect: () => {
                 dialog.clear()
                 local.model.set(
@@ -92,7 +93,7 @@ export function DialogModel(props: { providerID?: string }) {
               },
               title: model.name ?? item.modelID,
               description: providerDisplayName(provider),
-              category: "Recent",
+              category: "最近",
               onSelect: () => {
                 dialog.clear()
                 local.model.set(
@@ -168,7 +169,7 @@ export function DialogModel(props: { providerID?: string }) {
           map((option) => {
             return {
               ...option,
-              category: "Popular providers",
+              category: "常用提供商",
             }
           }),
           take(6),
@@ -191,7 +192,7 @@ export function DialogModel(props: { providerID?: string }) {
 
   const title = createMemo(() => {
     if (provider()) return providerDisplayName(provider()!)
-    return "Select model"
+    return "选择模型"
   })
 
   return (
@@ -199,14 +200,21 @@ export function DialogModel(props: { providerID?: string }) {
       keybind={[
         {
           keybind: keybind.all.model_provider_list?.[0],
-          title: connected() ? "Connect provider" : "View all providers",
+          title: connected() ? "连接提供商" : "查看全部提供商",
           onTrigger() {
             dialog.replace(() => <DialogProvider />)
           },
         },
         {
+          keybind: keybind.all.variant_cycle?.[0],
+          title: "推理等级",
+          onTrigger() {
+            dialog.replace(() => <DialogReasoning />)
+          },
+        },
+        {
           keybind: keybind.all.model_favorite_toggle?.[0],
-          title: "Favorite",
+          title: "收藏",
           disabled: !connected(),
           onTrigger: (option) => {
             local.model.toggleFavorite(option.value as { providerID: string; modelID: string })

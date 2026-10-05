@@ -1,0 +1,6 @@
+{
+  "description": "漏传 stageId",
+  "modelArgs": { "datasetId": "nsw_98", "dependentVar": "employed", "treatmentVar": "train" },
+  "expect": "reject",
+  "rejectHint": ["stageId"]
+}

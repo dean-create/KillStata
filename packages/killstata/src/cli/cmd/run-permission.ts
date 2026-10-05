@@ -45,8 +45,14 @@ function isAllowedAnalysisRuntimeShell(request: RunPermissionRequest) {
 
   const description = String(request.metadata?.description ?? "")
   const patterns = request.patterns.join("\n")
-  const knownAnalysisTask = /^Run econometric method:/i.test(description) || /^Data pipeline action:/i.test(description)
-  const knownRuntimePattern = /\*(econometrics|data)\*/i.test(patterns)
+  const managedRuntime = request.metadata?.managedRuntime === true
+  const knownAnalysisTask = managedRuntime || /^Run econometric method:/i.test(description) || /^Data pipeline action:/i.test(description)
+  // 受管方法工具使用 *ols*、*panel_fe*、*did2s* 等 capability pattern；
+  // 只要 metadata 明确来自 managedRuntime 且 pattern 是单一 capability，就沿用
+  // PermissionNext 的同一安全边界。普通 Bash 没有 managedRuntime 标记，仍拒绝。
+  const knownRuntimePattern = managedRuntime
+    ? /\*[A-Za-z0-9_-]+\*/.test(patterns)
+    : /\*(econometrics|data|mcda)\*/i.test(patterns)
   return knownAnalysisTask && knownRuntimePattern
 }
 
@@ -57,6 +63,14 @@ function isAnalysisPlanQuestion(header: string) {
 function analysisPlanAnswer(header: string) {
   return header === "分析计划" ? "是" : "Yes"
 }
+
+// P1-B：非交互 `killstata run` 是一次性命令，用户不在场无法回答澄清问题。
+// 原先系统直接 reject，模型收到"用户已取消"并被 blocked=stop 终止整轮，任务半途而废
+// 且没有恢复出路。改为回复一段合成指引，让模型明白当前无人可答、应基于最合理默认假设
+// 自主继续，并在最终结论中说明所做假设——复用现成的 reply 链路，绕开 turn 生命周期的 stop。
+const NON_INTERACTIVE_CLARIFICATION_REPLY =
+  "当前处于非交互批处理模式，无法向用户提问。请基于数据本身和最合理的默认假设直接继续分析，" +
+  "并在最终结论中明确列出你所做的关键假设，以及用户后续可以如何修正。"
 
 export function decideNonInteractiveQuestion(input: {
   workspaceRoot: string
@@ -79,9 +93,11 @@ export function decideNonInteractiveQuestion(input: {
         reason: "auto_accept_analysis_plan_question",
       }
     }
+    // 其余均为模型主动发起的研究设计澄清：回复统一的自主继续指引，每个问题给同一条答案。
     return {
-      action: "reject",
-      reason: "auto_reject_noninteractive_question",
+      action: "reply",
+      answers: input.request.questions.map(() => [NON_INTERACTIVE_CLARIFICATION_REPLY]),
+      reason: "auto_reply_noninteractive_clarification",
     }
   }
 

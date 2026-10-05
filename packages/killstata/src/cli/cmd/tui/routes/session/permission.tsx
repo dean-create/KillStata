@@ -10,10 +10,10 @@ import { SplitBorder } from "../../component/border"
 import { useSync } from "../../context/sync"
 import { useTextareaKeybindings } from "../../component/textarea-keybindings"
 import path from "path"
-import { LANGUAGE_EXTENSIONS } from "@tui/util/language"
 import { Keybind } from "@/util/keybind"
-import { Locale } from "@/util/locale"
 import { Global } from "@/global"
+
+import { displayPath, isInternalWorkspacePath } from "@/tool/analysis-display"
 
 type PermissionStage = "permission" | "always" | "reject"
 
@@ -23,6 +23,9 @@ function normalizePath(input?: string) {
   const cwd = process.cwd()
   const home = Global.Path.home
   const absolute = path.isAbsolute(input) ? input : path.resolve(cwd, input)
+  // 内部工作区（.killstata）路径对用户隐身：权限提示里只显示文件名，不暴露内部目录结构。
+  // absolute 由 input 解析而来，判定 absolute 即可覆盖两者。
+  if (isInternalWorkspacePath(absolute)) return displayPath(absolute, "name")
   const relative = path.relative(cwd, absolute)
 
   if (!relative) return "."
@@ -35,61 +38,19 @@ function normalizePath(input?: string) {
   return absolute
 }
 
-function filetype(input?: string) {
-  if (!input) return "none"
-  const ext = path.extname(input)
-  const language = LANGUAGE_EXTENSIONS[ext]
-  if (["typescriptreact", "javascriptreact", "javascript"].includes(language)) return "typescript"
-  return language
-}
-
 function EditBody(props: { request: PermissionRequest }) {
   const themeState = useTheme()
   const theme = themeState.theme
-  const syntax = themeState.syntax
-  const sync = useSync()
-  const dimensions = useTerminalDimensions()
 
   const filepath = createMemo(() => (props.request.metadata?.filepath as string) ?? "")
-  const diff = createMemo(() => (props.request.metadata?.diff as string) ?? "")
-
-  const view = createMemo(() => {
-    const diffStyle = sync.data.config.tui?.diff_style
-    if (diffStyle === "stacked") return "unified"
-    return dimensions().width > 120 ? "split" : "unified"
-  })
-
-  const ft = createMemo(() => filetype(filepath()))
 
   return (
     <box flexDirection="column" gap={1}>
       <box flexDirection="row" gap={1} paddingLeft={1}>
         <text fg={theme.textMuted}>{"→"}</text>
-        <text fg={theme.textMuted}>Edit {normalizePath(filepath())}</text>
+        <text fg={theme.textMuted}>编辑 {normalizePath(filepath())}</text>
       </box>
-      <Show when={diff()}>
-        <scrollbox height="100%">
-          <diff
-            diff={diff()}
-            view={view()}
-            filetype={ft()}
-            syntaxStyle={syntax()}
-            showLineNumbers={true}
-            width="100%"
-            wrapMode="word"
-            fg={theme.text}
-            addedBg={theme.diffAddedBg}
-            removedBg={theme.diffRemovedBg}
-            contextBg={theme.diffContextBg}
-            addedSignColor={theme.diffHighlightAdded}
-            removedSignColor={theme.diffHighlightRemoved}
-            lineNumberFg={theme.diffLineNumber}
-            lineNumberBg={theme.diffContextBg}
-            addedLineNumberBg={theme.diffAddedLineNumberBg}
-            removedLineNumberBg={theme.diffRemovedLineNumberBg}
-          />
-        </scrollbox>
-      </Show>
+      <text fg={theme.textMuted}>确认后将写入该文件。</text>
     </box>
   )
 }
@@ -142,15 +103,15 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
     <Switch>
       <Match when={store.stage === "always"}>
         <Prompt
-          title="Always allow"
+          title="总是允许"
           body={
             <Switch>
               <Match when={props.request.always.length === 1 && props.request.always[0] === "*"}>
-                <TextBody title={"This will allow " + props.request.permission + " until Killstata is restarted."} />
+                <TextBody title={"将允许 " + props.request.permission + " 直到killstata重启。"} />
               </Match>
               <Match when={true}>
                 <box paddingLeft={1} gap={1}>
-                  <text fg={theme.textMuted}>This will allow the following patterns until Killstata is restarted</text>
+                  <text fg={theme.textMuted}>将允许以下模式，直到killstata重启</text>
                   <box>
                     <For each={props.request.always}>
                       {(pattern) => (
@@ -165,7 +126,7 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
               </Match>
             </Switch>
           }
-          options={{ confirm: "Confirm", cancel: "Cancel" }}
+          options={{ confirm: "确认", cancel: "取消" }}
           escapeKey="cancel"
           onSelect={(option) => {
             setStore("stage", "permission")
@@ -195,23 +156,23 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
         {(() => {
           const body = (
             <Prompt
-              title="Permission required"
+              title="需要授权"
               body={
                 <Switch>
                   <Match when={props.request.permission === "edit"}>
                     <EditBody request={props.request} />
                   </Match>
                   <Match when={props.request.permission === "read"}>
-                    <TextBody icon="→" title={`Read ` + normalizePath(input().filePath as string)} />
+                    <TextBody icon="→" title={`读取 ` + normalizePath(input().filePath as string)} />
                   </Match>
                   <Match when={props.request.permission === "glob"}>
-                    <TextBody icon="✱" title={`Glob "` + (input().pattern ?? "") + `"`} />
+                    <TextBody icon="✱" title={`查找文件 "` + (input().pattern ?? "") + `"`} />
                   </Match>
                   <Match when={props.request.permission === "grep"}>
-                    <TextBody icon="✱" title={`Grep "` + (input().pattern ?? "") + `"`} />
+                    <TextBody icon="✱" title={`搜索内容 "` + (input().pattern ?? "") + `"`} />
                   </Match>
                   <Match when={props.request.permission === "list"}>
-                    <TextBody icon="→" title={`List ` + normalizePath(input().path as string)} />
+                    <TextBody icon="→" title={`列出目录 ` + normalizePath(input().path as string)} />
                   </Match>
                   <Match when={props.request.permission === "bash"}>
                     <TextBody
@@ -223,18 +184,18 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
                   <Match when={props.request.permission === "task"}>
                     <TextBody
                       icon="#"
-                      title={`${Locale.titlecase((input().subagent_type as string) ?? "Unknown")} Task`}
+                      title={`${(input().subagent_type as string) ?? "unknown"} 子任务`}
                       description={"◉ " + input().description}
                     />
                   </Match>
                   <Match when={props.request.permission === "webfetch"}>
-                    <TextBody icon="%" title={`WebFetch ` + (input().url ?? "")} />
+                    <TextBody icon="%" title={`联网获取 ` + (input().url ?? "")} />
                   </Match>
                   <Match when={props.request.permission === "websearch"}>
-                    <TextBody icon="◈" title={`Exa Web Search "` + (input().query ?? "") + `"`} />
+                    <TextBody icon="◈" title={`联网搜索 "` + (input().query ?? "") + `"`} />
                   </Match>
                   <Match when={props.request.permission === "codesearch"}>
-                    <TextBody icon="◇" title={`Exa Code Search "` + (input().query ?? "") + `"`} />
+                    <TextBody icon="◇" title={`代码搜索 "` + (input().query ?? "") + `"`} />
                   </Match>
                   <Match when={props.request.permission === "external_directory"}>
                     {(() => {
@@ -252,18 +213,18 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
                       const raw = parent ?? filepath ?? derived
                       const dir = normalizePath(raw)
 
-                      return <TextBody icon="←" title={`Access external directory ` + dir} />
+                      return <TextBody icon="←" title={`访问外部目录 ` + dir} />
                     })()}
                   </Match>
                   <Match when={props.request.permission === "doom_loop"}>
-                    <TextBody icon="⟳" title="Continue after repeated failures" />
+                    <TextBody icon="⟳" title="连续失败后继续" />
                   </Match>
                   <Match when={true}>
-                    <TextBody icon="⚙" title={`Call tool ` + props.request.permission} />
+                    <TextBody icon="⚙" title={`调用工具 ` + props.request.permission} />
                   </Match>
                 </Switch>
               }
-              options={{ once: "Allow once", always: "Allow always", reject: "Reject" }}
+              options={{ once: "仅本次允许", always: "始终允许", reject: "拒绝" }}
               escapeKey="reject"
               fullscreen
               onSelect={(option) => {
@@ -327,10 +288,10 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
       <box gap={1} paddingLeft={1} paddingRight={3} paddingTop={1} paddingBottom={1}>
         <box flexDirection="row" gap={1} paddingLeft={1}>
           <text fg={theme.error}>{"△"}</text>
-          <text fg={theme.text}>Reject permission</text>
+          <text fg={theme.text}>拒绝授权</text>
         </box>
         <box paddingLeft={1}>
-          <text fg={theme.textMuted}>Tell Killstata what to do differently</text>
+          <text fg={theme.textMuted}>告诉killstata换种做法</text>
         </box>
       </box>
       <box
@@ -355,10 +316,10 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
         />
         <box flexDirection="row" gap={2} flexShrink={0}>
           <text fg={theme.text}>
-            enter <span style={{ fg: theme.textMuted }}>confirm</span>
+            enter <span style={{ fg: theme.textMuted }}>确认</span>
           </text>
           <text fg={theme.text}>
-            esc <span style={{ fg: theme.textMuted }}>cancel</span>
+            esc <span style={{ fg: theme.textMuted }}>取消</span>
           </text>
         </box>
       </box>
@@ -417,7 +378,7 @@ function Prompt<const T extends Record<string, string>>(props: {
     }
   })
 
-  const hint = createMemo(() => (store.expanded ? "minimize" : "fullscreen"))
+  const hint = createMemo(() => (store.expanded ? "收起" : "全屏"))
   const renderer = useRenderer()
 
   const content = () => (
@@ -483,10 +444,10 @@ function Prompt<const T extends Record<string, string>>(props: {
             </text>
           </Show>
           <text fg={theme.text}>
-            {"⇆"} <span style={{ fg: theme.textMuted }}>select</span>
+            {"⇆"} <span style={{ fg: theme.textMuted }}>选择</span>
           </text>
           <text fg={theme.text}>
-            enter <span style={{ fg: theme.textMuted }}>confirm</span>
+            enter <span style={{ fg: theme.textMuted }}>确认</span>
           </text>
         </box>
       </box>

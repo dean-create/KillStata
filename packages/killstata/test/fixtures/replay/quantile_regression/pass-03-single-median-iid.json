@@ -1,0 +1,12 @@
+{
+  "description": "单中位数回归 + iid 标准误",
+  "modelArgs": {
+    "datasetId": "wage_88",
+    "stageId": "stage_000",
+    "dependentVar": "wage",
+    "treatmentVar": "union",
+    "quantiles": [0.5],
+    "covariance": "iid"
+  },
+  "expect": "pass"
+}

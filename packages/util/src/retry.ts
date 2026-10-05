@@ -33,7 +33,9 @@ export async function retry<T>(fn: () => Promise<T>, options: RetryOptions = {})
     } catch (error) {
       lastError = error
       if (attempt === attempts - 1 || !retryIf(error)) throw error
-      const wait = Math.min(delay * Math.pow(factor, attempt), maxDelay)
+      const base = Math.min(delay * Math.pow(factor, attempt), maxDelay)
+      // Full jitter: randomize within [0, base] to avoid thundering herd
+      const wait = Math.random() * base
       await new Promise((resolve) => setTimeout(resolve, wait))
     }
   }

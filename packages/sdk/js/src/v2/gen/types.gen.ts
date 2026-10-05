@@ -7,7 +7,6 @@ export type ClientOptions = {
 export type Project = {
   id: string
   worktree: string
-  vcs?: "git"
   name?: string
   icon?: {
     url?: string
@@ -25,20 +24,6 @@ export type Project = {
 export type EventProjectUpdated = {
   type: "project.updated"
   properties: Project
-}
-
-export type EventInstallationUpdated = {
-  type: "installation.updated"
-  properties: {
-    version: string
-  }
-}
-
-export type EventInstallationUpdateAvailable = {
-  type: "installation.update-available"
-  properties: {
-    version: string
-  }
 }
 
 export type EventServerInstanceDisposed = {
@@ -59,6 +44,20 @@ export type EventGlobalDisposed = {
   type: "global.disposed"
   properties: {
     [key: string]: unknown
+  }
+}
+
+export type EventInstallationUpdated = {
+  type: "installation.updated"
+  properties: {
+    version: string
+  }
+}
+
+export type EventInstallationUpdateAvailable = {
+  type: "installation.update-available"
+  properties: {
+    version: string
   }
 }
 
@@ -549,6 +548,13 @@ export type EventSessionError = {
   }
 }
 
+export type EventFileEdited = {
+  type: "file.edited"
+  properties: {
+    file: string
+  }
+}
+
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -603,21 +609,6 @@ export type EventTuiSessionSelect = {
   }
 }
 
-export type EventFileWatcherUpdated = {
-  type: "file.watcher.updated"
-  properties: {
-    file: string
-    event: "add" | "change" | "unlink"
-  }
-}
-
-export type EventVcsBranchUpdated = {
-  type: "vcs.branch.updated"
-  properties: {
-    branch?: string
-  }
-}
-
 export type EventMcpToolsChanged = {
   type: "mcp.tools.changed"
   properties: {
@@ -640,77 +631,6 @@ export type EventCommandExecuted = {
     sessionID: string
     arguments: string
     messageID: string
-  }
-}
-
-export type QuestionOption = {
-  /**
-   * Display text (1-5 words, concise)
-   */
-  label: string
-  /**
-   * Explanation of choice
-   */
-  description: string
-}
-
-export type QuestionInfo = {
-  /**
-   * Complete question
-   */
-  question: string
-  /**
-   * Very short label (max 30 chars)
-   */
-  header: string
-  /**
-   * Available choices
-   */
-  options: Array<QuestionOption>
-  /**
-   * Allow selecting multiple choices
-   */
-  multiple?: boolean
-  /**
-   * Allow typing a custom answer (default: true)
-   */
-  custom?: boolean
-}
-
-export type QuestionRequest = {
-  id: string
-  sessionID: string
-  /**
-   * Questions to ask
-   */
-  questions: Array<QuestionInfo>
-  tool?: {
-    messageID: string
-    callID: string
-  }
-}
-
-export type EventQuestionAsked = {
-  type: "question.asked"
-  properties: QuestionRequest
-}
-
-export type QuestionAnswer = Array<string>
-
-export type EventQuestionReplied = {
-  type: "question.replied"
-  properties: {
-    sessionID: string
-    requestID: string
-    answers: Array<QuestionAnswer>
-  }
-}
-
-export type EventQuestionRejected = {
-  type: "question.rejected"
-  properties: {
-    sessionID: string
-    requestID: string
   }
 }
 
@@ -1003,6 +923,77 @@ export type EventRuntimeWorkflowState = {
   }
 }
 
+export type QuestionOption = {
+  /**
+   * Display text (1-5 words, concise)
+   */
+  label: string
+  /**
+   * Explanation of choice
+   */
+  description: string
+}
+
+export type QuestionInfo = {
+  /**
+   * Complete question
+   */
+  question: string
+  /**
+   * Very short label (max 30 chars)
+   */
+  header: string
+  /**
+   * Available choices
+   */
+  options: Array<QuestionOption>
+  /**
+   * Allow selecting multiple choices
+   */
+  multiple?: boolean
+  /**
+   * Allow typing a custom answer (default: true)
+   */
+  custom?: boolean
+}
+
+export type QuestionRequest = {
+  id: string
+  sessionID: string
+  /**
+   * Questions to ask
+   */
+  questions: Array<QuestionInfo>
+  tool?: {
+    messageID: string
+    callID: string
+  }
+}
+
+export type EventQuestionAsked = {
+  type: "question.asked"
+  properties: QuestionRequest
+}
+
+export type QuestionAnswer = Array<string>
+
+export type EventQuestionReplied = {
+  type: "question.replied"
+  properties: {
+    sessionID: string
+    requestID: string
+    answers: Array<QuestionAnswer>
+  }
+}
+
+export type EventQuestionRejected = {
+  type: "question.rejected"
+  properties: {
+    sessionID: string
+    requestID: string
+  }
+}
+
 export type SessionStatus =
   | {
       type: "idle"
@@ -1072,20 +1063,13 @@ export type EventSessionCompacted = {
   }
 }
 
-export type EventFileEdited = {
-  type: "file.edited"
-  properties: {
-    file: string
-  }
-}
-
 export type Event =
   | EventProjectUpdated
-  | EventInstallationUpdated
-  | EventInstallationUpdateAvailable
   | EventServerInstanceDisposed
   | EventServerConnected
   | EventGlobalDisposed
+  | EventInstallationUpdated
+  | EventInstallationUpdateAvailable
   | EventMessageUpdated
   | EventMessageRemoved
   | EventMessagePartUpdated
@@ -1096,18 +1080,14 @@ export type Event =
   | EventSessionUpdated
   | EventSessionDeleted
   | EventSessionError
+  | EventFileEdited
   | EventTuiPromptAppend
   | EventTuiCommandExecute
   | EventTuiToastShow
   | EventTuiSessionSelect
-  | EventFileWatcherUpdated
-  | EventVcsBranchUpdated
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
   | EventCommandExecuted
-  | EventQuestionAsked
-  | EventQuestionReplied
-  | EventQuestionRejected
   | EventRuntimeQueryState
   | EventRuntimeQueueUpdated
   | EventRuntimeTaskUpdated
@@ -1123,11 +1103,13 @@ export type Event =
   | EventRuntimeCompaction
   | EventRuntimeSubagentLifecycle
   | EventRuntimeWorkflowState
+  | EventQuestionAsked
+  | EventQuestionReplied
+  | EventQuestionRejected
   | EventSessionStatus
   | EventSessionIdle
   | EventTodoUpdated
   | EventSessionCompacted
-  | EventFileEdited
 
 export type GlobalEvent = {
   directory: string
@@ -1912,10 +1894,6 @@ export type Config = {
       enabled: boolean
     }
     /**
-     * Control diff rendering style: 'auto' adapts to terminal width, 'stacked' always shows single column
-     */
-    diff_style?: "auto" | "stacked"
-    /**
      * Show internal/debug slash commands and MCP prompt commands in the TUI command menu
      */
     showAdvancedCommands?: boolean
@@ -1951,10 +1929,6 @@ export type Config = {
    * Command names to suppress from slash-command registration, including custom commands
    */
   disabled_commands?: Array<string>
-  watcher?: {
-    ignore?: Array<string>
-  }
-  plugin?: Array<string>
   snapshot?: boolean
   /**
    * Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing
@@ -2042,10 +2016,6 @@ export type Config = {
           extensions?: Array<string>
         }
       }
-  /**
-   * Additional instruction files or patterns to include
-   */
-  instructions?: Array<string>
   layout?: LayoutConfig
   permission?: PermissionConfig
   tools?: {
@@ -2286,30 +2256,8 @@ export type FileNode = {
 export type FileContent = {
   type: "text"
   content: string
-  diff?: string
-  patch?: {
-    oldFileName: string
-    newFileName: string
-    oldHeader?: string
-    newHeader?: string
-    hunks: Array<{
-      oldStart: number
-      oldLines: number
-      newStart: number
-      newLines: number
-      lines: Array<string>
-    }>
-    index?: string
-  }
   encoding?: "base64"
   mimeType?: string
-}
-
-export type File = {
-  path: string
-  added: number
-  removed: number
-  status: "added" | "deleted" | "modified"
 }
 
 export type McpStatusConnected = {
@@ -2347,10 +2295,6 @@ export type Path = {
   config: string
   worktree: string
   directory: string
-}
-
-export type VcsInfo = {
-  branch: string
 }
 
 export type Command = {
@@ -3086,6 +3030,7 @@ export type SessionSummarizeData = {
     providerID: string
     modelID: string
     auto?: boolean
+    instructions?: string
   }
   path: {
     /**
@@ -3421,6 +3366,10 @@ export type SessionCommandData = {
     arguments: string
     command: string
     variant?: string
+    queuePriority?: number
+    queueMetadata?: {
+      [key: string]: unknown
+    }
     parts?: Array<{
       id?: string
       type: "file"
@@ -4035,23 +3984,25 @@ export type FileReadResponses = {
 
 export type FileReadResponse = FileReadResponses[keyof FileReadResponses]
 
-export type FileStatusData = {
+export type DataFilesData = {
   body?: never
   path?: never
   query?: {
     directory?: string
+    query?: string
+    limit?: number
   }
-  url: "/file/status"
+  url: "/data/files"
 }
 
-export type FileStatusResponses = {
+export type DataFilesResponses = {
   /**
-   * File status
+   * Relative data file paths
    */
-  200: Array<File>
+  200: Array<string>
 }
 
-export type FileStatusResponse = FileStatusResponses[keyof FileStatusResponses]
+export type DataFilesResponse = DataFilesResponses[keyof DataFilesResponses]
 
 export type McpStatusData = {
   body?: never
@@ -4614,24 +4565,6 @@ export type PathGetResponses = {
 }
 
 export type PathGetResponse = PathGetResponses[keyof PathGetResponses]
-
-export type VcsGetData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-  }
-  url: "/vcs"
-}
-
-export type VcsGetResponses = {
-  /**
-   * VCS info
-   */
-  200: VcsInfo
-}
-
-export type VcsGetResponse = VcsGetResponses[keyof VcsGetResponses]
 
 export type CommandListData = {
   body?: never

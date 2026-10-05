@@ -1,29 +1,32 @@
-# npm Windows x64 发布
+# npm 多平台 CLI 发布
 
-KillStata 的 npm 发布仅支持 Windows x64，由一个很小的启动包和一个 Windows 原生二进制包组成。发布命令只有两条：
+KillStata 通过一个跨平台 launcher 和 11 个原生运行时包分发 `killstata web` 与终端 CLI。`packages/killstata/script/release-core.ts` 是原生包名单的权威来源：
+
+- macOS：arm64、x64、x64-baseline
+- Linux：arm64、arm64-musl、x64、x64-baseline、x64-musl、x64-baseline-musl
+- Windows：x64、x64-baseline
+
+一次正式 release 包含 11 个原生 tarball 和 `killstata` launcher tarball。构建/发布命令为：
 
 ```bash
 # 只构建和打包，不访问 npm 写接口
-bun run --cwd packages/killstata pack:release --version 0.1.27
+bun run --cwd packages/killstata pack:release --version 0.1.30
 
 # 完整预演：构建、计算完整性、查询 registry，但不上传
-bun run --cwd packages/killstata release:npm --version 0.1.27 --dry-run
+bun run --cwd packages/killstata release:npm --version 0.1.30 --dry-run
 ```
 
 正式发布只能从与远端同步、工作树干净的 `main`/`master` 执行：
 
 ```bash
-bun run --cwd packages/killstata release:npm --version 0.1.27
+bun run --cwd packages/killstata release:npm --version 0.1.30
 ```
 
 ## 包是怎么组成的
 
-`killstata` 是 launcher package，只包含启动脚本、安装脚本和元数据；它和 `killstata-windows-x64`
-都声明为 `win32/x64`，npm 会在其他系统直接拒绝安装。真正的可执行文件只在
-`killstata-windows-x64` 内。
+`killstata` 是 launcher package，包含 Node 启动脚本、Web 静态资源、引擎文件和可选原生依赖元数据。每个原生包只含该目标平台的可执行文件与配套资源。npm 根据包的 `os`/`cpu` 元数据安装当前系统的包；launcher 再根据 Node 诊断报告中 `glibcVersionRuntime` 选择 Linux glibc 或 musl 变体。
 
-launcher 的 `optionalDependencies` 只固定 `killstata-windows-x64` 的精确版本；安装脚本再把该二进制
-链接到 `killstata` 命令。
+launcher 的 `optionalDependencies` 将每个原生包固定到同一个精确版本；安装脚本检查目标包是否就绪。launcher 会优先选择当前 libc 对应的 Linux 二进制，缺少运行时报告时优先 musl。
 
 ## npm 发布的三个关键概念
 
@@ -34,8 +37,8 @@ launcher 的 `optionalDependencies` 只固定 `killstata-windows-x64` 的精确�
 因此，多个包不能真正做到数据库式原子提交。KillStata 使用下面的安全顺序模拟事务：
 
 ```text
-显式版本 → Windows x64 构建 → 2 个 tarball → SHA-512 manifest
-        → registry 冲突预检 → Windows native package 上传
+显式版本 → 11 个平台构建 → 12 个 tarball → SHA-512 manifest
+        → registry 冲突预检 → native packages 上传
         → 每包完整性复查 → launcher 最后上传 → 校验 latest
 ```
 
@@ -49,9 +52,9 @@ launcher 最后发布很关键：只要 launcher 的 `latest` 尚未切换，普
 
 现在必须明确传入 `--version X.Y.Z`。脚本还会验证：
 
-- 2 个包版本完全相同；
-- native package 名单必须精确等于 `killstata-windows-x64`；
-- launcher 的 `optionalDependencies` 不多不少，恰好覆盖该 native package；
+- 12 个包版本完全相同；
+- native package 名单必须精确等于 `EXPECTED_NATIVE_PACKAGE_NAMES`；
+- launcher 的 `optionalDependencies` 必须覆盖 11 个原生目标；
 - 每个 tarball 的 SHA-512 SRI 完整性，并在 registry 预检前和每次上传前重新计算；
 - registry 已存在的同版本内容是否与本地一致；上传后最多等待约 44 秒让 npm registry 传播，再确认完整性。
 

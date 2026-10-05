@@ -1,0 +1,6 @@
+{
+  "description": "漏传 stageId",
+  "modelArgs": { "datasetId": "health_21", "dependentVar": "visits", "treatmentVar": "insured" },
+  "expect": "reject",
+  "rejectHint": ["stageId"]
+}

@@ -1,0 +1,1 @@
+{"description":"双变量回归无控制变量","modelArgs":{"datasetId":"panel_98","stageId":"stage_000","dependentVar":"y","treatmentVar":"x1"},"expect":"pass"}

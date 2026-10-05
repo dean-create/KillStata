@@ -44,7 +44,8 @@ export type RealPaperDatasetContract = {
   }
 }
 
-const DEFAULT_REAL_PAPER_DATA_DIR = "/Users/cw/Desktop/ks/test"
+// 真实数据属于仓库根目录的 data/，不能绑定某台开发机的旧路径。
+const DEFAULT_REAL_PAPER_DATA_DIR = path.resolve(process.cwd(), "..", "..", "data")
 
 export function loadRealPaperDatasetContract(): RealPaperDatasetContract {
   const contractPath = path.resolve(process.cwd(), "..", "..", "test", "real-paper-chain", "dataset-contract.json")
@@ -72,6 +73,8 @@ export function verifyRealPaperDataset(filePath: string, expectedSha256: string)
   }
   const actual = sha256File(filePath)
   if (actual !== expectedSha256) {
-    throw new Error(`真实论文测试数据已变化：${path.basename(filePath)}；期望 SHA-256 ${expectedSha256}，实际 ${actual}`)
+    throw new Error(
+      `真实论文测试数据已变化：${path.basename(filePath)}；期望 SHA-256 ${expectedSha256}，实际 ${actual}`,
+    )
   }
 }

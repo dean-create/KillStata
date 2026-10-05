@@ -4,7 +4,7 @@ import z from "zod"
 import { MCP } from "../../mcp"
 import { Config } from "../../config/config"
 import { errors } from "../error"
-import { lazy } from "../../util/lazy"
+import { lazy } from "@killstata/util/lazy"
 
 export const McpRoutes = lazy(() =>
   new Hono()
@@ -148,7 +148,7 @@ export const McpRoutes = lazy(() =>
         if (!supportsOAuth) {
           return c.json({ error: `MCP server ${name} does not support OAuth` }, 400)
         }
-        const status = await MCP.authenticate(name)
+        const status = await MCP.authenticate(name, { openBrowser: true })
         return c.json(status)
       },
     )

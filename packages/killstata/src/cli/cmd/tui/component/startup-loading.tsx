@@ -5,7 +5,7 @@ import { useTheme } from "../context/theme"
 export function StartupLoading(props: { ready: () => boolean }) {
   const { theme } = useTheme()
   const [show, setShow] = createSignal(false)
-  const text = createMemo(() => (props.ready() ? "Finishing startup..." : "Loading Killstata runtime..."))
+  const text = createMemo(() => (props.ready() ? "启动收尾…" : "正在加载killstata运行时…"))
   let wait: ReturnType<typeof setTimeout> | undefined
   let hold: ReturnType<typeof setTimeout> | undefined
   let shownAt = 0

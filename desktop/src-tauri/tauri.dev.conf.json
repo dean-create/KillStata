@@ -1,0 +1,16 @@
+{
+  "productName": "KillStata Dev",
+  "identifier": "com.killstata.desktop.dev",
+  "app": {
+    "windows": [
+      {
+        "title": "KillStata Dev",
+        "width": 1180,
+        "height": 780,
+        "minWidth": 720,
+        "minHeight": 600,
+        "resizable": true
+      }
+    ]
+  }
+}

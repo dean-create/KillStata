@@ -1,11 +1,12 @@
 import z from "zod"
 import { Tool } from "./tool"
+import { ToolModel } from "./model-contracts"
 import { summarizeToolError } from "@/runtime/tool-result-policy"
 
 const FRIENDLY_INVALID_TOOL_OUTPUT = "工具调用参数不符合契约，请根据工具描述修正参数后重试。"
 
-export const InvalidTool = Tool.define("invalid", {
-  description: "Do not use",
+export const InvalidTool = Tool.define("invalid", Tool.Execution.blocked, ToolModel.forTool("invalid"), {
+  description: "不可调用的占位工具。",
   parameters: z.object({
     tool: z.string(),
     error: z.string(),

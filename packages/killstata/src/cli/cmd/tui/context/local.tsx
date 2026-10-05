@@ -5,7 +5,7 @@ import { useTheme } from "@tui/context/theme"
 import { uniqueBy } from "remeda"
 import path from "path"
 import { Global } from "@/global"
-import { iife } from "@/util/iife"
+import { iife } from "@killstata/util/iife"
 import { createSimpleContext } from "./helper"
 import { useToast } from "../ui/toast"
 import { Provider } from "@/provider/provider"
@@ -14,6 +14,7 @@ import { useArgs } from "./args"
 import { useSDK } from "./sdk"
 import { RGBA } from "@opentui/core"
 import { nextTabCycleIndex, pickTabCycleAgents } from "./agent-cycle"
+import { selectTuiModel } from "./model-priority"
 
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
   name: "Local",
@@ -27,16 +28,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       return !!provider?.models[model.modelID]
     }
 
-    function getFirstValidModel(...modelFns: (() => { providerID: string; modelID: string } | undefined)[]) {
-      for (const modelFn of modelFns) {
-        const model = modelFn()
-        if (!model) continue
-        if (isModelValid(model)) return model
-      }
-    }
-
     const agent = iife(() => {
-      const agentsAllVisiblePrimary = createMemo(() => sync.data.agent.filter((x) => x.mode !== "subagent" && !x.hidden))
+      const agentsAllVisiblePrimary = createMemo(() =>
+        sync.data.agent.filter((x) => x.mode !== "subagent" && !x.hidden),
+      )
       const agentsForTabCycle = createMemo(() => pickTabCycleAgents(agentsAllVisiblePrimary()))
       const [agentStore, setAgentStore] = createStore<{
         current: string
@@ -66,7 +61,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (!agentsAllVisiblePrimary().some((x) => x.name === name))
             return toast.show({
               variant: "warning",
-              message: `Agent not found: ${name}`,
+              message: `未找到 agent：${name}`,
               duration: 3000,
             })
           setAgentStore("current", name)
@@ -111,12 +106,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           modelID: string
         }[]
         variant: Record<string, string | undefined>
+        reasoningLevel: Record<string, string | undefined>
       }>({
         ready: false,
         model: {},
         recent: [],
         favorite: [],
         variant: {},
+        reasoningLevel: {},
       })
 
       const file = Bun.file(path.join(Global.Path.state, "model.json"))
@@ -137,6 +134,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             recent: modelStore.recent,
             favorite: modelStore.favorite,
             variant: modelStore.variant,
+            reasoningLevel: modelStore.reasoningLevel,
           }),
         )
       }
@@ -148,6 +146,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (Array.isArray(x.recent)) setModelStore("recent", x.recent)
           if (Array.isArray(x.favorite)) setModelStore("favorite", x.favorite)
           if (typeof x.variant === "object" && x.variant !== null) setModelStore("variant", x.variant)
+          if (typeof x.reasoningLevel === "object" && x.reasoningLevel !== null)
+            setModelStore("reasoningLevel", x.reasoningLevel)
         })
         .catch(() => {})
         .finally(() => {
@@ -197,12 +197,17 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
       const currentModel = createMemo(() => {
         const a = agent.current()
-        return (
-          getFirstValidModel(
-            () => modelStore.model[a.name],
-            () => a.model,
-            fallbackModel,
-          ) ?? undefined
+        const explicit = args.model
+          ? Provider.parseModel(args.model)
+          : undefined
+        return selectTuiModel(
+          {
+            explicit: explicit?.providerID && explicit.modelID ? explicit : undefined,
+            stored: modelStore.model[a.name],
+            agent: a.model,
+            fallback: fallbackModel(),
+          },
+          isModelValid,
         )
       })
 
@@ -256,7 +261,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (!favorites.length) {
             toast.show({
               variant: "info",
-              message: "Add a favorite model to use this shortcut",
+              message: "先收藏一个模型才能用这个快捷键",
               duration: 3000,
             })
             return
@@ -288,7 +293,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           batch(() => {
             if (!isModelValid(model)) {
               toast.show({
-                message: `Model ${model.providerID}/${model.modelID} is not valid`,
+                message: `模型 ${model.providerID}/${model.modelID} 无效`,
                 variant: "warning",
                 duration: 3000,
               })
@@ -310,7 +315,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           batch(() => {
             if (!isModelValid(model)) {
               toast.show({
-                message: `Model ${model.providerID}/${model.modelID} is not valid`,
+                message: `模型 ${model.providerID}/${model.modelID} 无效`,
                 variant: "warning",
                 duration: 3000,
               })
@@ -329,6 +334,29 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             save()
           })
         },
+        reasoningLevel: {
+          current() {
+            const m = currentModel()
+            if (!m) return undefined
+            const key = `${m.providerID}/${m.modelID}`
+            return modelStore.reasoningLevel[key] ?? modelStore.variant[key]
+          },
+          list() {
+            const m = currentModel()
+            if (!m) return []
+            const provider = sync.data.provider.find((x) => x.id === m.providerID)
+            const variants = Object.keys(provider?.models[m.modelID]?.variants ?? {})
+            return ["off", ...variants.filter((level) => level !== "off")]
+          },
+          set(value: string | undefined) {
+            const m = currentModel()
+            if (!m) return
+            const key = `${m.providerID}/${m.modelID}`
+            setModelStore("reasoningLevel", key, value)
+            setModelStore("variant", key, value)
+            save()
+          },
+        },
         variant: {
           current() {
             const m = currentModel()
@@ -341,8 +369,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             if (!m) return []
             const provider = sync.data.provider.find((x) => x.id === m.providerID)
             const info = provider?.models[m.modelID]
-            if (!info?.variants) return []
-            return Object.keys(info.variants)
+            return Object.keys(provider?.models[m.modelID]?.variants ?? {})
           },
           set(value: string | undefined) {
             const m = currentModel()
@@ -387,6 +414,35 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       },
     }
 
+    const executionMode = iife(() => {
+      const [store, setStore] = createStore<{ mode: "auto" | "plan" }>({ mode: "auto" })
+      const file = Bun.file(path.join(Global.Path.state, "execution_mode.json"))
+      file
+        .json()
+        .then((x) => {
+          if (x && (x.mode === "auto" || x.mode === "plan")) setStore("mode", x.mode)
+        })
+        .catch(() => {})
+      function save() {
+        Bun.write(file, JSON.stringify({ mode: store.mode }))
+      }
+      return {
+        current() {
+          return store.mode
+        },
+        set(mode: "auto" | "plan") {
+          setStore("mode", mode)
+          save()
+        },
+        toggle() {
+          const next = store.mode === "auto" ? "plan" : "auto"
+          setStore("mode", next)
+          save()
+          return next
+        },
+      }
+    })
+
     // Automatically update model when agent changes
     createEffect(() => {
       const value = agent.current()
@@ -400,7 +456,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         else
           toast.show({
             variant: "warning",
-            message: `Agent ${value.name}'s configured model ${value.model.providerID}/${value.model.modelID} is not valid`,
+            message: `agent ${value.name} 配置的模型 ${value.model.providerID}/${value.model.modelID} 无效`,
             duration: 3000,
           })
       }
@@ -410,6 +466,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       model,
       agent,
       mcp,
+      executionMode,
     }
     return result
   },

@@ -1,0 +1,14 @@
+{
+  "description": "默认 robust 标准误(RE 的 GLS 在长面板下常用稳健 SE)",
+  "modelArgs": {
+    "datasetId": "wage_panel",
+    "stageId": "stage_000",
+    "dependentVar": "lwage",
+    "treatmentVar": "educ",
+    "covariates": ["exper"],
+    "entityVar": "nr",
+    "timeVar": "year",
+    "covariance": "robust"
+  },
+  "expect": "pass"
+}

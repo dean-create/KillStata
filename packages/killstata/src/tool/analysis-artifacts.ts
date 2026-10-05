@@ -1,11 +1,7 @@
 import fs from "fs"
 import path from "path"
 import type { NumericSnapshotDocument } from "./analysis-grounding"
-import {
-  findDatasetForSource,
-  type DatasetManifest,
-  readDatasetManifest,
-} from "./analysis-state"
+import { findDatasetForSource, type DatasetManifest, readDatasetManifest } from "./analysis-state"
 import { Instance } from "../project/instance"
 
 export type FinalOutputsDocument = {
@@ -63,9 +59,7 @@ export function readJsonIfExists<T>(filePath?: string) {
 export function generatedArtifactRoot(input: { module: string; runId?: string; branch?: string }) {
   const pieces = [projectRoot(), "analysis", input.module, input.runId ?? "adhoc"]
   if (input.branch) pieces.push(input.branch)
-  const dir = path.join(...pieces)
-  fs.mkdirSync(dir, { recursive: true })
-  return dir
+  return path.join(...pieces)
 }
 
 export function maybeDatasetManifestFromSourcePath(sourcePath?: string) {
@@ -74,11 +68,7 @@ export function maybeDatasetManifestFromSourcePath(sourcePath?: string) {
   return findDatasetForSource(sourcePath).manifest
 }
 
-export function resolveFinalOutputRecord(input: {
-  datasetId: string
-  outputKey: string
-  runId?: string
-}) {
+export function resolveFinalOutputRecord(input: { datasetId: string; outputKey: string; runId?: string }) {
   const manifest = readDatasetManifest(input.datasetId)
   const candidates = [...manifest.finalOutputs]
     .filter((item) => item.key === input.outputKey || item.label === input.outputKey)
@@ -187,9 +177,13 @@ export function loadResultBundle(input: {
   const metadataPath =
     typeof results.metadata_path === "string" ? results.metadata_path : path.join(resultDir, "model_metadata.json")
   const numericSnapshotPath =
-    typeof results.numeric_snapshot_path === "string" ? results.numeric_snapshot_path : path.join(resultDir, "numeric_snapshot.json")
+    typeof results.numeric_snapshot_path === "string"
+      ? results.numeric_snapshot_path
+      : path.join(resultDir, "numeric_snapshot.json")
   const coefficientTablePath =
-    typeof results.coefficients_path === "string" ? results.coefficients_path : path.join(resultDir, "coefficient_table.csv")
+    typeof results.coefficients_path === "string"
+      ? results.coefficients_path
+      : path.join(resultDir, "coefficient_table.csv")
   const narrativePath =
     typeof results.narrative_path === "string" ? results.narrative_path : path.join(resultDir, "narrative.md")
 
@@ -208,11 +202,9 @@ export function loadResultBundle(input: {
     coefficientTablePath: fs.existsSync(coefficientTablePath) ? coefficientTablePath : undefined,
     narrativePath: fs.existsSync(narrativePath) ? narrativePath : undefined,
     sourcePath:
-      discoveredManifest?.sourcePath ??
-      (typeof results.source_path === "string" ? results.source_path : undefined),
+      discoveredManifest?.sourcePath ?? (typeof results.source_path === "string" ? results.source_path : undefined),
     datasetId:
-      discoveredManifest?.datasetId ??
-      (typeof results.dataset_id === "string" ? results.dataset_id : input.datasetId),
+      discoveredManifest?.datasetId ?? (typeof results.dataset_id === "string" ? results.dataset_id : input.datasetId),
     stageId: typeof results.stage_id === "string" ? results.stage_id : undefined,
     runId: typeof results.run_id === "string" ? results.run_id : input.runId,
     branch: typeof results.branch === "string" ? results.branch : undefined,
