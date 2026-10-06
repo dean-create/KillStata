@@ -1,18 +1,25 @@
-# 当前计划：桌面/Web 同一界面与本机 CLI 分享体验（更新于 2026-10-06）
+# 当前计划：桌面/Web 同一界面与本机 CLI 分享体验（更新于 2026-10-07）
 
 > 目标：Desktop 与 Web 共用研究 UI 和可见交互；全局 npm CLI `killstata web` 默认只监听本机 `127.0.0.1:3080`，显式 `--share` 才开放可信私有局域网访客。
 
 - 详细实施与测试记录：`docs/superpowers/plans/2026-10-04-desktop-web-parity-cli.md`。
 - 两端默认 frontend：不读模型凭据、不启动 Core；提交只记录研究信息。用户主动连接后才启用平台适配器。
 - Web 保留浏览器文件能力；访客工作区按不透明 ID 隔离，文件只在连接后提交分析时上传。分享访客可用主机预配置模型，档案只读且不返回 API Key。
-- 已验证：Desktop 全量 365 通过、2 跳过；Web 构建、Desktop/CLI 类型检查、分享专项测试、CLI 帮助测试通过；本机 CLI 候选 0.1.30 已打包，12 个 tarball 的 SHA-512 与 manifest 一致，npm dry-run 未发布，隔离 arm64 安装可启动 `killstata web`。
+- 分享工作区按两阶段提交：Host `/prepare` 只在内存中签发 60 秒有效、最多 128 个待确认的 ID/随机 capability，不建目录、不写 registry；浏览器先把 capability 写入 IndexedDB，再提交 `/workspaces`。若页面在两步之间刷新，`/ensure` 可用仍有效的原 capability 完成登记；若此前已登记，则安全重绑。registry 只保存 SHA-256，Host 会话仍独立限制工作区与研究授权。
+- workspace registry 的 create/finalize/ensure 使用同一私有跨进程锁保护读—改—写与原子替换，避免多个 `killstata web --port ...` 同时运行时互相覆盖工作区记录；锁冲突有界重试，进程崩溃后可按 stale lease 回收。
+- 分享 Host 在服务端校验访客会话、工作区与研究 ID；每次兑换链接创建独立短期会话，访客无法继承别人的工作区/研究授权，也不能在新会话中恢复旧 Core 权限。App 在访客连接分析 Core 前先用浏览器 IndexedDB 中的随机 workspace capability token 重绑；服务端 registry 只存 SHA-256，本机 owner 可轮换旧工作区凭据。Host→真实 registry 集成回归还验证伪造 owner-role header 与伪造 capability 都被拒绝、浏览器保存的真实 capability 可重绑。
+- 运行方式评估：参考 DSH 的 npm CLI 启动本机 Web 服务，不部署公网站点；默认回环访问，远程终端可用 SSH 本地端口转发。`--share` 是额外的可信私有 LAN 选项，明文 HTTP，不作为公网部署能力。
+- 发布边界待决：npm 只负责公开分发 CLI，服务仍在用户本机运行；当前 registry `latest` 为 Windows x64-only `0.1.27`，但 `0.1.30` 候选包含 11 个平台包。这与此前 Windows-only 发布决定冲突；未明确改策略前不得发布候选。
+- 分享分析必须提交只读/工作区读写两种精确权限规则之一，并使用主机当前活动模型；不接受缺省、自定义权限或 Full Access。模型管理只展示主机活动模型，不返回 profile ID、自定义 Base URL、小模型信息或 API Key。
+- LAN 分享仅用明文 HTTP，因此命令行和文档都明确限制在可信私有网；提交可能消耗主机模型额度。非安全上下文不支持 Clipboard API 时，Web 使用浏览器复制回退。
+- 已验证：Desktop 全量 372 通过、2 跳过；CLI/Core 全量 2181 通过、5 跳过、0 失败；Web 与 Tauri production build/typecheck 通过，共享 CSS/Core chunk 字节一致。安全补丁后重新构建的 `0.1.30` 候选含 11 个 native + launcher 共 12 个 tarball，`release.ts --dry-run` 的 manifest/SHA-512 验证通过且未发布；每个 tarball 都含 `dist-web/index.html`。隔离 npm prefix 安装的 arm64 launcher 返回 `0.1.30`，`killstata web --help`、默认 loopback 启动和 `--share` 启动均通过。
 - 视觉验收：最终 Web 在 1440×900 与 390×844 可用；Desktop/Web 的“1”研究记录及通用设置内容一致。已修复窄屏工作区抽屉遮住设置面板的问题。
-- 本机完整 Core 全量为 **2165 通过、5 跳过、0 失败**（2170 tests / 309 files / 10533 assertions）；审查后新增 Hausman 统计一致性与 session 输出用例，聚焦 panel 契约/session 输出 9/9、CLI typecheck 通过，等待新 CI 完整运行。
+- 本机最新串行 Core 全量为 **2181 通过、5 跳过、0 失败**（2186 tests / 309 files / 10653 assertions / 2 snapshots）；Desktop 最新全量 **372 通过、2 跳过**。分享安全新增 Host/session/workspace 聚焦与真实 Host→registry 集成检查，另有访客模型展示与本地选择器回归覆盖。
 - Desktop 全量复跑 **365 通过 / 2 跳过**；parity lifecycle 测试在并行运行下耗时略超默认 5 秒，已仅将该测试限制调为 10 秒，未改变行为断言。Desktop typecheck、Web build 通过。
 - 独立审查提出 Hausman metrics/recommendation 不一致风险；展示层对不完整、超范围或决策标记冲突的统计量隐藏 FE/RE 推荐；validator 还验证 `rejectRe` 与 `pValue < alpha` 一致。面板契约/session 输出测试 9/9，覆盖有效 FE/RE、`p == alpha`、异常数值、错误推荐和错误理由。
 - 最新已完成 GitHub test 工作流（head `1e84054`，Nix hash bot commit 之前）全绿：Core 2105 pass / 72 skip / 0 fail（2177 tests / 309 files），Desktop/Web 365 pass / 2 skip，Python engine 150 pass；三条私有 workbook 回放在 clean checkout 明确跳过。
 - 独立 `typecheck` 已在 `ubuntu-latest` 通过；Nix hash updater 修复 `patches/` 和缺失 `desktop` workspace 后成功，自动更新四个平台 hashes 并提交 `6f9e36f`。GitHub 没有为 GITHUB_TOKEN bot commit 自动启动后续检查，需再触发最终 head CI。
-- 仍待 Linux 主机启动、第二台局域网设备验收、真实模型 Provider 验收；npm 发布前需最终用户批准。公开 registry 仍为 `killstata@0.1.27`，`0.1.30` 未发布。
+- 仍待第二台局域网设备验收、Linux 主机启动和新 GitHub CI；本地隔离安装未调用真实模型 Provider。公开 registry 仍为 `killstata@0.1.27`，`0.1.30` 未发布；正式 npm 发布仍需最终用户批准。
 
 ---
 

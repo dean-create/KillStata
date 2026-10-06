@@ -4,16 +4,16 @@ Date: 2026-10-06
 
 ## Passed
 
-- Desktop full suite, serialized: 365 passed, 2 skipped.
+- Desktop full suite, serialized: 368 passed, 2 skipped.
 - Desktop TypeScript check: passed.
 - KillStata CLI TypeScript check: passed.
 - CLI Web command tests: 9 passed, including the `--share` help contract.
 - Candidate Web production build and Tauri debug bundle: passed.
 - Web UI at 1440×900 and 390×844: passed visual checks. At 390×844, opening Settings from the workspace drawer now closes the drawer so the full Settings panel remains usable.
 - Desktop and Web showed the same frontend “1” research record and shared Settings content. The `MessageThread` regression and Desktop/Web integration tests confirm reasoning stays collapsed while the main reply is visible.
-- Final npm dry-run for `0.1.30`: 12 artifacts (11 native targets plus launcher); every tarball SHA-512 matched the release manifest; dry-run published nothing.
-- Isolated npm prefix install of the final macOS arm64 native tarball and launcher: `killstata --version` returned `0.1.30`; `killstata web --help`, default loopback startup, and `--share` startup worked.
-- LAN share smoke used a fake profile and a synthetic workspace on the same Mac. A visitor connected to Core and saw only a sanitized, read-only model profile. No dataset was submitted to an external model provider.
+- Fresh `0.1.30` npm dry-run after sharing-capability hardening: 12 artifacts (11 native targets plus launcher); SHA-512 manifest validation passed; all 12 tarballs contain `dist-web/index.html`; the dry-run published nothing.
+- Isolated npm global-prefix install from the fresh macOS arm64 and launcher tarballs: `killstata --version` returned `0.1.30`; `killstata web --help`, default loopback startup on port 3080, and `--share` startup worked. An unauthenticated HTTP request was rejected with 401; no real Provider request was made.
+- LAN share smoke used a fake profile and a synthetic workspace on the same Mac. A visitor connected to Core and saw the active host model without its saved profile metadata or API Key. No dataset was submitted to an external model provider.
 - `git diff --check` passed for the feature delta against its `a037cf2` implementation base. Preparing a GitHub branch directly from `origin/main` exposes older trailing whitespace in that base snapshot; those unrelated lines were not normalized in this task.
 
 ## CLI full-suite and Python environment repair
@@ -53,3 +53,11 @@ The previous Draft PR #6 head failed GitHub typecheck because the clean checkout
 - Native runtime startup on a Linux host.
 - Fresh GitHub CI for the follow-up commit, including the final two panel Schema cases.
 - Public npm publication. The registry still serves `killstata@0.1.27`; `0.1.30` remains an unpublished candidate pending the review gate and final approval.
+
+## 2026-10-06 sharing security review follow-up
+
+- Shared-browser sessions now receive separate cookies on each launch-token exchange. The server binds registered workspace IDs and run IDs to that session; a different session cannot use them until it reselects the same browser folder through the workspace `ensure` route. Old run IDs cannot be resumed under a new share session.
+- The share Host rejects missing/custom/Full Access permission rules, missing models, and any model or summary model other than the active host profile. Share requests require a registered workspace, and host-default credential status omits profile IDs, endpoint URLs, and secondary models. `/title` now allows its actual `PATCH` method.
+- Core focused contracts: 78 pass / 0 fail across share host/session/workspace/permission suites. A new Host→real workspace-registry integration test rejects a forged owner-role header and forged capability while allowing the saved capability to rebind. Final serial Core full suite: 2,177 pass / 5 skip / 0 fail (2,182 tests, 309 files, 10,624 assertions, 2 snapshots). Desktop full suite: 368 pass / 2 skip. CLI and Desktop typechecks pass.
+- Source Web runs use loopback by default. `--share` uses plain HTTP and is only suitable for a trusted private LAN. The current tokenized preview is running on port 3082 for another-device smoke; it is not a public site. No real dataset or provider request has been sent.
+- Fresh Tauri and Web production bundles share byte-identical CSS (`05bdb526…576d4c`) and Core chunk (`8261a5e5…d50ceb3`). The latest `0.1.30` candidate was rebuilt after this hardening and passed the dry-run plus isolated macOS arm64 install checks above.

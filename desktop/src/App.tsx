@@ -70,6 +70,7 @@ type RevertedTurnSnapshot = {
 
 /** 仅由桌面壳提供的原生目录选择；前端不会枚举或读取目录内的文件。 */
 export type WorkspacePicker = () => Promise<string | { id: string; name: string } | undefined>
+export type WorkspaceRebinder = (workspace: { id: string; name: string }) => Promise<void>
 /** 仅在已有工作区且研究者主动点名一个文件时提供；不返回或展示路径。 */
 export type WorkspaceFilePicker = (workspaceID?: string) => Promise<File | undefined>
 
@@ -221,7 +222,7 @@ function resultDocumentBlocks(document: string): ResultDocumentBlock[] {
   return blocks
 }
 
-export default function App(props: { engine?: EngineClient; credentials?: CredentialStore; runtimeDiagnostics?: RuntimeDiagnostics; workspacePicker?: WorkspacePicker; workspaceFilePicker?: WorkspaceFilePicker; workspaceStore?: WorkspaceStore; uiPreferences?: UiPreferencesStore; initialUiPreferences?: SharedUiPreferences; initialWorkspaceHistoryEnabled?: boolean; workspaceContextChanged?: (workspaceID: string) => void; requireApiKey?: boolean; connectionAvailable?: boolean; sharedVisitor?: boolean; mode?: "frontend" | "connected"; credentialStorageNotice?: string; credentialStoreLabel?: string }) {
+export default function App(props: { engine?: EngineClient; credentials?: CredentialStore; runtimeDiagnostics?: RuntimeDiagnostics; workspacePicker?: WorkspacePicker; workspaceRebinder?: WorkspaceRebinder; workspaceFilePicker?: WorkspaceFilePicker; workspaceStore?: WorkspaceStore; uiPreferences?: UiPreferencesStore; initialUiPreferences?: SharedUiPreferences; initialWorkspaceHistoryEnabled?: boolean; workspaceContextChanged?: (workspaceID: string) => void; requireApiKey?: boolean; connectionAvailable?: boolean; sharedVisitor?: boolean; mode?: "frontend" | "connected"; credentialStorageNotice?: string; credentialStoreLabel?: string }) {
   const [mode, setMode] = createSignal<"frontend" | "connected">(props.mode ?? "frontend")
   const connectionAvailable = props.connectionAvailable === true
   const requireApiKey = () => props.requireApiKey === true && mode() === "connected"
@@ -256,7 +257,10 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
   const [engineFeedback, setEngineFeedback] = createSignal<LocalFeedback>()
   const [connectionMessage, setConnectionMessage] = createSignal("")
   const [waitingForShareWorkspace, setWaitingForShareWorkspace] = createSignal(false)
-  const [permissionMode, setPermissionMode] = createSignal<PermissionMode>(props.initialUiPreferences?.permissionMode ?? savedPermissionMode())
+  const permissionModeForSurface = (value: PermissionMode) => props.sharedVisitor && value === "full_access"
+    ? DEFAULT_PERMISSION_MODE
+    : value
+  const [permissionMode, setPermissionMode] = createSignal<PermissionMode>(permissionModeForSurface(props.initialUiPreferences?.permissionMode ?? savedPermissionMode()))
   const [reasoningEffort, setReasoningEffort] = createSignal<ReasoningEffort>(props.initialUiPreferences?.reasoningEffort ?? savedReasoningEffort())
   const [showThinking, setShowThinking] = createSignal(false)
   const [showTimestamps, setShowTimestamps] = createSignal(false)
@@ -372,8 +376,17 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
       researches: workspace.researches.map((research) => ({ ...research, workspaceID: workspace.id, dataset: undefined })),
     }))
     updateLoadedIDCounters(records)
-    restoringResearch = true
     const activeWorkspace = records.find((workspace) => workspace.id === snapshot.activeWorkspaceID)
+    if (props.sharedVisitor && activeWorkspace && activeWorkspace.id !== UNASSIGNED_WORKSPACE_ID && props.workspaceRebinder) {
+      try {
+        await props.workspaceRebinder({ id: activeWorkspace.id, name: activeWorkspace.name })
+      } catch {
+        if (isCurrent()) setWorkspacePersistenceFeedback("无法恢复已保存的访客工作区，请重新选择该目录后重试。")
+        return false
+      }
+    }
+    if (!isCurrent()) return false
+    restoringResearch = true
     const latest = activeWorkspace?.researches[0]
     // 原始文件不进入历史，只有安全元数据；提示需要用快照里的名称，而非已清空的内存 dataset。
     const latestDataset = snapshot.workspaces.find((workspace) => workspace.id === snapshot.activeWorkspaceID)?.researches[0]?.dataset
@@ -789,7 +802,7 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
       }
       setWorkbookSheetNames(session.workbookSheetNames)
       setSelectedWorkbookSheet(session.selectedWorkbookSheet)
-      if (session.runID && isPermissionMode(session.permissionMode)) setPermissionMode(session.permissionMode)
+      if (session.runID && isPermissionMode(session.permissionMode)) setPermissionMode(permissionModeForSurface(session.permissionMode))
       setPrompt("")
       setSubmittedPrompt(session.submittedPrompt)
       setRunID(session.runID)
@@ -817,10 +830,11 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
   // 授权档位在 Core session 创建时固定；已有 session 的界面会锁定该控件。
   // 推理等级仍作为 variant 随每轮 prompt 发送。
   const selectPermissionMode = (mode: PermissionMode) => {
+    const selected = permissionModeForSurface(mode)
     permissionModePreferenceRevision += 1
-    setPermissionMode(mode)
-    globalThis.localStorage?.setItem(permissionModeStorageKey, mode)
-    void saveSharedUiPreference("permissionMode", mode)
+    setPermissionMode(selected)
+    globalThis.localStorage?.setItem(permissionModeStorageKey, selected)
+    void saveSharedUiPreference("permissionMode", selected)
   }
 
   const selectReasoningEffort = (effort: ReasoningEffort) => {
@@ -906,8 +920,9 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
       }
       if (!runID() && !isPreparingSubmission() && permissionModeRevision === permissionModePreferenceRevision && !permissionModeWasPending
         && !pendingUiPreferenceWrites.has("permissionMode") && isPermissionMode(shared.permissionMode)) {
-        setPermissionMode(shared.permissionMode)
-        globalThis.localStorage?.setItem(permissionModeStorageKey, shared.permissionMode)
+        const selected = permissionModeForSurface(shared.permissionMode)
+        setPermissionMode(selected)
+        globalThis.localStorage?.setItem(permissionModeStorageKey, selected)
       }
     } catch {
       // Shared preferences are best-effort; keep the last valid local choice when storage is unavailable.
@@ -1018,14 +1033,18 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
     queueMicrotask(() => settingsCloseButton?.focus())
   }
 
+  const promptForShareWorkspace = () => {
+    setConnectionMessage("请先选择一个工作区，才能提交分析。访客提交的文件会上传到主机，并保存在此工作区中。")
+    setWaitingForShareWorkspace(true)
+    setSettingsOpen(false)
+    setWorkspacePanelOpen(true)
+  }
+
   const activateConnectedMode = async () => {
     if (!connectionAvailable || isRunning() || isPreparingSubmission() || pendingInteraction()) return
     if (props.sharedVisitor) {
       if (activeWorkspaceID() === UNASSIGNED_WORKSPACE_ID) {
-        setConnectionMessage("请先选择一个工作区。连接后，访客提交的文件会上传到主机，并保存在此工作区中。")
-        setWaitingForShareWorkspace(true)
-        setSettingsOpen(false)
-        setWorkspacePanelOpen(true)
+        promptForShareWorkspace()
         return
       }
       setSettingsCategory("general")
@@ -1298,8 +1317,15 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
 
   const selectWorkspace = async () => {
     if (!(await cancelActiveRunBeforeContextChange())) return
-    const picked = await props.workspacePicker?.()
+    let picked: Awaited<ReturnType<WorkspacePicker>>
+    try {
+      picked = await props.workspacePicker?.()
+    } catch (error) {
+      setWorkspacePersistenceFeedback(error instanceof Error ? error.message : "无法选择或保存工作区，请重试。")
+      return
+    }
     if (!picked) return
+    setWorkspacePersistenceFeedback(undefined)
     const normalizedPath = typeof picked === "string" ? picked.replace(/[\\/]+$/, "") : picked.id
     const folderName = typeof picked === "string" ? normalizedPath.split(/[\\/]/).filter(Boolean).at(-1) : picked.name
     if (!folderName) return
@@ -1327,7 +1353,7 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
       setSubmittedPrompt(savedResearches[0]?.submittedPrompt)
       setRunID(savedResearches[0]?.runID)
       if (savedResearches[0]?.runID && isPermissionMode(savedResearches[0].permissionMode)) {
-        setPermissionMode(savedResearches[0].permissionMode)
+        setPermissionMode(permissionModeForSurface(savedResearches[0].permissionMode))
       }
       setResultDocument(savedResearches[0]?.resultDocument ?? "")
       setResultExportable(savedResearches[0]?.resultExportable ?? false)
@@ -1350,6 +1376,14 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
   const switchWorkspace = async (workspace: WorkspaceRecord) => {
     if (workspace.id === activeWorkspaceID()) return
     if (!(await cancelActiveRunBeforeContextChange())) return
+    if (props.sharedVisitor && workspace.id !== UNASSIGNED_WORKSPACE_ID && props.workspaceRebinder) {
+      try {
+        await props.workspaceRebinder({ id: workspace.id, name: workspace.name })
+      } catch {
+        setWorkspacePersistenceFeedback("无法恢复已保存的访客工作区，请重新选择该目录后重试。")
+        return
+      }
+    }
     const latest = workspace.researches[0]
     setActiveWorkspaceID(workspace.id)
     setWorkspaceName(workspace.id === UNASSIGNED_WORKSPACE_ID ? undefined : workspace.name)
@@ -1366,7 +1400,7 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
       setResultExportable(latest?.resultExportable ?? false)
       setRunStatus(latest ? persistedRunStatus(latest.runStatus) : "idle")
       setRunID(latest?.runID)
-      if (latest?.runID && isPermissionMode(latest.permissionMode)) setPermissionMode(latest.permissionMode)
+      if (latest?.runID && isPermissionMode(latest.permissionMode)) setPermissionMode(permissionModeForSurface(latest.permissionMode))
       clearInteraction()
       setIsRunning(false)
     })
@@ -1636,6 +1670,10 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
       showSystemMessage(`/${slashDefinition.name} 当前不在 Core 可执行命令目录中，未发送请求。`, "warning")
       return
     }
+    if (props.sharedVisitor && mode() === "connected" && activeWorkspaceID() === UNASSIGNED_WORKSPACE_ID) {
+      promptForShareWorkspace()
+      return
+    }
     if (!runID()) await refreshSharedUiPreferences(false)
     setIsPreparingSubmission(true)
     try {
@@ -1899,6 +1937,31 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
     return `上下文状态：已用 ${used} / ${budget} tokens，剩余 ${remaining}，占用 ${percentage}；压缩状态：${compaction}；当前数据阶段：${stage}。`
   }
 
+  const writeClipboardText = async (text: string) => {
+    try {
+      if (typeof navigator.clipboard?.writeText === "function") {
+        await navigator.clipboard.writeText(text)
+        return
+      }
+    } catch {
+      // Insecure LAN origins do not expose the async Clipboard API; try the browser copy command.
+    }
+    const fallback = document.createElement("textarea")
+    fallback.value = text
+    fallback.setAttribute("readonly", "")
+    fallback.style.position = "fixed"
+    fallback.style.left = "-9999px"
+    document.body.append(fallback)
+    let copied = false
+    try {
+      fallback.select()
+      copied = document.execCommand?.("copy") === true
+    } finally {
+      fallback.remove()
+    }
+    if (!copied) throw new Error("Clipboard access is unavailable")
+  }
+
   const copyThread = async () => {
     const text = threadMessages().map((message) => {
       if (message.kind === "user") return `用户：${message.text}`
@@ -1911,10 +1974,10 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
       return
     }
     try {
-      await navigator.clipboard.writeText(text)
+      await writeClipboardText(text)
       showSystemMessage("当前会话内容已复制到剪贴板。")
     } catch {
-      showSystemMessage("复制会话内容失败，请检查桌面剪贴板权限。", "error")
+      showSystemMessage("复制会话内容失败，请检查应用或浏览器的剪贴板权限。", "error")
     }
   }
 
@@ -2364,7 +2427,9 @@ export default function App(props: { engine?: EngineClient; credentials?: Creden
           permissionLabel: permissionModeInfo(permissionMode()).label,
           permissionDescription: permissionModeInfo(permissionMode()).description,
           permissionLocked: Boolean(runID()),
-          permissionOptions: PERMISSION_MODES,
+          permissionOptions: props.sharedVisitor
+            ? PERMISSION_MODES.filter((option) => option.id !== "full_access")
+            : PERMISSION_MODES,
           onPermissionChange: (next) => { if (isPermissionMode(next)) selectPermissionMode(next) },
           model: providerDraft().model,
           modelName: modelDisplayName(providerDraft().model),

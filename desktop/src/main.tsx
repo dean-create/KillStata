@@ -138,21 +138,33 @@ const tauriParityFixture = shouldUseTauriParityFixture({
   flag: import.meta.env.VITE_KILLSTATA_TAURI_PARITY_FIXTURE,
 }) ? createTauriParityFixtureAdapters() : undefined
 const webWorkspaceContext = { id: UNASSIGNED_WORKSPACE_ID }
+const sharedCredentialFetch: typeof fetch = (input, init) => {
+  const headers = new Headers(init?.headers)
+  if (webWorkspaceContext.id !== UNASSIGNED_WORKSPACE_ID) {
+    headers.set("x-killstata-workspace-id", webWorkspaceContext.id)
+  }
+  return fetch(input, { ...init, headers })
+}
 const connectedWebEngine = isLocalWeb && engineURL
   ? new HttpEngineClient(engineURL, fetch, engineToken, undefined, engineProtocolVersion, () => webWorkspaceContext.id)
   : undefined
 const engine = tauriParityFixture?.engine ?? (isTauri ? tauriCoreEngine() : connectedWebEngine ?? createDemoEngine())
-const credentials = tauriParityFixture?.credentials ?? (isTauri ? tauriCredentials() : isSharedVisitor ? createSharedWebCredentialStore() : isLocalWeb ? createWebCredentialStore() : createDemoCredentialStore())
+const credentials = tauriParityFixture?.credentials ?? (isTauri ? tauriCredentials() : isSharedVisitor ? createSharedWebCredentialStore(sharedCredentialFetch) : isLocalWeb ? createWebCredentialStore() : createDemoCredentialStore())
 const runtimeDiagnostics = tauriParityFixture?.runtimeDiagnostics ?? (isTauri ? tauriRuntimeDiagnostics() : isLocalWeb && !isSharedVisitor ? createWebRuntimeDiagnostics(fetch, () => webWorkspaceContext.id) : createDemoRuntimeDiagnostics())
 const uiPreferences = tauriParityFixture?.uiPreferences ?? (isTauri ? tauriUiPreferences() : isLocalWeb && !isSharedVisitor ? createWebUiPreferencesStore() : undefined)
 const browserWorkspacePicker = isLocalWeb
   ? isSharedVisitor ? createBrowserSharedWorkspacePicker() : createBrowserWorkspacePicker()
   : undefined
+const rebindSharedWorkspace = isSharedVisitor && browserWorkspacePicker
+  ? async (workspace: { id: string; name: string }): Promise<void> => {
+      await browserWorkspacePicker.ensureWorkspace(workspace.id, workspace.name)
+    }
+  : undefined
 const workspaceStore = tauriParityFixture?.workspaceStore ?? (isTauri ? tauriWorkspaceStore() : createLocalWorkspaceStore())
 
 function renderApp(initialUiPreferences?: SharedUiPreferences, initialWorkspaceHistoryEnabled?: boolean) {
   render(
-    () => <App engine={engine} credentials={credentials} runtimeDiagnostics={runtimeDiagnostics} uiPreferences={uiPreferences} initialUiPreferences={initialUiPreferences} initialWorkspaceHistoryEnabled={initialWorkspaceHistoryEnabled} workspaceStore={workspaceStore} workspacePicker={isTauri ? selectTauriWorkspace : browserWorkspacePicker?.selectWorkspace} workspaceFilePicker={isTauri ? selectTauriWorkspaceFile : browserWorkspacePicker?.selectFile} workspaceContextChanged={isLocalWeb ? (id) => { webWorkspaceContext.id = id; connectedWebEngine?.refreshWorkspaceContext() } : undefined} mode={mode} connectionAvailable={isTauri || isLocalWeb} sharedVisitor={isSharedVisitor} requireApiKey={isTauri || isLocalWeb} />,
+    () => <App engine={engine} credentials={credentials} runtimeDiagnostics={runtimeDiagnostics} uiPreferences={uiPreferences} initialUiPreferences={initialUiPreferences} initialWorkspaceHistoryEnabled={initialWorkspaceHistoryEnabled} workspaceStore={workspaceStore} workspacePicker={isTauri ? selectTauriWorkspace : browserWorkspacePicker?.selectWorkspace} workspaceRebinder={rebindSharedWorkspace} workspaceFilePicker={isTauri ? selectTauriWorkspaceFile : browserWorkspacePicker?.selectFile} workspaceContextChanged={isLocalWeb ? (id) => { webWorkspaceContext.id = id; connectedWebEngine?.refreshWorkspaceContext() } : undefined} mode={mode} connectionAvailable={isTauri || isLocalWeb} sharedVisitor={isSharedVisitor} requireApiKey={isTauri || isLocalWeb} />,
     document.getElementById("root")!,
   )
 }

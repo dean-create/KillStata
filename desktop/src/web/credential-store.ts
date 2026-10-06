@@ -125,10 +125,34 @@ export function createWebCredentialStore(fetcher: WebCredentialFetch = fetch): C
 /** Share visitors can use the host's configured model, but cannot read or change its API Key. */
 export function createSharedWebCredentialStore(fetcher: WebCredentialFetch = fetch): CredentialStore {
   const store = createWebCredentialStore(fetcher)
+  const sharedStatus = async (): Promise<CredentialStatus> => {
+    const status = await store.getStatus!()
+    return {
+      configured: status.configured,
+      provider: status.provider,
+      model: status.model,
+      ...(status.configured ? { profileId: "shared-host-profile" } : {}),
+    }
+  }
   return {
-    hasApiKey: () => store.hasApiKey(),
-    getStatus: () => store.getStatus!(),
-    listProfiles: () => store.listProfiles!(),
+    hasApiKey: async () => (await sharedStatus()).configured,
+    getStatus: sharedStatus,
+    listProfiles: async () => {
+      const status = await sharedStatus()
+      if (!status.configured) return { profiles: [], defaultProfileId: null }
+      const profileId = status.profileId!
+      return {
+        profiles: [{
+          id: profileId,
+          displayName: "分享主机模型",
+          provider: status.provider,
+          model: status.model,
+          configured: true,
+          isDefault: true,
+        }],
+        defaultProfileId: profileId,
+      }
+    },
     prepareEngineForAnalysis: () => store.prepareEngineForAnalysis!(),
   }
 }

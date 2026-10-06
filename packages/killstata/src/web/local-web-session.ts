@@ -5,6 +5,7 @@ export const LOCAL_WEB_LAUNCH_TOKEN_LIFETIME_MS = 60_000
 export const LOCAL_WEB_SESSION_LIFETIME_SECONDS = 12 * 60 * 60
 export const LOCAL_WEB_SHARE_TOKEN_LIFETIME_MS = 60 * 60 * 1_000
 export const LOCAL_WEB_SHARE_SESSION_LIFETIME_SECONDS = 8 * 60 * 60
+const MAX_ACTIVE_SHARE_SESSIONS = 256
 
 type LocalWebSessionOptions = {
   share?: boolean
@@ -32,7 +33,9 @@ function cookieValues(header: string | null, name: string) {
   })
 }
 
-function sessionFromCookie(header: string | null, sessions: Map<string, { expiresAt: number; share: boolean }>) {
+type BrowserSession = { expiresAt: number; share: boolean; workspaces: Set<string>; runs: Map<string, string> }
+
+function sessionFromCookie(header: string | null, sessions: Map<string, BrowserSession>) {
   const values = cookieValues(header, LOCAL_WEB_COOKIE_NAME)
   if (values.length !== 1) return undefined
   for (const [token, session] of sessions) {
@@ -54,8 +57,22 @@ export function createLocalWebSession(options: LocalWebSessionOptions = {}) {
   const shareToken = share ? randomToken() : undefined
   const launchExpiresAt = now() + launchTokenLifetimeMs
   let launchTokenUsed = false
-  let shareSessionToken: string | undefined
-  const sessions = new Map<string, { expiresAt: number; share: boolean }>()
+  const sessions = new Map<string, BrowserSession>()
+
+  function pruneExpiredSessions() {
+    for (const [token, session] of sessions) {
+      if (now() >= session.expiresAt) sessions.delete(token)
+    }
+  }
+
+  function addSession(token: string, shared: boolean) {
+    sessions.set(token, {
+      expiresAt: now() + sessionLifetimeSeconds * 1_000,
+      share: shared,
+      workspaces: new Set(),
+      runs: new Map(),
+    })
+  }
 
   return {
     launchToken,
@@ -64,15 +81,17 @@ export function createLocalWebSession(options: LocalWebSessionOptions = {}) {
     exchangeLaunchToken(candidate: string, shared = false) {
       const expectedToken = shared ? shareToken : launchToken
       if (typeof candidate !== "string" || !expectedToken || now() >= launchExpiresAt || !equalSecret(candidate, expectedToken)) return undefined
+      pruneExpiredSessions()
       if (shared) {
-        shareSessionToken ??= randomToken()
-        sessions.set(shareSessionToken, { expiresAt: now() + sessionLifetimeSeconds * 1_000, share: true })
-        return shareSessionToken
+        if ([...sessions.values()].filter((session) => session.share).length >= MAX_ACTIVE_SHARE_SESSIONS) return undefined
+        const sessionToken = randomToken()
+        addSession(sessionToken, true)
+        return sessionToken
       }
       if (launchTokenUsed) return undefined
       launchTokenUsed = true
       const sessionToken = randomToken()
-      sessions.set(sessionToken, { expiresAt: now() + sessionLifetimeSeconds * 1_000, share: false })
+      addSession(sessionToken, false)
       return sessionToken
     },
 
@@ -84,6 +103,30 @@ export function createLocalWebSession(options: LocalWebSessionOptions = {}) {
     isShareCookieHeader(header: string | null) {
       const session = sessionFromCookie(header, sessions)
       return Boolean(session?.share && now() < session.expiresAt)
+    },
+
+    registerShareWorkspace(header: string | null, workspaceID: string) {
+      const session = sessionFromCookie(header, sessions)
+      if (!session?.share || now() >= session.expiresAt) return false
+      session.workspaces.add(workspaceID)
+      return true
+    },
+
+    hasShareWorkspace(header: string | null, workspaceID: string) {
+      const session = sessionFromCookie(header, sessions)
+      return Boolean(session?.share && now() < session.expiresAt && session.workspaces.has(workspaceID))
+    },
+
+    registerShareRun(header: string | null, workspaceID: string, runID: string) {
+      const session = sessionFromCookie(header, sessions)
+      if (!session?.share || now() >= session.expiresAt || !session.workspaces.has(workspaceID)) return false
+      session.runs.set(runID, workspaceID)
+      return true
+    },
+
+    hasShareRun(header: string | null, workspaceID: string, runID: string) {
+      const session = sessionFromCookie(header, sessions)
+      return Boolean(session?.share && now() < session.expiresAt && session.runs.get(runID) === workspaceID)
     },
 
     setCookieHeader(value: string) {

@@ -120,7 +120,7 @@ export function buildWebCommandOptions(yargs: Argv) {
       default: true,
     })
     .option("share", {
-      describe: "可信局域网访客可连接主机已配置的模型，但不能查看或修改主机凭据",
+      describe: "允许可信局域网访客使用主机模型和独立工作区；禁用完全访问授权",
       type: "boolean",
       default: false,
     })
@@ -170,7 +170,7 @@ export async function executeLocalWebCommand(
   try {
     dependencies.stdout(`KillStata Web: ${service.launchUrl}`)
     for (const url of service.shareUrls ?? []) dependencies.stdout(`局域网预览：${url}`)
-    if (share) dependencies.stderr("分享链接仅用于可信局域网；访客可连接主机已配置的模型，但不能查看或修改主机凭据。分析数据会在访客提交后传到主机。")
+    if (share) dependencies.stderr("分享链接使用未加密 HTTP，仅限可信局域网；访客可在独立工作区使用主机模型，完全访问档位已禁用。访客提交后，所选文件会上传到主机并可能消耗主机模型额度。")
     if (!options.noOpen) {
       try { await dependencies.openBrowser(service.launchUrl) }
       catch { dependencies.stderr("无法自动打开浏览器；请在本机浏览器中打开终端显示的启动链接。") }

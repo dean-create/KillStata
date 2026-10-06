@@ -2,8 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { permissionRuleset } from "../../../../desktop/src/session-policy"
 import { isAllowedWebClientAddress, isPrivateIPv4, isShareClientAddress, isShareApiRouteAllowed, privateIPv4Addresses, startLocalWebHost } from "../../src/web/local-web-host"
 import { createLocalWebUiPreferences } from "../../src/web/local-web-ui-preferences"
+import { createLocalWebWorkspaceRegistry } from "../../src/web/local-web-workspaces"
 
 type TestNetworkInterfaces = ReturnType<typeof os.networkInterfaces>
 
@@ -90,9 +92,10 @@ describe("local Web host", () => {
 
   test("lets share visitors use analysis with the host profile but blocks credential administration", () => {
     expect(isShareApiRouteAllowed("/api/v2/workspaces", "POST")).toBe(true)
-    expect(isShareApiRouteAllowed("/api/v2/workspaces/ensure", "POST")).toBe(false)
+    expect(isShareApiRouteAllowed("/api/v2/workspaces/ensure", "POST")).toBe(true)
+    expect(isShareApiRouteAllowed("/api/v2/workspaces/prepare", "POST")).toBe(true)
     expect(isShareApiRouteAllowed("/api/v2/workspaces", "GET")).toBe(false)
-    expect(isShareApiRouteAllowed("/api/v2/credentials/profiles", "GET")).toBe(true)
+    expect(isShareApiRouteAllowed("/api/v2/credentials/profiles", "GET")).toBe(false)
     expect(isShareApiRouteAllowed("/api/v2/credentials/status", "GET")).toBe(true)
     expect(isShareApiRouteAllowed("/api/v2/credentials/activate", "POST")).toBe(true)
     expect(isShareApiRouteAllowed("/api/v2/credentials/profiles", "POST")).toBe(false)
@@ -101,6 +104,8 @@ describe("local Web host", () => {
     expect(isShareApiRouteAllowed("/api/v2/health", "GET")).toBe(true)
     expect(isShareApiRouteAllowed("/api/v2/runs", "POST")).toBe(true)
     expect(isShareApiRouteAllowed("/api/v2/runs/run-1/events", "GET")).toBe(true)
+    expect(isShareApiRouteAllowed("/api/v2/runs/run-1/title", "PATCH")).toBe(true)
+    expect(isShareApiRouteAllowed("/api/v2/runs/run-1/title", "POST")).toBe(false)
     expect(isShareApiRouteAllowed("/api/v2/runs/%2e%2e/credentials/profiles", "GET")).toBe(false)
     expect(isShareApiRouteAllowed("/api/v2/runs/run-1/unknown", "POST")).toBe(false)
   })
@@ -122,12 +127,28 @@ describe("local Web host", () => {
 
   test("serves a share-token preview while denying credential and engine APIs", async () => {
     const apiCalls: Array<[string, string]> = []
+    let nextRunID = 0
     const shared = await start(async (request) => {
       const pathname = new URL(request.url).pathname
       apiCalls.push([pathname, request.method])
+      if (pathname === "/api/v2/workspaces" || pathname === "/api/v2/workspaces/ensure" || pathname === "/api/v2/workspaces/prepare") {
+        const body = await request.json().catch(() => ({})) as { name?: string }
+        return Response.json({ protocolVersion: "v2", id: "visitor-workspace-1", name: body.name ?? "visitor-study", accessToken: "visitor-capability-token-012345678901234567890123" })
+      }
       if (pathname === "/api/v2/credentials/profiles") {
         return Response.json({ profiles: [{ id: "host-default", provider: "deepseek", model: "deepseek/deepseek-v4-flash", configured: true, isDefault: true }], defaultProfileId: "host-default" })
       }
+      if (pathname === "/api/v2/credentials/status") {
+        return Response.json({
+          configured: true,
+          provider: "custom",
+          model: "custom/host-model",
+          profileId: "owner-private-profile-id",
+          baseURL: "https://internal-owner-endpoint.example/v1",
+          smallModel: "custom/private-small-model",
+        })
+      }
+      if (pathname === "/api/v2/runs") return Response.json({ protocolVersion: "v2", runId: `shared-run-${++nextRunID}` })
       return Response.json({ ok: true })
     }, {
       share: true,
@@ -142,18 +163,27 @@ describe("local Web host", () => {
     const first = await fetch(localShareLaunch, { redirect: "manual" })
     const firstCookie = first.headers.get("set-cookie")?.split(";")[0]
     const second = await fetch(localShareLaunch, { redirect: "manual" })
+    const secondCookie = second.headers.get("set-cookie")?.split(";")[0]
     expect(first.status).toBe(303)
     expect(first.headers.get("location")).toBe("/?share=1")
     expect(first.headers.get("set-cookie")).toContain("killstata_share=1")
     expect(second.status).toBe(303)
-    expect(second.headers.get("set-cookie")?.split(";")[0]).toBe(firstCookie)
+    expect(secondCookie).not.toBe(firstCookie)
 
-    const workspace = await fetch(new URL("/api/v2/workspaces", shared.url), {
+    const preparation = await fetch(new URL("/api/v2/workspaces/prepare", shared.url), {
       method: "POST",
       headers: { cookie: firstCookie!, origin: new URL(shared.url).origin, "content-type": "application/json" },
       body: JSON.stringify({ name: "visitor-study" }),
     })
-    const credentials = await fetch(new URL("/api/v2/credentials/profiles", shared.url), { headers: { cookie: firstCookie! } })
+    const preparedWorkspace = await preparation.json() as { id: string; name: string; accessToken: string }
+    const workspace = await fetch(new URL("/api/v2/workspaces", shared.url), {
+      method: "POST",
+      headers: { cookie: firstCookie!, origin: new URL(shared.url).origin, "content-type": "application/json" },
+      body: JSON.stringify(preparedWorkspace),
+    })
+    const visitorWorkspaceID = preparedWorkspace.id
+    const privateProfiles = await fetch(new URL("/api/v2/credentials/profiles", shared.url), { headers: { cookie: firstCookie! } })
+    const credentials = await fetch(new URL("/api/v2/credentials/status", shared.url), { headers: { cookie: firstCookie! } })
     const forbiddenCredentialMutation = await fetch(new URL("/api/v2/credentials/profiles", shared.url), {
       method: "POST",
       headers: { cookie: firstCookie!, origin: new URL(shared.url).origin, "content-type": "application/json" },
@@ -161,18 +191,45 @@ describe("local Web host", () => {
     })
     const activation = await fetch(new URL("/api/v2/credentials/activate", shared.url), {
       method: "POST",
-      headers: { cookie: firstCookie!, origin: new URL(shared.url).origin },
+      headers: { cookie: firstCookie!, origin: new URL(shared.url).origin, "x-killstata-workspace-id": visitorWorkspaceID },
     })
-    const engine = await fetch(new URL("/api/v2/health", shared.url), { headers: { cookie: firstCookie! } })
+    const missingWorkspaceEngine = await fetch(new URL("/api/v2/health", shared.url), { headers: { cookie: firstCookie! } })
+    const engine = await fetch(new URL("/api/v2/health", shared.url), {
+      headers: { cookie: firstCookie!, "x-killstata-workspace-id": visitorWorkspaceID },
+    })
+    const otherVisitorWorkspaceEngine = await fetch(new URL("/api/v2/health", shared.url), {
+      headers: { cookie: secondCookie!, "x-killstata-workspace-id": visitorWorkspaceID },
+    })
+    const reclaimedWorkspace = await fetch(new URL("/api/v2/workspaces/ensure", shared.url), {
+      method: "POST",
+      headers: { cookie: secondCookie!, origin: new URL(shared.url).origin, "content-type": "application/json" },
+      body: JSON.stringify({ id: visitorWorkspaceID, name: "visitor-study" }),
+    })
+    const capabilityRebind = await fetch(new URL("/api/v2/workspaces/ensure", shared.url), {
+      method: "POST",
+      headers: { cookie: secondCookie!, origin: new URL(shared.url).origin, "content-type": "application/json" },
+      body: JSON.stringify({ id: visitorWorkspaceID, name: "visitor-study", accessToken: "visitor-capability-token-012345678901234567890123" }),
+    })
+    const reclaimedHealth = await fetch(new URL("/api/v2/health", shared.url), {
+      headers: { cookie: secondCookie!, "x-killstata-workspace-id": visitorWorkspaceID },
+    })
     const workspaceList = await fetch(new URL("/api/v2/workspaces", shared.url), { headers: { cookie: firstCookie! } })
     const runtime = await fetch(new URL("/api/v2/runtime", shared.url), { headers: { cookie: firstCookie! } })
 
+    expect(preparation.status).toBe(200)
     expect(workspace.status).toBe(200)
+    expect(privateProfiles.status).toBe(404)
     expect(credentials.status).toBe(200)
-    expect(await credentials.json()).not.toHaveProperty("apiKey")
+    const sharedModelStatus = await credentials.json()
+    expect(sharedModelStatus).toEqual({ configured: true, provider: "custom", model: "custom/host-model" })
     expect(forbiddenCredentialMutation.status).toBe(404)
     expect(activation.status).toBe(200)
+    expect(missingWorkspaceEngine.status).toBe(403)
     expect(engine.status).toBe(200)
+    expect(otherVisitorWorkspaceEngine.status).toBe(403)
+    expect(reclaimedWorkspace.status).toBe(403)
+    expect(capabilityRebind.status).toBe(200)
+    expect(reclaimedHealth.status).toBe(200)
     expect(workspaceList.status).toBe(404)
     expect(runtime.status).toBe(404)
 
@@ -182,10 +239,205 @@ describe("local Web host", () => {
       headers: { cookie: owner.cookie!, origin: new URL(shared.url).origin },
     })
     expect(ownerHealth.status).toBe(200)
+    expect(apiCalls).toContainEqual(["/api/v2/workspaces/prepare", "POST"])
     expect(apiCalls).toContainEqual(["/api/v2/workspaces", "POST"])
-    expect(apiCalls).toContainEqual(["/api/v2/credentials/profiles", "GET"])
+    expect(apiCalls).toContainEqual(["/api/v2/credentials/status", "GET"])
+    expect(apiCalls).not.toContainEqual(["/api/v2/credentials/profiles", "GET"])
     expect(apiCalls).toContainEqual(["/api/v2/credentials/activate", "POST"])
     expect(apiCalls).toContainEqual(["/api/v2/health", "GET"])
+  })
+
+  test("uses the prepared bearer capability across share sessions and ignores visitor role headers", async () => {
+    temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "killstata-web-share-registry-"))
+    const assets = path.join(temporaryRoot, "dist")
+    await mkdir(assets, { recursive: true })
+    await writeFile(path.join(assets, "index.html"), "preview")
+    const registry = createLocalWebWorkspaceRegistry({ dataDirectory: path.join(temporaryRoot, "data") })
+    const shared = await startLocalWebHost({
+      assetsDirectory: assets,
+      api: async (request) => await registry.handle(request) ?? Response.json({ ok: true }),
+      port: 0,
+      share: true,
+      networkInterfaces: () => ({
+        en0: [{ address: "192.168.1.12", netmask: "255.255.255.0", family: "IPv4", mac: "", internal: false, cidr: "192.168.1.12/24" }],
+      }),
+    })
+    host = shared
+    const shareURL = new URL(shared.url)
+    shareURL.searchParams.set("share", "1")
+    shareURL.searchParams.set("token", new URL(shared.shareUrls![0]!).searchParams.get("token")!)
+    const exchangeShareLink = async () => {
+      const response = await fetch(shareURL, { redirect: "manual" })
+      expect(response.status).toBe(303)
+      return response.headers.get("set-cookie")?.split(";")[0]!
+    }
+    const firstCookie = await exchangeShareLink()
+    const secondCookie = await exchangeShareLink()
+    const origin = new URL(shared.url).origin
+    const prepareResponse = await fetch(new URL("/api/v2/workspaces/prepare", shared.url), {
+      method: "POST",
+      headers: { cookie: firstCookie, origin, "content-type": "application/json" },
+      body: JSON.stringify({ name: "visitor-study" }),
+    })
+    const preparedResponseBody = await prepareResponse.json() as { id: string; name: string; accessToken: string }
+    const prepared = { id: preparedResponseBody.id, name: preparedResponseBody.name, accessToken: preparedResponseBody.accessToken }
+    const registryAfterPrepare = await registry.list()
+    const wrongCapability = `${prepared.accessToken[0] === "A" ? "B" : "A"}${prepared.accessToken.slice(1)}`
+    const forgedFinalize = await fetch(new URL("/api/v2/workspaces", shared.url), {
+      method: "POST",
+      headers: { cookie: secondCookie, origin, "content-type": "application/json", "x-killstata-workspace-role": "owner" },
+      body: JSON.stringify({ ...prepared, accessToken: wrongCapability }),
+    })
+    const registryAfterOtherSession = await registry.list()
+    const createdResponse = await fetch(new URL("/api/v2/workspaces/ensure", shared.url), {
+      method: "POST",
+      headers: { cookie: secondCookie, origin, "content-type": "application/json", "x-killstata-workspace-role": "owner" },
+      body: JSON.stringify(prepared),
+    })
+    const created = await createdResponse.json() as { id: string; name: string; accessToken: string }
+    const ensureURL = new URL("/api/v2/workspaces/ensure", shared.url)
+    const validRebind = await fetch(ensureURL, {
+      method: "POST",
+      headers: { cookie: firstCookie, origin, "content-type": "application/json" },
+      body: JSON.stringify({ id: created.id, name: created.name, accessToken: created.accessToken }),
+    })
+    const visitorHealth = await fetch(new URL("/api/v2/health", shared.url), {
+      headers: { cookie: firstCookie, "x-killstata-workspace-id": created.id },
+    })
+
+    expect(prepareResponse.status).toBe(200)
+    expect(registryAfterPrepare).toEqual([])
+    expect(forgedFinalize.status).toBe(403)
+    expect(registryAfterOtherSession).toEqual([])
+    expect(createdResponse.status).toBe(200)
+    expect(created.accessToken).toMatch(/^[A-Za-z0-9_-]{40,64}$/)
+    expect(created).toMatchObject(prepared)
+    expect(validRebind.status).toBe(200)
+    expect((await validRebind.json()).accessToken).toBe(created.accessToken)
+    expect(visitorHealth.status).toBe(200)
+  })
+
+  test("accepts only built-in session permission profiles from shared visitors", async () => {
+    const apiCalls: Request[] = []
+    let nextRunID = 0
+    const shared = await start(async (request) => {
+      const pathname = new URL(request.url).pathname
+      if (pathname === "/api/v2/workspaces" || pathname === "/api/v2/workspaces/ensure" || pathname === "/api/v2/workspaces/prepare") {
+        return Response.json({ protocolVersion: "v2", id: "visitor-workspace", name: "visitor-study", accessToken: "visitor-capability-token-012345678901234567890123" })
+      }
+      if (pathname === "/api/v2/credentials/status") {
+        apiCalls.push(request)
+        return Response.json({ configured: true, provider: "custom", model: "custom/host-model" })
+      }
+      apiCalls.push(request)
+      if (pathname === "/api/v2/runs") return Response.json({ protocolVersion: "v2", runId: `shared-run-${++nextRunID}` })
+      return Response.json({ ok: true })
+    }, {
+      share: true,
+      networkInterfaces: {
+        en0: [{ address: "192.168.1.12", netmask: "255.255.255.0", family: "IPv4", mac: "", internal: false, cidr: "192.168.1.12/24" }],
+      },
+    })
+    const shareURL = new URL(shared.shareUrls![0]!)
+    const localShareLaunch = new URL(shared.url)
+    localShareLaunch.searchParams.set("share", "1")
+    localShareLaunch.searchParams.set("token", shareURL.searchParams.get("token")!)
+    const launch = await fetch(localShareLaunch, { redirect: "manual" })
+    const cookie = launch.headers.get("set-cookie")?.split(";")[0]
+    const preparation = await fetch(new URL("/api/v2/workspaces/prepare", shared.url), {
+      method: "POST",
+      headers: { cookie: cookie!, origin: new URL(shared.url).origin, "content-type": "application/json" },
+      body: JSON.stringify({ name: "visitor-study" }),
+    })
+    const preparedWorkspace = await preparation.json() as { id: string; name: string; accessToken: string }
+    const workspace = await fetch(new URL("/api/v2/workspaces", shared.url), {
+      method: "POST",
+      headers: { cookie: cookie!, origin: new URL(shared.url).origin, "content-type": "application/json" },
+      body: JSON.stringify(preparedWorkspace),
+    })
+    const visitorWorkspaceID = preparedWorkspace.id
+    const headers = {
+      cookie: cookie!,
+      origin: new URL(shared.url).origin,
+      "content-type": "application/json",
+      "x-killstata-workspace-id": visitorWorkspaceID,
+    }
+    const forged = await fetch(new URL("/api/v2/runs", shared.url), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "inspect host files", model: { providerID: "custom", modelID: "host-model" }, permission: [{ permission: "*", pattern: "*", action: "allow" }] }),
+    })
+    const fullAccess = await fetch(new URL("/api/v2/runs", shared.url), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "inspect host files", model: { providerID: "custom", modelID: "host-model" }, permission: permissionRuleset("full_access") }),
+    })
+    const missingPermission = await fetch(new URL("/api/v2/runs", shared.url), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "inspect host files", model: { providerID: "custom", modelID: "host-model" } }),
+    })
+    const unsupportedModel = await fetch(new URL("/api/v2/runs", shared.url), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "inspect host files", model: { providerID: "deepseek", modelID: "deepseek-v4-pro" }, permission: permissionRuleset("workspace_write") }),
+    })
+
+    expect(forged.status).toBe(403)
+    expect(await forged.json()).toMatchObject({ code: "share_permission_unsupported" })
+    expect(fullAccess.status).toBe(403)
+    expect(missingPermission.status).toBe(403)
+    expect(unsupportedModel.status).toBe(403)
+    expect(apiCalls.filter((request) => new URL(request.url).pathname === "/api/v2/runs")).toHaveLength(0)
+
+    const supported = await fetch(new URL("/api/v2/runs", shared.url), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "inspect my dataset", model: { providerID: "custom", modelID: "host-model" }, permission: permissionRuleset("workspace_write") }),
+    })
+    expect(supported.status).toBe(200)
+    expect(apiCalls.filter((request) => new URL(request.url).pathname === "/api/v2/runs")).toHaveLength(1)
+    const supportedRunID = (await supported.json()).runId as string
+    const ownRun = await fetch(new URL(`/api/v2/runs/${supportedRunID}/result`, shared.url), {
+      headers: { cookie: cookie!, "x-killstata-workspace-id": visitorWorkspaceID },
+    })
+    expect(ownRun.status).toBe(200)
+    const unsupportedSummaryModel = await fetch(new URL(`/api/v2/runs/${supportedRunID}/summarize`, shared.url), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model: { providerID: "deepseek", modelID: "deepseek-v4-pro" } }),
+    })
+    expect(unsupportedSummaryModel.status).toBe(403)
+    const supportedSummaryModel = await fetch(new URL(`/api/v2/runs/${supportedRunID}/summarize`, shared.url), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model: { providerID: "custom", modelID: "host-model" } }),
+    })
+    expect(supportedSummaryModel.status).toBe(200)
+
+    const readOnly = await fetch(new URL("/api/v2/runs", shared.url), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "inspect my dataset", model: { providerID: "custom", modelID: "host-model" }, permission: permissionRuleset("read_only") }),
+    })
+    expect(readOnly.status).toBe(200)
+    expect(apiCalls.filter((request) => new URL(request.url).pathname === "/api/v2/runs")).toHaveLength(2)
+    const secondLaunch = await fetch(localShareLaunch, { redirect: "manual" })
+    const secondCookie = secondLaunch.headers.get("set-cookie")?.split(";")[0]
+    const otherVisitorRun = await fetch(new URL(`/api/v2/runs/${supportedRunID}/result`, shared.url), {
+      headers: { cookie: secondCookie!, "x-killstata-workspace-id": visitorWorkspaceID },
+    })
+    expect(otherVisitorRun.status).toBe(403)
+    const reclaim = await fetch(new URL("/api/v2/workspaces/ensure", shared.url), {
+      method: "POST",
+      headers: { cookie: secondCookie!, origin: new URL(shared.url).origin, "content-type": "application/json" },
+      body: JSON.stringify({ id: visitorWorkspaceID, name: "visitor-study", accessToken: "visitor-capability-token-012345678901234567890123" }),
+    })
+    expect(reclaim.status).toBe(200)
+    const staleRun = await fetch(new URL(`/api/v2/runs/${supportedRunID}/result`, shared.url), {
+      headers: { cookie: secondCookie!, "x-killstata-workspace-id": visitorWorkspaceID },
+    })
+    expect(staleRun.status).toBe(404)
   })
 
   test("reports a concise port-in-use error for a second Web listener", async () => {

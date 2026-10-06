@@ -41,19 +41,30 @@ describe("local Web browser session", () => {
     expect(session.exchangeLaunchToken(session.launchToken)).toBeUndefined()
   })
 
-  test("allows a share token to establish multiple bounded browser sessions", () => {
+  test("creates isolated bounded sessions for each share-token exchange", () => {
     let now = 10_000
     const session = createLocalWebSession({ share: true, now: () => now })
     const firstCookie = session.exchangeLaunchToken(session.shareToken!, true)
     const secondCookie = session.exchangeLaunchToken(session.shareToken!, true)
 
     expect(firstCookie).toBeTruthy()
-    expect(secondCookie).toBe(firstCookie)
+    expect(secondCookie).toBeTruthy()
+    expect(secondCookie).not.toBe(firstCookie)
     expect(session.setCookieHeader(firstCookie!)).toContain("Max-Age=28800")
-    expect(session.exchangeLaunchToken(session.shareToken!, true)).toBe(firstCookie)
+    const firstHeader = `killstata_web=${firstCookie}`
+    const secondHeader = `killstata_web=${secondCookie}`
+    expect(session.isShareCookieHeader(firstHeader)).toBe(true)
+    expect(session.isShareCookieHeader(secondHeader)).toBe(true)
+    expect(session.registerShareWorkspace(firstHeader, "visitor-workspace-a")).toBe(true)
+    expect(session.hasShareWorkspace(firstHeader, "visitor-workspace-a")).toBe(true)
+    expect(session.hasShareWorkspace(secondHeader, "visitor-workspace-a")).toBe(false)
+    expect(session.registerShareRun(firstHeader, "visitor-workspace-a", "run-a")).toBe(true)
+    expect(session.hasShareRun(firstHeader, "visitor-workspace-a", "run-a")).toBe(true)
+    expect(session.hasShareRun(secondHeader, "visitor-workspace-a", "run-a")).toBe(false)
 
     now += 60 * 60 * 1_000 + 1
     expect(session.exchangeLaunchToken(session.shareToken!, true)).toBeUndefined()
-    expect(session.authenticateCookieHeader(`killstata_web=${firstCookie}`)).toBe(true)
+    expect(session.authenticateCookieHeader(firstHeader)).toBe(true)
   })
+
 })

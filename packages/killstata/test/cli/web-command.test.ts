@@ -32,8 +32,8 @@ describe("killstata web command", () => {
   test("describes LAN sharing as access to the host-configured model without credential access", async () => {
     const help = await buildWebCommandOptions(yargs([]).help()).getHelp()
 
-    expect(help).toContain("访客可连接主机已配置的模型")
-    expect(help).toContain("不能查看或修改主机凭据")
+    expect(help).toContain("可信局域网访客使用主机模型")
+    expect(help).toContain("禁用完全访问授权")
     expect(help).not.toContain("不开放分析核心")
   })
 
@@ -78,7 +78,9 @@ describe("killstata web command", () => {
     expect(calls).toEqual(["start:3080:true", "shutdown", "stop"])
     expect(stdout).toContain("局域网预览：http://192.168.1.12:3080/?share=1&token=share")
     expect(dependencies.stderr.mock.calls.flat().join(" ")).toContain("可信局域网")
-    expect(dependencies.stderr.mock.calls.flat().join(" ")).toContain("可连接主机已配置的模型")
+    expect(dependencies.stderr.mock.calls.flat().join(" ")).toContain("未加密 HTTP")
+    expect(dependencies.stderr.mock.calls.flat().join(" ")).toContain("完全访问档位已禁用")
+    expect(dependencies.stderr.mock.calls.flat().join(" ")).toContain("主机模型额度")
     expect(dependencies.stderr.mock.calls.flat().join(" ")).not.toContain("不能连接分析核心")
   })
 
@@ -207,4 +209,5 @@ describe("killstata web command", () => {
 
     expect(order).toEqual(["host", "api", "core"])
   })
+
 })

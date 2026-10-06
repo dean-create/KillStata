@@ -310,12 +310,98 @@ describe("KillStata Desktop Codex-style conversation UI", () => {
     await user.click(screen.getByRole("button", { name: "设置" }))
     await user.click(screen.getByRole("button", { name: "连接分析核心" }))
 
-    expect(screen.getByText("请先选择一个工作区。连接后，访客提交的文件会上传到主机，并保存在此工作区中。"))
+    expect(screen.getByText("请先选择一个工作区，才能提交分析。访客提交的文件会上传到主机，并保存在此工作区中。"))
     expect(hasApiKey).not.toHaveBeenCalled()
     expect(health).not.toHaveBeenCalled()
     await user.click(screen.getByRole("button", { name: "选择本地工作区" }))
     await waitFor(() => expect(workspacePicker).toHaveBeenCalledOnce())
     await waitFor(() => expect(screen.getByRole("status", { name: "分析核心就绪" })).toBeTruthy())
+  })
+
+  test("rebinds a restored visitor workspace before connecting to a new share session", async () => {
+    const user = userEvent.setup()
+    const sequence: string[] = []
+    const store = createMemoryWorkspaceStore({
+      version: 1,
+      activeWorkspaceID: "saved-visitor-workspace",
+      workspaces: [
+        { id: "saved-visitor-workspace", name: "saved-study", lastOpenedAt: 1, researches: [] },
+        { id: "__unassigned__", name: "未归档研究", lastOpenedAt: 0, researches: [] },
+      ],
+    })
+    await store.setEnabled?.(true)
+    const health = vi.fn(async () => {
+      sequence.push("health")
+      return { protocolVersion: "v1" as const, engineVersion: "host", status: "ready" as const }
+    })
+    render(() => <App
+      engine={createMockEngine({ health })}
+      credentials={createMockCredentials({ hasApiKey: async () => true })}
+      workspaceStore={store}
+      workspaceRebinder={async ({ id, name }) => { sequence.push(`rebind:${id}:${name}`) }}
+      mode="frontend"
+      connectionAvailable
+      sharedVisitor
+      requireApiKey
+    />)
+
+    await waitFor(() => expect(sequence).toContain("rebind:saved-visitor-workspace:saved-study"))
+    await user.click(screen.getByRole("button", { name: "设置" }))
+    await user.click(screen.getByRole("button", { name: "连接分析核心" }))
+    await waitFor(() => expect(screen.getByRole("status", { name: "分析核心就绪" })).toBeTruthy())
+    expect(sequence.indexOf("rebind:saved-visitor-workspace:saved-study")).toBeLessThan(sequence.indexOf("health"))
+  })
+
+  test("shows when a share visitor cannot persist the workspace capability", async () => {
+    const user = userEvent.setup()
+    const workspacePicker = vi.fn(async () => {
+      throw new Error("此浏览器无法保存分享工作区凭据。请允许此站点使用存储空间后重新选择工作区。")
+    })
+    render(() => <App workspacePicker={workspacePicker} mode="frontend" connectionAvailable sharedVisitor requireApiKey />)
+
+    await user.click(screen.getByRole("button", { name: "打开工作区" }))
+    await user.click(screen.getByRole("button", { name: "选择本地工作区" }))
+
+    await waitFor(() => expect(screen.getByText(/此浏览器无法保存分享工作区凭据/)).toBeTruthy())
+    expect(workspacePicker).toHaveBeenCalledOnce()
+  })
+
+  test("asks a connected share visitor to select a workspace before sending after clearing it", async () => {
+    const user = userEvent.setup()
+    const hasApiKey = vi.fn(async () => true)
+    const prepareEngineForAnalysis = vi.fn(async () => {})
+    const startRun = vi.fn(async () => ({ runId: "must-not-start" }))
+    const store = createMemoryWorkspaceStore({
+      version: 1,
+      activeWorkspaceID: "visitor-workspace-4",
+      workspaces: [
+        { id: "visitor-workspace-4", name: "visitor-study", lastOpenedAt: 1, researches: [] },
+        { id: "__unassigned__", name: "未归档研究", lastOpenedAt: 0, researches: [] },
+      ],
+    })
+    await store.setEnabled?.(true)
+    render(() => <App
+      engine={createMockEngine({ startRun })}
+      credentials={createMockCredentials({ hasApiKey, prepareEngineForAnalysis })}
+      workspaceStore={store}
+      workspaceRebinder={async () => {}}
+      mode="connected"
+      connectionAvailable
+      sharedVisitor
+      requireApiKey
+    />)
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "打开工作区" })).toBeTruthy())
+    await user.click(screen.getByRole("button", { name: "打开工作区" }))
+    await user.click(screen.getByRole("button", { name: "清除本地工作区" }))
+    await user.click(screen.getByRole("button", { name: "关闭工作区" }))
+    await typeAndSend("继续我的分析")
+
+    expect(hasApiKey).not.toHaveBeenCalled()
+    expect(prepareEngineForAnalysis).not.toHaveBeenCalled()
+    expect(startRun).not.toHaveBeenCalled()
+    expect(screen.getByRole("status", { name: "连接提示" }).textContent).toContain("请先选择一个工作区，才能提交分析。")
+    expect(screen.getByRole("dialog", { name: "研究工作区" })).toBeTruthy()
   })
 
   test("connects a shared visitor to the host profile and uploads data only on submit", async () => {
@@ -342,6 +428,7 @@ describe("KillStata Desktop Codex-style conversation UI", () => {
       connectionAvailable
       sharedVisitor
       requireApiKey
+      initialUiPreferences={{ permissionMode: "full_access" }}
     />)
 
     await user.click(screen.getByRole("button", { name: "选择本地工作区" }))
@@ -355,6 +442,10 @@ describe("KillStata Desktop Codex-style conversation UI", () => {
     await user.click(screen.getByRole("button", { name: "连接分析核心" }))
     await waitFor(() => expect(screen.getByRole("status", { name: "分析核心就绪" })).toBeTruthy())
     expect(screen.queryByRole("dialog", { name: "设置" })).toBeNull()
+    const permissionButton = screen.getByRole("button", { name: "工具授权：工作区读写" })
+    await user.click(permissionButton)
+    expect(screen.queryByRole("option", { name: /完全访问/ })).toBeNull()
+    expect(screen.getByRole("option", { name: /只读分析/ })).toBeTruthy()
     expect(prepareEngineForAnalysis).toHaveBeenCalledOnce()
     expect(uploadDataset).not.toHaveBeenCalled()
     expect(screen.getByRole("status", { name: "分享分析数据说明" })).toBeTruthy()
@@ -2578,6 +2669,29 @@ describe("KillStata Desktop Codex-style conversation UI", () => {
     expect(unrevert).toHaveBeenCalledWith("run-commands")
     expect(writeText).toHaveBeenCalled()
     expect(screen.getByText(/推理等级已设为 high/)).toBeTruthy()
+  })
+
+  test("copies a conversation through the browser fallback when secure Clipboard API is unavailable", async () => {
+    const user = userEvent.setup()
+    const writeText = vi.fn(async () => { throw new Error("clipboard requires a secure context") })
+    const execCommand = vi.fn(() => true)
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand })
+    const subscribe = vi.fn((_runID: string, listener: (event: EngineRunEvent) => void) => {
+      queueMicrotask(() => listener({ type: "assistant_delta", text: "一份可复制的回答" }))
+      queueMicrotask(() => listener({ type: "completed", message: "分析已完成。" }))
+      return () => {}
+    })
+    render(() => <App mode="connected" engine={createMockEngine({ startRun: async () => ({ runId: "run-copy-fallback" }), subscribe })} />)
+
+    await user.type(screen.getByRole("textbox"), "保留这段研究问题")
+    await user.click(screen.getByRole("button", { name: "发送" }))
+    await waitFor(() => expect(screen.getByText("一份可复制的回答")).toBeTruthy())
+    await user.type(screen.getByRole("textbox"), "/copy")
+    await user.click(screen.getByRole("button", { name: "发送" }))
+
+    await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"))
+    expect(screen.getByText("当前会话内容已复制到剪贴板。")).toBeTruthy()
   })
 
   test("/undo hides the reverted turn and /redo restores it in the conversation", async () => {

@@ -41,18 +41,42 @@ describe("Web credential store", () => {
     expect(calls[0]![1]?.credentials).toBe("same-origin")
   })
 
-  test("gives shared visitors read-only model status and activation without credential mutation APIs", async () => {
+  test("shows shared visitors only the active host model, not saved profile metadata", async () => {
     const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = []
     const fetcher: typeof fetch = async (input, init) => {
       calls.push([input, init])
-      if (String(input).endsWith("/profiles")) {
-        return Response.json({ profiles: [{ id: "host-default", provider: "deepseek", model: "deepseek/deepseek-v4-flash", configured: true, isDefault: true }], defaultProfileId: "host-default" })
+      if (String(input).endsWith("/status")) {
+        return Response.json({
+          configured: true,
+          provider: "custom",
+          model: "custom/host-model",
+          profileId: "owner-private-profile-id",
+          baseURL: "https://internal-owner-endpoint.example/v1",
+          smallModel: "custom/private-small-model",
+        })
       }
       return Response.json({ activated: true })
     }
     const store = createSharedWebCredentialStore(fetcher)
 
     await expect(store.hasApiKey()).resolves.toBe(true)
+    await expect(store.getStatus?.()).resolves.toEqual({
+      configured: true,
+      provider: "custom",
+      model: "custom/host-model",
+      profileId: "shared-host-profile",
+    })
+    await expect(store.listProfiles?.()).resolves.toEqual({
+      profiles: [{
+        id: "shared-host-profile",
+        displayName: "分享主机模型",
+        provider: "custom",
+        model: "custom/host-model",
+        configured: true,
+        isDefault: true,
+      }],
+      defaultProfileId: "shared-host-profile",
+    })
     await store.prepareEngineForAnalysis?.()
 
     expect(store.saveProfile).toBeUndefined()
@@ -60,7 +84,9 @@ describe("Web credential store", () => {
     expect(store.deleteProfile).toBeUndefined()
     expect(store.discoverModels).toBeUndefined()
     expect(calls.map(([input, init]) => [String(input), init?.method ?? "GET"])).toEqual([
-      ["/api/v2/credentials/profiles", "GET"],
+      ["/api/v2/credentials/status", "GET"],
+      ["/api/v2/credentials/status", "GET"],
+      ["/api/v2/credentials/status", "GET"],
       ["/api/v2/credentials/activate", "POST"],
     ])
   })

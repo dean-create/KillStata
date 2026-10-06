@@ -51,7 +51,9 @@ To let people on the same trusted private network use the host's configured anal
 killstata web --share
 ```
 
-Share the private-LAN link printed in the terminal; its token can be exchanged for one hour. Visitors use their own browser file picker and separate workspace ID. They can connect to the host's configured analysis core, but cannot view or change its API Key or model profiles. A selected file is uploaded to the host only after the visitor explicitly connects and submits an analysis. The default `killstata web` command remains available at `127.0.0.1:3080` only.
+Share the private-LAN link printed in the terminal; its token can be exchanged for one hour. Visitors use their own browser file picker and must select a managed visitor workspace before any analysis Core request is accepted. Shared visitors can use read-only or workspace-write permissions, but cannot use Full Access or submit custom permission rules. They can use the host's configured model without seeing saved profile details or credentials. A selected file is uploaded to the host only after the visitor explicitly connects and submits an analysis, and may consume the host's model quota.
+
+LAN sharing uses unencrypted HTTP. Share the link only with trusted people on a private network; anyone who obtains it can submit analysis requests to the host. The default `killstata web` command remains available at `127.0.0.1:3080` only.
 
 For remote access over SSH, forward the local port (`ssh -L 3080:127.0.0.1:3080 user@host`), run `killstata web --no-open` on the host, and open the printed local launch link through the tunnel.
 

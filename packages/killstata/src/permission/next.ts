@@ -198,7 +198,9 @@ export namespace PermissionNext {
         if (rule.action === "deny")
           throw new DeniedError(ruleset.filter((r) => Wildcard.match(request.permission, r.permission)))
         const safeAction = safetyActionFor(request.permission, pattern, request.metadata)
-        if (rule.action === "ask" || (rule.action === "allow" && safeAction === "ask")) {
+        const executionPolicyRequiresApproval = request.permission === "bash"
+          && (request.metadata.execPolicyDecision as { action?: unknown } | undefined)?.action === "ask"
+        if (rule.action === "ask" || executionPolicyRequiresApproval || (rule.action === "allow" && safeAction === "ask")) {
           const id = input.id ?? Identifier.ascending("permission")
           return new Promise<void>((resolve, reject) => {
             const info: Request = {

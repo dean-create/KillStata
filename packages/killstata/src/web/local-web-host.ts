@@ -69,14 +69,113 @@ export function isAllowedWebClientAddress(address: string | undefined, share: bo
 }
 
 export function isShareApiRouteAllowed(pathname: string, method: string) {
-  if (pathname === "/api/v2/workspaces") return method === "POST"
-  if (pathname === "/api/v2/credentials/profiles" || pathname === "/api/v2/credentials/status") return method === "GET"
+  if (pathname === "/api/v2/workspaces" || pathname === "/api/v2/workspaces/ensure"
+    || pathname === "/api/v2/workspaces/prepare") return method === "POST"
+  if (pathname === "/api/v2/credentials/status") return method === "GET"
   if (pathname === "/api/v2/credentials/activate") return method === "POST"
   if (pathname === "/api/v2/health" || pathname === "/api/v2/commands") return method === "GET"
   if (pathname === "/api/v2/datasets" || pathname === "/api/v2/runs") return method === "POST"
   if (pathname === "/api/v2/verification/events") return method === "GET"
-  const runRoute = /^\/api\/v2\/runs\/[A-Za-z0-9_-]{1,128}\/(?:result|events|cancel|interactions\/[A-Za-z0-9_-]{1,128}\/(?:answer|deny)|context|summarize|title|revert|undo|redo)$/
-  return runRoute.test(pathname) && (method === "GET" || method === "POST")
+  if (/^\/api\/v2\/runs\/[A-Za-z0-9_-]{1,128}\/(?:result|events|context)$/.test(pathname)) return method === "GET"
+  if (/^\/api\/v2\/runs\/[A-Za-z0-9_-]{1,128}\/title$/.test(pathname)) return method === "PATCH"
+  const mutatingRunRoute = /^\/api\/v2\/runs\/[A-Za-z0-9_-]{1,128}\/(?:cancel|interactions\/[A-Za-z0-9_-]{1,128}\/(?:answer|deny)|summarize|revert|undo|redo)$/
+  return mutatingRunRoute.test(pathname) && method === "POST"
+}
+
+type SharePermissionAction = "allow" | "deny" | "ask"
+type SharePermissionRule = { permission: string; pattern: string; action: SharePermissionAction }
+
+const sharedPermissionRules = (edit: SharePermissionAction, bash: SharePermissionAction): SharePermissionRule[] => {
+  const rule = (permission: string, action: SharePermissionAction): SharePermissionRule => ({ permission, pattern: "*", action })
+  return [
+    rule("read", "allow"),
+    rule("glob", "allow"),
+    rule("grep", "allow"),
+    rule("list", "allow"),
+    rule("todoread", "allow"),
+    rule("todowrite", "allow"),
+    rule("question", "allow"),
+    rule("edit", edit),
+    rule("write", edit),
+    rule("patch", edit),
+    rule("bash", bash),
+    rule("task", "deny"),
+    rule("webfetch", "deny"),
+    rule("websearch", "deny"),
+    rule("external_directory", "deny"),
+  ]
+}
+
+const SHARE_PERMISSION_RULESETS = [
+  sharedPermissionRules("ask", "ask"), // read_only
+  sharedPermissionRules("allow", "ask"), // workspace_write
+]
+
+function isSupportedSharePermissionRuleset(value: unknown) {
+  if (!Array.isArray(value)) return false
+  return SHARE_PERMISSION_RULESETS.some((ruleset) => value.length === ruleset.length && ruleset.every((expected, index) => {
+    const actual = value[index]
+    return actual && typeof actual === "object" && !Array.isArray(actual)
+      && (actual as Record<string, unknown>).permission === expected.permission
+      && (actual as Record<string, unknown>).pattern === expected.pattern
+      && (actual as Record<string, unknown>).action === expected.action
+  }))
+}
+
+function isShareWorkspaceCreation(pathname: string, method: string) {
+  return (pathname === "/api/v2/workspaces" || pathname === "/api/v2/workspaces/ensure") && method === "POST"
+}
+
+function isShareWorkspacePreparation(pathname: string, method: string) {
+  return pathname === "/api/v2/workspaces/prepare" && method === "POST"
+}
+
+function isShareCredentialStatus(pathname: string, method: string) {
+  return pathname === "/api/v2/credentials/status" && method === "GET"
+}
+
+function shareWorkspaceID(request: Request) {
+  const url = new URL(request.url)
+  const headerID = request.headers.get("x-killstata-workspace-id") ?? undefined
+  const queryID = url.pathname.endsWith("/events") ? url.searchParams.get("workspaceId") ?? undefined : undefined
+  if (headerID && queryID && headerID !== queryID) return undefined
+  const id = headerID ?? queryID
+  return id && id !== "__unassigned__" && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined
+}
+
+async function hasSupportedSharedRunPermissions(request: Request) {
+  const body = await request.clone().json().catch(() => undefined)
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false
+  const permission = (body as Record<string, unknown>).permission
+  return permission !== undefined && isSupportedSharePermissionRuleset(permission)
+}
+
+async function hasSupportedSharedModelRequest(request: Request, api: (request: Request) => Promise<Response>) {
+  const body = await request.clone().json().catch(() => undefined)
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false
+  const model = (body as Record<string, unknown>).model
+  if (!model || typeof model !== "object" || Array.isArray(model)) return false
+  const selection = model as Record<string, unknown>
+  if (typeof selection.providerID !== "string" || typeof selection.modelID !== "string") return false
+
+  try {
+    const status = await sharedCredentialStatus(await api(new Request("http://127.0.0.1/api/v2/credentials/status")))
+    if (!status.ok) return false
+    const value = await status.json() as Record<string, unknown>
+    if (value.configured !== true || typeof value.provider !== "string" || typeof value.model !== "string") return false
+    const prefix = `${value.provider}/`
+    const modelID = value.model.startsWith(prefix) ? value.model.slice(prefix.length) : value.model
+    return selection.providerID === value.provider && selection.modelID === modelID
+  } catch {
+    return false
+  }
+}
+
+async function hasShareWorkspaceCapability(request: Request) {
+  const body = await request.clone().json().catch(() => undefined)
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false
+  const token = (body as Record<string, unknown>).accessToken
+  return typeof token === "string" && /^[A-Za-z0-9_-]{40,64}$/.test(token)
 }
 
 export function privateIPv4Addresses(
@@ -101,6 +200,21 @@ function securityResponse(response: Response, requestMethod: string) {
 
 function jsonError(status: number, code: string, message: string) {
   return Response.json({ protocolVersion: "v2", code, message, retryable: false }, { status })
+}
+
+async function sharedCredentialStatus(response: Response) {
+  if (!response.ok) return response
+  const body = await response.clone().json().catch(() => undefined)
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return jsonError(502, "credential_status_invalid", "主机模型状态暂时不可用。")
+  }
+  const value = body as Record<string, unknown>
+  const providers = new Set(["deepseek", "custom", "anthropic", "google"])
+  if (typeof value.configured !== "boolean" || typeof value.provider !== "string" || !providers.has(value.provider)
+    || typeof value.model !== "string" || !value.model.trim() || value.model.length > 256) {
+    return jsonError(502, "credential_status_invalid", "主机模型状态暂时不可用。")
+  }
+  return Response.json({ configured: value.configured, provider: value.provider, model: value.model })
 }
 
 function originMatches(request: Request, expectedOrigin: string, requireOrigin: boolean) {
@@ -186,8 +300,96 @@ export async function startLocalWebHost(options: LocalWebHostOptions): Promise<L
           if (sharedSession && !isShareApiRouteAllowed(url.pathname, request.method)) {
             return respond(jsonError(404, "share_route_unavailable", "此分享链接不允许访问该本机 API"), request.method)
           }
+          if (sharedSession && url.pathname === "/api/v2/workspaces/ensure" && request.method === "POST"
+            && !(await hasShareWorkspaceCapability(request))) {
+            return respond(jsonError(403, "workspace_access_denied", "重新连接访客工作区需要此浏览器保存的工作区凭据。"), request.method)
+          }
+          if (sharedSession && url.pathname === "/api/v2/workspaces" && request.method === "POST") {
+            const body = await request.clone().json().catch(() => undefined)
+            const id = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).id : undefined
+            if (typeof id !== "string" || !(await hasShareWorkspaceCapability(request))) {
+              return respond(jsonError(403, "workspace_preparation_required", "访客工作区尚未安全准备或凭据无效，请重新选择工作区。"), request.method)
+            }
+          }
+          const visitorWorkspaceID = sharedSession ? shareWorkspaceID(request) : undefined
+          if (sharedSession && !isShareWorkspaceCreation(url.pathname, request.method)
+            && !isShareWorkspacePreparation(url.pathname, request.method)
+            && !isShareCredentialStatus(url.pathname, request.method)
+            && (!visitorWorkspaceID || !session.hasShareWorkspace(cookieHeader, visitorWorkspaceID))) {
+            return respond(jsonError(403, "workspace_required", "分享访客必须先选择一个独立工作区。"), request.method)
+          }
+          const runPathMatch = url.pathname.match(/^\/api\/v2\/runs\/([A-Za-z0-9_-]{1,128})\//)
+          if (sharedSession && runPathMatch
+            && (!visitorWorkspaceID || !session.hasShareRun(cookieHeader, visitorWorkspaceID, runPathMatch[1]!))) {
+            return respond(jsonError(404, "share_run_unavailable", "此分享会话无法访问该研究。"), request.method)
+          }
+          let shareRunRequest: Record<string, unknown> | undefined
+          if (sharedSession && url.pathname === "/api/v2/runs" && request.method === "POST") {
+            const body = await request.clone().json().catch(() => undefined)
+            shareRunRequest = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : undefined
+            if (shareRunRequest?.sessionID !== undefined
+              && (typeof shareRunRequest.sessionID !== "string" || !visitorWorkspaceID
+                || !session.hasShareRun(cookieHeader, visitorWorkspaceID, shareRunRequest.sessionID))) {
+              return respond(jsonError(404, "share_run_unavailable", "此分享会话无法访问该研究。"), request.method)
+            }
+          }
+          if (sharedSession && url.pathname === "/api/v2/runs" && request.method === "POST"
+            && !(await hasSupportedSharedRunPermissions(request))) {
+            return respond(jsonError(403, "share_permission_unsupported", "分享模式只允许只读分析或工作区读写授权；完全访问和自定义规则不可用。"), request.method)
+          }
+          const modelBoundShareRoute = (url.pathname === "/api/v2/runs"
+            || /^\/api\/v2\/runs\/[A-Za-z0-9_-]{1,128}\/summarize$/.test(url.pathname))
+            && request.method === "POST"
+          if (sharedSession && modelBoundShareRoute && !(await hasSupportedSharedModelRequest(request, options.api))) {
+            return respond(jsonError(403, "share_model_unsupported", "分享模式只能使用主机当前配置的默认模型。"), request.method)
+          }
           try {
-            return respond(await options.api(request), request.method)
+            const apiRequest = request.clone()
+            apiRequest.headers.delete("x-killstata-workspace-role")
+            apiRequest.headers.delete("x-killstata-workspace-preparation")
+            apiRequest.headers.set("x-killstata-workspace-role", sharedSession ? "visitor" : "owner")
+            if (sharedSession && url.pathname === "/api/v2/workspaces" && request.method === "POST") {
+              apiRequest.headers.set("x-killstata-workspace-preparation", "1")
+            }
+            let response = await options.api(apiRequest)
+            if (sharedSession && url.pathname === "/api/v2/credentials/status" && request.method === "GET") {
+              response = await sharedCredentialStatus(response)
+            }
+            if (sharedSession && isShareWorkspaceCreation(url.pathname, request.method) && response.ok) {
+              const body = await response.clone().json().catch(() => undefined)
+              const id = body && typeof body === "object" && !Array.isArray(body)
+                ? (body as Record<string, unknown>).id
+                : undefined
+              const accessToken = body && typeof body === "object" && !Array.isArray(body)
+                ? (body as Record<string, unknown>).accessToken
+                : undefined
+              if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id) || id === "__unassigned__"
+                || typeof accessToken !== "string" || !/^[A-Za-z0-9_-]{40,64}$/.test(accessToken)
+                || !session.registerShareWorkspace(cookieHeader, id)) {
+                return respond(jsonError(502, "share_workspace_invalid", "无法建立访客工作区，请重新选择后重试。"), request.method)
+              }
+            }
+            if (sharedSession && isShareWorkspacePreparation(url.pathname, request.method) && response.ok) {
+              const body = await response.clone().json().catch(() => undefined)
+              const id = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).id : undefined
+              const accessToken = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).accessToken : undefined
+              if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id) || id === "__unassigned__"
+                || typeof accessToken !== "string" || !/^[A-Za-z0-9_-]{40,64}$/.test(accessToken)) {
+                return respond(jsonError(502, "workspace_preparation_invalid", "无法安全准备访客工作区，请重新选择后重试。"), request.method)
+              }
+            }
+            if (sharedSession && url.pathname === "/api/v2/runs" && request.method === "POST" && response.ok
+              && shareRunRequest?.sessionID === undefined) {
+              const body = await response.clone().json().catch(() => undefined)
+              const id = body && typeof body === "object" && !Array.isArray(body)
+                ? (body as Record<string, unknown>).runId
+                : undefined
+              if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id) || !visitorWorkspaceID
+                || !session.registerShareRun(cookieHeader, visitorWorkspaceID, id)) {
+                return respond(jsonError(502, "share_run_invalid", "无法登记本次分享会话，请重新开始研究。"), request.method)
+              }
+            }
+            return respond(response, request.method)
           } catch {
             return respond(jsonError(500, "local_web_failure", "本机 Web 服务暂时无法处理请求"), request.method)
           }

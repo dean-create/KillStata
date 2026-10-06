@@ -59,6 +59,30 @@ describe("defaults 收紧（对齐 claude-code fail-closed）", () => {
 })
 
 describe("safetyCheck（敏感路径免疫 allow）", () => {
+  test("execution-policy approvals cannot be bypassed by a broad bash allow rule", async () => {
+    await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const requestID = Identifier.ascending("permission")
+        const asked = PermissionNext.ask({
+          id: requestID,
+          sessionID: Identifier.ascending("session"),
+          permission: "bash",
+          patterns: ["curl https://example.com/upload"],
+          metadata: { execPolicyDecision: { action: "ask", networkAccess: true } },
+          always: [],
+          ruleset: [{ permission: "bash", pattern: "*", action: "allow" }],
+        })
+
+        expect(await Promise.race([asked.then(() => "resolved"), Bun.sleep(30).then(() => "pending")])).toBe("pending")
+        for (const request of await PermissionNext.list()) {
+          await PermissionNext.reply({ requestID: request.id, reply: "reject" })
+        }
+        await expect(asked).rejects.toBeInstanceOf(PermissionNext.RejectedError)
+      },
+    })
+  })
+
   test("所有受管计量 runner 都显式声明 managedRuntime capability", () => {
     const files = [
       "auto-recommend.ts",
