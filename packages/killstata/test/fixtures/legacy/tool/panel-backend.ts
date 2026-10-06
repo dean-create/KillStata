@@ -69,12 +69,27 @@ export type PanelBackendResult = {
   message?: string
 }
 
+function hasUsableHausmanStatistics(hausman: Partial<PanelHausman> | undefined) {
+  if (!hausman) return false
+  return typeof hausman.df === "number"
+    && Number.isInteger(hausman.df)
+    && hausman.df > 0
+    && typeof hausman.statistic === "number"
+    && Number.isFinite(hausman.statistic)
+    && hausman.statistic >= 0
+    && typeof hausman.pValue === "number"
+    && Number.isFinite(hausman.pValue)
+    && hausman.pValue >= 0
+    && hausman.pValue <= 1
+    && typeof hausman.alpha === "number"
+    && Number.isFinite(hausman.alpha)
+    && hausman.alpha > 0
+    && hausman.alpha < 1
+}
+
 export function isHausmanUndetermined(hausman: Partial<PanelHausman> | undefined) {
-  return hausman?.df === undefined
-    || hausman.df === 0
-    || hausman.statistic == null
-    || hausman.pValue == null
-    || hausman.rejectRe == null
+  if (!hausman || !hasUsableHausmanStatistics(hausman)) return true
+  return typeof hausman.rejectRe !== "boolean" || hausman.rejectRe !== (hausman.pValue! < hausman.alpha!)
 }
 
 const CoefficientSchema = z
@@ -99,7 +114,7 @@ const HausmanSchema = z
     statistic: z.number().finite().nonnegative().nullable(),
     df: z.number().int().nonnegative(),
     pValue: z.number().finite().min(0).max(1).nullable(),
-    alpha: z.number().finite(),
+    alpha: z.number().finite().gt(0).lt(1),
     rejectRe: z.boolean().nullable(),
   })
   .strict()
@@ -160,7 +175,7 @@ const SuccessResultSchema = z
     if (value.nPeriods < 2) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "面板时间期数过少" })
     }
-    if (isHausmanUndetermined(value.hausman)) {
+    if (!hasUsableHausmanStatistics(value.hausman)) {
       if (value.hausman.rejectRe !== null) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hausman 检验不可判定时不能提供拒绝标记" })
       }
@@ -168,7 +183,11 @@ const SuccessResultSchema = z
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hausman 检验不可判定时不能推荐 FE 或 RE" })
       }
     } else {
-      const expectedRecommendation = value.hausman.rejectRe === true ? "fixed_effects" : "random_effects"
+      const expectedRejectRe = value.hausman.pValue! < value.hausman.alpha
+      if (value.hausman.rejectRe !== expectedRejectRe) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hausman 拒绝标记必须与 p 值和 alpha 一致" })
+      }
+      const expectedRecommendation = expectedRejectRe ? "fixed_effects" : "random_effects"
       if (value.recommendation.preferred !== expectedRecommendation) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hausman 检验结论与模型推荐不一致" })
       }

@@ -64,16 +64,23 @@ describe("legacy panel backend result contract", () => {
   })
 
   test("accepts FE/RE recommendations that agree with a determinate Hausman result", () => {
-    for (const [rejectRe, preferred] of [
-      [true, "fixed_effects"],
-      [false, "random_effects"],
+    for (const [rejectRe, preferred, pValue] of [
+      [true, "fixed_effects", 0.01],
+      [false, "random_effects", 0.3],
     ] as const) {
       const result = validatePanelBackendResult({
         ...panelBackendResult(preferred),
-        hausman: { statistic: 1, df: 1, pValue: 0.3, alpha: 0.05, rejectRe },
+        hausman: { statistic: 1, df: 1, pValue, alpha: 0.05, rejectRe },
       })
       expect(result.recommendation?.preferred).toBe(preferred)
     }
+  })
+
+  test("rejects a Hausman decision flag that disagrees with p-value and alpha", () => {
+    expect(() => validatePanelBackendResult({
+      ...panelBackendResult("fixed_effects"),
+      hausman: { statistic: 1, df: 1, pValue: 0.3, alpha: 0.05, rejectRe: true },
+    })).toThrow("面板随机效应结果结构不完整")
   })
 
   test("rejects a random-effects recommendation when Hausman is indeterminate", () => {
@@ -93,9 +100,14 @@ describe("panel random effects model-facing execution", () => {
   test("does not present RE when the session engine returns an indeterminate Hausman result", async () => {
     const previousPython = process.env.KILLSTATA_PYTHON
     process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")
-    const sessionID = "panel-undetermined-result-test"
     const dataPath = path.join(tempDir, "undetermined_panel.csv")
     fs.writeFileSync(dataPath, "firm_id,year,sales,training,size,age\n1,1,10,1,2,3\n", "utf-8")
+    const invalidHausmanResults = [
+      { statistic: null, df: 0, pValue: null, alpha: 0.05, rejectRe: null },
+      { statistic: -1, df: 1.5, pValue: 1.2, alpha: 0.05, rejectRe: false },
+      { statistic: 1, df: 1, pValue: 0.3, alpha: 0.05, rejectRe: true },
+    ] as const
+    let responseIndex = 0
     const validateSpy = spyOn(EconometricsEngineClient.prototype, "validate").mockImplementation(async (methodID, arguments_) => ({
       registry_version: 1,
       method_id: methodID,
@@ -105,7 +117,13 @@ describe("panel random effects model-facing execution", () => {
       fs.mkdirSync(payload.output_dir, { recursive: true })
       const resultPath = path.join(payload.output_dir, "results.json")
       const coefficientsPath = path.join(payload.output_dir, "coefficients.csv")
-      const result = { ...panelBackendResult("random_effects"), resultPath, coefficientsPath }
+      const result = {
+        ...panelBackendResult("random_effects"),
+        hausman: invalidHausmanResults[responseIndex++]!,
+        recommendation: { preferred: "random_effects", reason: "Hausman 检验不显著，推荐随机效应（RE）" },
+        resultPath,
+        coefficientsPath,
+      }
       fs.writeFileSync(resultPath, JSON.stringify(result), "utf-8")
       fs.writeFileSync(coefficientsPath, "term,estimate\ntraining,1\n", "utf-8")
       return { payload: result } as never
@@ -113,32 +131,41 @@ describe("panel random effects model-facing execution", () => {
 
     try {
       await Instance.provide({ directory: tempDir, fn: async () => {
-        const source = registerCanonicalDataset({ sessionID, sourcePath: dataPath, datasetId: "dataset_panel_undetermined" })
         const tool = await PanelRandomEffectsTool.init()
-        const result = await tool.execute({
-          ...source,
-          dependentVar: "sales",
-          treatmentVar: "training",
-          covariates: ["size", "age"],
-          entityVar: "firm_id",
-          timeVar: "year",
-          covariance: "robust",
-        }, {
-          sessionID,
-          messageID: "message",
-          callID: "call",
-          agent: "analyst",
-          abort: new AbortController().signal,
-          metadata: () => undefined,
-          ask: async () => undefined,
-        } as never)
+        for (let index = 0; index < invalidHausmanResults.length; index += 1) {
+          const sessionID = `panel-undetermined-result-test-${index}`
+          const source = registerCanonicalDataset({
+            sessionID,
+            sourcePath: dataPath,
+            datasetId: `dataset_panel_undetermined_${index}`,
+          })
+          const result = await tool.execute({
+            ...source,
+            dependentVar: "sales",
+            treatmentVar: "training",
+            covariates: ["size", "age"],
+            entityVar: "firm_id",
+            timeVar: "year",
+            covariance: "robust",
+          }, {
+            sessionID,
+            messageID: "message",
+            callID: "call",
+            agent: "analyst",
+            abort: new AbortController().signal,
+            metadata: () => undefined,
+            ask: async () => undefined,
+          } as never)
 
-        expect(result.output).toContain("Hausman 检验不可判定")
-        expect(result.output).toContain("推荐模型：暂不可判定")
-        expect(result.output).not.toContain("推荐模型：随机效应（RE）")
-        expect(result.metadata.analysisView.conclusion).toContain("不能据此选择 FE 或 RE")
-        expect(validateSpy).toHaveBeenCalledTimes(1)
-        expect(executeSpy).toHaveBeenCalledTimes(1)
+          expect(result.output).toContain("Hausman 检验不可判定")
+          expect(result.output).toContain("推荐模型：暂不可判定")
+          expect(result.output).not.toContain("推荐模型：随机效应（RE）")
+          expect(result.output).not.toContain("推荐理由：Hausman 检验不显著")
+          expect(result.metadata.analysisView.conclusion).toContain("不能据此选择 FE 或 RE")
+          expect(result.metadata.analysisView.results?.find((item) => item.label === "Hausman p 值")?.value).toBeUndefined()
+        }
+        expect(validateSpy).toHaveBeenCalledTimes(invalidHausmanResults.length)
+        expect(executeSpy).toHaveBeenCalledTimes(invalidHausmanResults.length)
       } })
     } finally {
       validateSpy.mockRestore()

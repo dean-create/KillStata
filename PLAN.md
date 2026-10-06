@@ -7,9 +7,9 @@
 - Web 保留浏览器文件能力；访客工作区按不透明 ID 隔离，文件只在连接后提交分析时上传。分享访客可用主机预配置模型，档案只读且不返回 API Key。
 - 已验证：Desktop 全量 365 通过、2 跳过；Web 构建、Desktop/CLI 类型检查、分享专项测试、CLI 帮助测试通过；本机 CLI 候选 0.1.30 已打包，12 个 tarball 的 SHA-512 与 manifest 一致，npm dry-run 未发布，隔离 arm64 安装可启动 `killstata web`。
 - 视觉验收：最终 Web 在 1440×900 与 390×844 可用；Desktop/Web 的“1”研究记录及通用设置内容一致。已修复窄屏工作区抽屉遮住设置面板的问题。
-- 本机完整 Core 全量为 **2165 通过、5 跳过、0 失败**（2170 tests / 309 files / 10533 assertions）；审查后新增两条 Hausman Schema 反例，聚焦 panel 契约/执行 4/4、CLI typecheck 通过，等待新 CI 完整运行。
+- 本机完整 Core 全量为 **2165 通过、5 跳过、0 失败**（2170 tests / 309 files / 10533 assertions）；审查后新增 Hausman 统计一致性与 session 输出用例，聚焦 panel 契约/session 输出 7/7、CLI typecheck 通过，等待新 CI 完整运行。
 - Desktop 全量复跑 **365 通过 / 2 跳过**；parity lifecycle 测试在并行运行下耗时略超默认 5 秒，已仅将该测试限制调为 10 秒，未改变行为断言。Desktop typecheck、Web build 通过。
-- 独立审查提出 Hausman metrics/recommendation 不一致风险；展示层现禁止不可判定时显示 FE/RE 推荐，validator 要求 undecided statistics 与 recommendation 保持一致；面板契约/输出执行 6/6，覆盖有效 FE/RE、矛盾字段和访客输出。
+- 独立审查提出 Hausman metrics/recommendation 不一致风险；展示层对不完整、超范围或决策标记冲突的统计量隐藏 FE/RE 推荐；validator 还验证 `rejectRe` 与 `pValue < alpha` 一致。面板契约/session 输出测试 7/7，覆盖有效 FE/RE、异常数值、错误推荐和错误理由。
 - Draft PR #6 已开；当前最新 GitHub 结果仍对应修复前提交。将完成 follow-up review、推送并重新跑 clean-checkout CI。
 - 仍待完成：新 GitHub CI、Linux 主机启动、第二台局域网设备验收、真实模型 Provider 验收；npm 发布前需最终用户批准。当前公开 registry 仍为 `killstata@0.1.27`，`0.1.30` 未发布。
 

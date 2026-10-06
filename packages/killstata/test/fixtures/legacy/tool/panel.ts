@@ -214,6 +214,9 @@ async function executePanel(params: PanelParams, ctx: Tool.Context) {
       : rec?.preferred === "random_effects"
         ? "随机效应（RE）"
         : "暂不可判定"
+  const recommendationReason = hausmanUndetermined
+    ? "Hausman 检验信息不足或相互矛盾，不能据此选择 FE 或 RE。"
+    : rec?.reason ?? "无"
 
   const output = [
     `${TOOL_LABEL}已完成。`,
@@ -229,10 +232,10 @@ async function executePanel(params: PanelParams, ctx: Tool.Context) {
     ]),
     "",
     hausmanUndetermined
-      ? `Hausman 检验不可判定（df = ${hausman?.df ?? 0}）`
+      ? "Hausman 检验不可判定，不能据此选择 FE 或 RE"
       : `Hausman 检验：H = ${numberText(hausman?.statistic, 3)}（df = ${hausman?.df ?? 0}），p = ${numberText(hausman?.pValue)}`,
     `推荐模型：${recommendedModel}`,
-    `推荐理由：${rec?.reason ?? "无"}`,
+    `推荐理由：${recommendationReason}`,
     "",
     ARTIFACT_SAVED_NOTICE,
   ].join("\n")
@@ -279,7 +282,9 @@ async function executePanel(params: PanelParams, ctx: Tool.Context) {
           ),
           analysisMetric(
             "Hausman p 值",
-            hausman?.pValue !== null && hausman?.pValue !== undefined ? numberText(hausman.pValue) : undefined,
+            !hausmanUndetermined && hausman?.pValue !== null && hausman?.pValue !== undefined
+              ? numberText(hausman.pValue)
+              : undefined,
           ),
           analysisMetric("N", result.rowsUsed),
           analysisMetric("个体数", result.nEntities),
