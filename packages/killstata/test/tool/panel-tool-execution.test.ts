@@ -67,6 +67,7 @@ describe("legacy panel backend result contract", () => {
     for (const [rejectRe, preferred, pValue] of [
       [true, "fixed_effects", 0.01],
       [false, "random_effects", 0.3],
+      [false, "random_effects", 0.05],
     ] as const) {
       const result = validatePanelBackendResult({
         ...panelBackendResult(preferred),
@@ -80,6 +81,24 @@ describe("legacy panel backend result contract", () => {
     expect(() => validatePanelBackendResult({
       ...panelBackendResult("fixed_effects"),
       hausman: { statistic: 1, df: 1, pValue: 0.3, alpha: 0.05, rejectRe: true },
+    })).toThrow("面板随机效应结果结构不完整")
+  })
+
+  test("rejects invalid p-value or alpha ranges", () => {
+    expect(() => validatePanelBackendResult({
+      ...panelBackendResult("random_effects"),
+      hausman: { statistic: 1, df: 1, pValue: 1.01, alpha: 0.05, rejectRe: false },
+    })).toThrow("面板随机效应结果结构不完整")
+    expect(() => validatePanelBackendResult({
+      ...panelBackendResult("random_effects"),
+      hausman: { statistic: 1, df: 1, pValue: 0.3, alpha: 0, rejectRe: false },
+    })).toThrow("面板随机效应结果结构不完整")
+  })
+
+  test("rejects a recommendation that conflicts with a determinate Hausman test", () => {
+    expect(() => validatePanelBackendResult({
+      ...panelBackendResult("fixed_effects"),
+      hausman: { statistic: 1, df: 1, pValue: 0.3, alpha: 0.05, rejectRe: false },
     })).toThrow("面板随机效应结果结构不完整")
   })
 
