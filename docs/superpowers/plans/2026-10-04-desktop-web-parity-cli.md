@@ -142,4 +142,5 @@
 - [x] Verify local loopback and private-LAN share separately. Share route/session tests block credential mutation; installed candidate activates the fake host profile in an isolated visitor workspace. No data was submitted to an external Provider and no second physical device was available.
 - [x] Finish the adversarial review and create Draft PR #6 with the known CLI full-suite failure disclosed.
 - [x] Restore clean-checkout typecheck dependencies from committed history into tracked source/test fixtures without copying modified local `trash/` files; CLI typecheck and focused legacy tests pass locally.
-- [ ] Commit/push this repair and verify updated GitHub CI; resolve or get an explicit decision on the composite-panel CLI gate; complete Linux host and second-device verification; obtain final approval before public npm publish.
+- [x] Commit and push the clean-checkout repair (`f9e576b`); local CLI typecheck and 188 focused tests pass. GitHub CI rerun is pending.
+- [ ] Resolve or get an explicit decision on the composite-panel CLI gate; complete Linux host and second-device verification; obtain final approval before public npm publish.

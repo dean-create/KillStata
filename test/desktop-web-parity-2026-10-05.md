@@ -31,7 +31,7 @@ The previous Draft PR #6 head failed GitHub typecheck because the clean checkout
 
 - CLI typecheck after the repair: passed.
 - Focused legacy import/exposure/replay tests: 185 passed; backend stderr: 1 passed; file discovery: 2 passed.
-- The repaired files are still uncommitted and not on the PR head; GitHub CI has not yet verified this repair.
+- The repair is committed and pushed as `f9e576b`; GitHub CI is rerunning it now. The previous clean-checkout failure remains the last remote result until that run completes.
 
 ## Not verified
 

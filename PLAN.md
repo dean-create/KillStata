@@ -9,8 +9,8 @@
 - 视觉验收：最终 Web 在 1440×900 与 390×844 可用；Desktop/Web 的“1”研究记录及通用设置内容一致。已修复窄屏工作区抽屉遮住设置面板的问题。
 - 已知门禁：CLI 全量 2161 通过、5 跳过、3 失败；两项 runtime-config 测试单独复跑通过，`test/drive/scripted-stable-composite-panel.test.ts` 仍单独失败，详见 `PROGRESS.md`。该失败需要查明后才能请求发布审批。
 - Draft PR #6 已开，GitHub CI 运行中；推送保护发现的 key-shaped 测试文件名已改为非密钥占位符，定向脱敏测试通过。
-- GitHub Draft PR #6 的 `check-standards` 通过；上一版 `typecheck` 因 clean checkout 缺少依赖而失败。候选工作树已用历史提交中的 `file-discovery.ts` 和 legacy 测试 oracle 补齐，CLI typecheck 通过；此修复尚未提交/推送，等待新 CI 复核。
-- 仍待完成：提交并推送 clean-checkout 修复并等待 CI；查明 CLI 全量测试中复合面板回放失败；Linux 主机启动及第二台局域网设备验收；公开 npm 发布前的最终用户批准。当前公开 registry 仍为 `killstata@0.1.27`，本机预览版服务运行于 `http://127.0.0.1:3080`。
+- GitHub Draft PR #6 的 `check-standards` 通过。此前 clean-checkout `typecheck` 失败；提交 `f9e576b` 补入历史 `file-discovery.ts` 与 test-only legacy fixtures，CLI typecheck 和相关 188 项聚焦测试通过，更新后的 GitHub CI 正在运行。
+- 仍待完成：确认更新后的 GitHub CI；查明 CLI 全量测试中复合面板回放失败；Linux 主机启动及第二台局域网设备验收；公开 npm 发布前的最终用户批准。当前公开 registry 仍为 `killstata@0.1.27`，本机预览版服务运行于 `http://127.0.0.1:3080`。
 
 ---
 
