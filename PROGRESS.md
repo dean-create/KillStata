@@ -8,10 +8,10 @@
 - 安装包分享页已在同一台 Mac 经私有网卡连入隔离测试档案：访客 Core ready、模型档案只读、无 API Key；未提交数据给外部 Provider。第二台物理设备尚未验收。
 - 修复上一轮 CI 根因：CI 使用绝对 Python/PYTHONPATH；7 个旧模型测试尊重注入的 `KILLSTATA_PYTHON`；permission safety 测试从 `Global.Path.data` 构造 managed runtime 路径。
 - 独立复审发现无效 Hausman 指标与 `random_effects` 推荐可能冲突。展示层对缺失、超范围或自相矛盾指标不显示 FE/RE 推荐，也隐藏不可信 p 值与理由；legacy Schema 校验 df/统计量/p 值/alpha 范围、`rejectRe === (pValue < alpha)` 和模型推荐一致性。反例先红后绿，面板契约+session 输出测试 9/9 通过，含 `p == alpha` 边界。
-- 最新完整 GitHub test suite：**Core 2105 pass / 72 skip / 0 fail**（2177 tests / 309 files）；Desktop/Web 365 pass / 2 skip；Python engine 150 pass。clean checkout 缺失的三条私有 workbook 回放按设计跳过。
+- 最新完整 GitHub test suite（head `1e84054`，Nix hash bot commit 之前）：**Core 2105 pass / 72 skip / 0 fail**（2177 tests / 309 files）；Desktop/Web 365 pass / 2 skip；Python engine 150 pass。clean checkout 缺失的三条私有 workbook 回放按设计跳过。
 - Desktop 全量在并行 Web build 下重复暴露一项 5.09 秒用例超时；同一用例隔离耗时 1.99 秒。仅将该 parity 测试的单项限制调为 10 秒后，全量 Desktop **365 pass / 2 skip**；Desktop typecheck 和 Web 生产构建通过。
 - 三个 scripted DID 用例已改用 `hasLocalRealData` / `localRealDataPath`：无 workbook 显式 skip，有本地 workbook 继续完整运行。clean-data 模拟 3 skip / 3 pass / 0 fail；私有本地 workbook 下 6 pass / 0 fail，数据仍未跟踪。
-- 独立 `typecheck` 已在 `ubuntu-latest` 通过；Nix updater 在 hash 计算前因 `nix/node_modules.nix` 引用 checkout 中不存在的可选 `patches/` 目录而失败。该目录没有跟踪文件；fileset 已改用 `lib.fileset.maybeMissing`，等待下一轮 Nix/test 工作流。
+- 独立 `typecheck` 已在 `ubuntu-latest` 通过。Nix updater 修复了可选 `patches/` 和缺失 `desktop/` workspace 后通过，并自动更新四个平台的 `nix/hashes.json`，提交 `6f9e36f`。GitHub 不会自动启动 bot commit 后续工作流；需用人类提交触发最终 head 检查。
 - npm registry 仍为 `killstata@0.1.27`；候选 `0.1.30` 未发布。尚待：新 GitHub CI、Linux 主机启动、第二台设备访问、真实 Provider 验收及发布审批。
 - 本轮详细验证记录：`test/desktop-web-parity-2026-10-05.md`。
 

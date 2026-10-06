@@ -148,5 +148,5 @@
 - [x] Rerun the full Desktop suite after raising only the slow parity test's local timeout to 10 seconds; 365 pass / 2 skip. Desktop typecheck and Web production build pass.
 - [x] Make the three real-DID scripted journeys portable: use the local-data helper, run when a private workbook is configured, and skip explicitly in a clean checkout without it. Verified 3 skip / 3 pass without data and 6 pass / 0 fail with local `did.xlsx`.
 - [x] Push the missing-workbook test fix and confirm a fresh clean checkout: Core 2105 pass / 72 skip / 0 fail; Desktop/Web 365 pass / 2 skip; Python engine 150 pass.
-- [x] Switch the queued typecheck/Nix hash jobs to `ubuntu-latest`; standalone typecheck passed. The Nix updater exposed an optional missing `patches/` fileset path, now wrapped in `lib.fileset.maybeMissing`.
-- [ ] Confirm the next Nix hash workflow and test workflow; complete Linux host and second-device verification; obtain final approval before public npm publish.
+- [x] Switch the queued typecheck/Nix hash jobs to `ubuntu-latest`; standalone typecheck passed. Fix optional `patches/` and include the declared `desktop` workspace in the Nix source fileset; Nix updater completed and committed hashes for all four platforms as `6f9e36f`.
+- [ ] Trigger and confirm clean-checkout checks on the hash-updated head; complete Linux host and second-device verification; obtain final approval before public npm publish.

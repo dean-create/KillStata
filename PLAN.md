@@ -10,8 +10,8 @@
 - 本机完整 Core 全量为 **2165 通过、5 跳过、0 失败**（2170 tests / 309 files / 10533 assertions）；审查后新增 Hausman 统计一致性与 session 输出用例，聚焦 panel 契约/session 输出 9/9、CLI typecheck 通过，等待新 CI 完整运行。
 - Desktop 全量复跑 **365 通过 / 2 跳过**；parity lifecycle 测试在并行运行下耗时略超默认 5 秒，已仅将该测试限制调为 10 秒，未改变行为断言。Desktop typecheck、Web build 通过。
 - 独立审查提出 Hausman metrics/recommendation 不一致风险；展示层对不完整、超范围或决策标记冲突的统计量隐藏 FE/RE 推荐；validator 还验证 `rejectRe` 与 `pValue < alpha` 一致。面板契约/session 输出测试 9/9，覆盖有效 FE/RE、`p == alpha`、异常数值、错误推荐和错误理由。
-- 最新 GitHub test 工作流全绿：Core 2105 pass / 72 skip / 0 fail（2177 tests / 309 files），Desktop/Web 365 pass / 2 skip，Python engine 150 pass；三条私有 workbook 回放在 clean checkout 明确跳过。
-- 独立 `typecheck` 已在 `ubuntu-latest` 通过；Nix hash updater 也开始运行，但在缺失的可选 `patches/` fileset 路径上失败。`nix/node_modules.nix` 现对该目录使用 `lib.fileset.maybeMissing`；待下一轮 Nix/test 检查验证。
+- 最新已完成 GitHub test 工作流（head `1e84054`，Nix hash bot commit 之前）全绿：Core 2105 pass / 72 skip / 0 fail（2177 tests / 309 files），Desktop/Web 365 pass / 2 skip，Python engine 150 pass；三条私有 workbook 回放在 clean checkout 明确跳过。
+- 独立 `typecheck` 已在 `ubuntu-latest` 通过；Nix hash updater 修复 `patches/` 和缺失 `desktop` workspace 后成功，自动更新四个平台 hashes 并提交 `6f9e36f`。GitHub 没有为 GITHUB_TOKEN bot commit 自动启动后续检查，需再触发最终 head CI。
 - 仍待 Linux 主机启动、第二台局域网设备验收、真实模型 Provider 验收；npm 发布前需最终用户批准。公开 registry 仍为 `killstata@0.1.27`，`0.1.30` 未发布。
 
 ---
