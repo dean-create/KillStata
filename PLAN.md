@@ -19,7 +19,7 @@
 - 独立审查提出 Hausman metrics/recommendation 不一致风险；展示层对不完整、超范围或决策标记冲突的统计量隐藏 FE/RE 推荐；validator 还验证 `rejectRe` 与 `pValue < alpha` 一致。面板契约/session 输出测试 9/9，覆盖有效 FE/RE、`p == alpha`、异常数值、错误推荐和错误理由。
 - 最新已完成 GitHub test 工作流（head `1e84054`，Nix hash bot commit 之前）全绿：Core 2105 pass / 72 skip / 0 fail（2177 tests / 309 files），Desktop/Web 365 pass / 2 skip，Python engine 150 pass；三条私有 workbook 回放在 clean checkout 明确跳过。
 - 独立 `typecheck` 已在 `ubuntu-latest` 通过；Nix hash updater 修复 `patches/` 和缺失 `desktop` workspace 后成功，自动更新四个平台 hashes 并提交 `6f9e36f`。GitHub 没有为 GITHUB_TOKEN bot commit 自动启动后续检查，需再触发最终 head CI。
-- 仍待第二台局域网设备验收、Linux 主机启动和新 GitHub CI；本地隔离安装未调用真实模型 Provider。公开 registry 仍为 `killstata@0.1.27`，`0.1.30` 未发布；正式 npm 发布仍需最终用户批准。
+- 当前 PR #6 为 Draft、HEAD `547711be`。该 HEAD 的 GitHub workflow_dispatch 全量 `test` 与 `typecheck` 均通过；PR Standards 在实现提交 `145e501` 通过，之后仅增加 Nix hash bot 提交。仍待第二台局域网设备验收、Linux 主机启动和真实 Provider 验收。公开 registry 仍为 Windows x64-only `killstata@0.1.27`；`0.1.30` 多平台候选未发布，须先确认是否改变此前 Windows-only 发布决策。
 
 ---
 

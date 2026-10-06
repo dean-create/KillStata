@@ -28,7 +28,8 @@
 - 最终产物复核：Web `build:web` 与 Desktop `build` 都通过；Tauri/Web CSS SHA-256 同为 `05bdb52640fa6be5c756a34aca687f88133231bee24d2fd6f0182e0075576d4c`，Core chunk 同为 `8261a5e51510afea7347ee6c40e783127639b88b158982711196012d6d50ceb3`。`0.1.30` 重打包 12/12 tarball 均含相同 Web `index.html`；npm dry-run 列出 11 个平台包+launcher 且未发布。隔离 npm prefix 本地安装后 `killstata --version`=`0.1.30`、`web --help` 正常；`killstata web --port 0 --no-open` 绑定回环并成功返回 Web HTML 200，Ctrl+C 后端口关闭，未提交数据或调用 Provider。
 - 2026-10-07 继续验收：系统已有全局 `dsh 0.2.0-rc.2`；因 KillStata 占用默认 3080，使用 `dsh web --no-open --port 3081` 启动参考 UI，回环 HTTP 返回 200 后关闭。另用隔离 XDG 配置、无模型凭据的 `0.1.30` 启动新 LAN 预览 `--share --port 0`；本机经 LAN 地址访问返回 HTML 200。通过已安装的 Darwin arm64 二进制走完访客 `/prepare`→`/workspaces`，HTTP 200/201；登记前 registry 仍为空，登记后仅保存 token 哈希。端口 62841 服务当前保持运行，分享 token 一小时有效；另一台物理设备验收仍待用户反馈。
 - 同步发现：PID 37471 的本机 KillStata Web 仍监听 3080；PID 28969 的旧源码分享服务仍监听 3082。均未擅自停止。新隔离体验服务单独监听 62841，数据/模型目录隔离在 `/tmp/killstata-web-share-preview-2026-10-07`。
-- 当前 npm `latest` 仍为 `0.1.27` Windows x64-only；新候选 `0.1.30` 包含 11 个平台原生包，超出此前 Windows-only 发布决定。候选代码与隔离安装已验证，但发布平台策略需要用户明确选择；未推送新改动，因此没有当前 head GitHub CI。仍待第二台实体设备、Linux 主机和真实 Provider 验收；npm 发布未进行。
+- 提交 `145e501` 已推送到 Draft PR #6。Nix hash workflow 成功提交 `547711be`；另一个并发 updater 因远端 ref 已前进而被拒绝，未覆盖提交。对精确 HEAD `547711be` 手动运行的 GitHub 全量 test `37503072696` 与 typecheck `37503073194` 均成功；PR Standards 在代码提交 `145e501` 已通过。第二台设备、Linux 主机和真实 Provider 验收仍待完成。
+- 当前 npm `latest` 仍为 `0.1.27` Windows x64-only；`0.1.30` 包含 11 个平台原生包，超出此前 Windows-only 发布决定。平台策略选择仍待用户答复；候选未发布、PR 仍为 Draft。新的隔离 LAN 页面服务在 `192.168.0.183:62841`，本机已从 LAN 地址完成页面及 visitor prepare/finalize 验收；另一台物理设备仍待验收。
 - 当轮日志：`test/desktop-web-parity-2026-10-07.log`、`test/web-share-focused-2026-10-07.log`、`test/web-share-core-full-managed-2026-10-07-final.log`、`test/killstata-pack-release-0.1.30-2026-10-07.log`、`test/killstata-release-dry-run-0.1.30-2026-10-07.log`。
 
 ## main 合并与 npm 正式发布（2026-07-18）
