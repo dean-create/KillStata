@@ -22,7 +22,7 @@ afterAll(() => {
 describe("quantile-regression model-facing execution", () => {
   test("quantile_regression returns a Chinese result with a per-quantile effect path", async () => {
     const previousPython = process.env.KILLSTATA_PYTHON
-    process.env.KILLSTATA_PYTHON = path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+    process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")
 
     // 构造有分布异质性的连续结果：wage 的方差随 union 放大 -> 高分位处 union 溢价更大
     const dataPath = path.join(tempDir, "wage.csv")

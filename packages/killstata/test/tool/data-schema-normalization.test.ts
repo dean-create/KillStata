@@ -3,15 +3,16 @@ import { spawnSync } from "child_process"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { resolveRuntimePythonCommand } from "@/killstata/runtime-config"
+import { managedPythonExecutable, resolveRuntimePythonCommand } from "@/killstata/runtime-config"
 import { Instance } from "@/project/instance"
 import { hasLocalRealData, localRealDataPath } from "../helpers/local-real-data"
 
 async function managedPythonWithPandas() {
-  const configured = await resolveRuntimePythonCommand().catch(() => undefined)
+  const configured = process.env.KILLSTATA_PYTHON?.trim()
+    || await resolveRuntimePythonCommand().catch(() => undefined)
   const candidates = [
     configured,
-    path.join(os.homedir(), ".killstata", "venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
+    managedPythonExecutable(),
   ].filter((candidate): candidate is string => Boolean(candidate))
   return candidates.find((candidate) => spawnSync(candidate, ["-c", "import pandas"], { encoding: "utf-8" }).status === 0)
 }

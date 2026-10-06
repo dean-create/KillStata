@@ -1,4 +1,4 @@
-# 当前计划：桌面/Web 同一界面与本机 CLI 分享体验（更新于 2026-10-05）
+# 当前计划：桌面/Web 同一界面与本机 CLI 分享体验（更新于 2026-10-06）
 
 > 目标：Desktop 与 Web 共用研究 UI 和可见交互；全局 npm CLI `killstata web` 默认只监听本机 `127.0.0.1:3080`，显式 `--share` 才开放可信私有局域网访客。
 
@@ -7,10 +7,9 @@
 - Web 保留浏览器文件能力；访客工作区按不透明 ID 隔离，文件只在连接后提交分析时上传。分享访客可用主机预配置模型，档案只读且不返回 API Key。
 - 已验证：Desktop 全量 365 通过、2 跳过；Web 构建、Desktop/CLI 类型检查、分享专项测试、CLI 帮助测试通过；本机 CLI 候选 0.1.30 已打包，12 个 tarball 的 SHA-512 与 manifest 一致，npm dry-run 未发布，隔离 arm64 安装可启动 `killstata web`。
 - 视觉验收：最终 Web 在 1440×900 与 390×844 可用；Desktop/Web 的“1”研究记录及通用设置内容一致。已修复窄屏工作区抽屉遮住设置面板的问题。
-- 已知门禁：CLI 全量 2161 通过、5 跳过、3 失败；两项 runtime-config 测试单独复跑通过，`test/drive/scripted-stable-composite-panel.test.ts` 仍单独失败，详见 `PROGRESS.md`。该失败需要查明后才能请求发布审批。
-- Draft PR #6 已开，GitHub CI 运行中；推送保护发现的 key-shaped 测试文件名已改为非密钥占位符，定向脱敏测试通过。
-- GitHub Draft PR #6 的 `check-standards` 通过。此前 clean-checkout `typecheck` 失败；提交 `f9e576b` 补入历史 `file-discovery.ts` 与 test-only legacy fixtures，CLI typecheck 和相关 188 项聚焦测试通过，更新后的 GitHub CI 正在运行。
-- 仍待完成：确认更新后的 GitHub CI；查明 CLI 全量测试中复合面板回放失败；Linux 主机启动及第二台局域网设备验收；公开 npm 发布前的最终用户批准。当前公开 registry 仍为 `killstata@0.1.27`，本机预览版服务运行于 `http://127.0.0.1:3080`。
+- 本机 CLI 全量 Core **2165 通过、5 跳过、0 失败**（2170 tests / 309 files / 10533 assertions）；此前 11 个 CI 失败中，解释器错误、测试硬编码 home 路径、permission runtime 路径和 panel fixture 语义均已修复并有红绿证据。
+- Draft PR #6 已开；当前最新 GitHub 结果仍对应修复前提交。将推送本轮修复后重新跑 clean-checkout CI。
+- 仍待完成：新 GitHub CI、Linux 主机启动、第二台局域网设备验收、真实模型 Provider 验收；npm 发布前需最终用户批准。当前公开 registry 仍为 `killstata@0.1.27`，`0.1.30` 未发布。
 
 ---
 

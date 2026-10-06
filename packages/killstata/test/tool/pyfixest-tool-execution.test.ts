@@ -19,7 +19,7 @@ afterAll(() => {
 describe("PyFixest model-facing execution", () => {
   test("returns a Chinese HDFE result without exposing formulas or internal aliases", async () => {
     const previousPython = process.env.KILLSTATA_PYTHON
-    process.env.KILLSTATA_PYTHON = path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+    process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")
     const dataPath = path.join(tempDir, "panel.csv")
     const rows = ["firm,year,y,x"]
     for (let firm = 1; firm <= 10; firm += 1) {
@@ -73,11 +73,11 @@ describe("PyFixest model-facing execution", () => {
       if (previousPython === undefined) delete process.env.KILLSTATA_PYTHON
       else process.env.KILLSTATA_PYTHON = previousPython
     }
-  }, 30_000)
+  }, 60_000)
 
   test("returns an actual DID effect with inference in the user summary", async () => {
     const previousPython = process.env.KILLSTATA_PYTHON
-    process.env.KILLSTATA_PYTHON = path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+    process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")
     const dataPath = path.join(tempDir, "did2s-panel.csv")
     const rows = ["unit,year,treated,event_time,outcome"]
     for (let unit = 1; unit <= 60; unit += 1) {

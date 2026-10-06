@@ -17,12 +17,14 @@ jobs:
       - uses: ./.github/actions/setup-bun
 
       - name: Set up Python
+        id: setup-python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install the locked econometrics-engine dependencies
-        run: python -m pip install -r packages/killstata-econometrics-engine/requirements.lock
+        run: |
+          "${{ steps.setup-python.outputs.python-path }}" -m pip install -r packages/killstata-econometrics-engine/requirements.lock
 
       - name: Typecheck all workspaces
         run: |
@@ -34,8 +36,8 @@ jobs:
 
       - name: Test KillStata Core
         env:
-          KILLSTATA_PYTHON: python
-          PYTHONPATH: packages/killstata-econometrics-engine/src
+          KILLSTATA_PYTHON: ${{ steps.setup-python.outputs.python-path }}
+          PYTHONPATH: ${{ github.workspace }}/packages/killstata-econometrics-engine/src
         working-directory: packages/killstata
         run: bun test --timeout=20000
 
@@ -44,6 +46,7 @@ jobs:
 
       - name: Test Python econometrics engine
         env:
-          KILLSTATA_PYTHON: python
-          PYTHONPATH: packages/killstata-econometrics-engine/src
-        run: python -m unittest discover -s packages/killstata-econometrics-engine/tests -p 'test_*.py'
+          KILLSTATA_PYTHON: ${{ steps.setup-python.outputs.python-path }}
+          PYTHONPATH: ${{ github.workspace }}/packages/killstata-econometrics-engine/src
+        run: |
+          "${{ steps.setup-python.outputs.python-path }}" -m unittest discover -s packages/killstata-econometrics-engine/tests -p 'test_*.py'

@@ -5,6 +5,7 @@ import path from "path"
 import { Instance } from "@/project/instance"
 import { PermissionNext } from "@/permission/next"
 import { Agent } from "@/agent/agent"
+import { Global } from "@/global"
 import { Identifier } from "@/id/id"
 import { Storage } from "@/storage/storage"
 
@@ -251,10 +252,13 @@ describe("safetyCheck（敏感路径免疫 allow）", () => {
       directory: root,
       fn: async () => {
         const sessionID = Identifier.ascending("session")
+        const pythonExecutable = process.platform === "win32"
+          ? path.join(Global.Path.data, "venv", "Scripts", "python.exe")
+          : path.join(Global.Path.data, "venv", "bin", "python")
+        const venvPython = `${pythonExecutable} *data*`
         const ruleset: PermissionNext.Ruleset = [
-          { permission: "bash", pattern: "/Users/cw/.killstata/venv/bin/python *data*", action: "allow" },
+          { permission: "bash", pattern: venvPython, action: "allow" },
         ]
-        const venvPython = `/Users/cw/.killstata/venv/bin/python *data*`
         await PermissionNext.ask({
           id: Identifier.ascending("permission"),
           sessionID,

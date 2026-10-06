@@ -23,7 +23,7 @@ afterAll(() => {
 describe("count-data model-facing execution", () => {
   test("poisson_regression returns a Chinese result with IRR and no internal leakage", async () => {
     const previousPython = process.env.KILLSTATA_PYTHON
-    process.env.KILLSTATA_PYTHON = path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+    process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")
 
     // 构造有真实信号的计数结果：visits ~ Poisson(exp(η))，η 由 insured + age 决定
     const dataPath = path.join(tempDir, "clinic.csv")

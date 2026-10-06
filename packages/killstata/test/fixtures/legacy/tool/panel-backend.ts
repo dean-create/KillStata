@@ -35,7 +35,7 @@ export type PanelHausman = {
   df: number
   pValue: number | null
   alpha: number
-  rejectRe: boolean
+  rejectRe: boolean | null
 }
 
 export type PanelBackendResult = {
@@ -62,7 +62,7 @@ export type PanelBackendResult = {
     primary: PanelCoefficient | null
   }
   hausman?: PanelHausman
-  recommendation?: { preferred: "fixed_effects" | "random_effects"; reason: string }
+  recommendation?: { preferred: "fixed_effects" | "random_effects" | "undetermined"; reason: string }
   resultPath?: string
   coefficientsPath?: string
   warnings?: string[]
@@ -92,7 +92,7 @@ const HausmanSchema = z
     df: z.number().int().nonnegative(),
     pValue: z.number().finite().min(0).max(1).nullable(),
     alpha: z.number().finite(),
-    rejectRe: z.boolean(),
+    rejectRe: z.boolean().nullable(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -132,7 +132,7 @@ const SuccessResultSchema = z
     hausman: HausmanSchema,
     recommendation: z
       .object({
-        preferred: z.enum(["fixed_effects", "random_effects"]),
+        preferred: z.enum(["fixed_effects", "random_effects", "undetermined"]),
         reason: z.string().min(1),
       })
       .strict(),

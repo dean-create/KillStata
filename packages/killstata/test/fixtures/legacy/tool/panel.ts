@@ -206,6 +206,17 @@ async function executePanel(params: PanelParams, ctx: Tool.Context) {
   const primaryFe = result.fixedEffects?.primary
   const hausman = result.hausman
   const rec = result.recommendation
+  const hausmanUndetermined = rec?.preferred === "undetermined"
+    || hausman?.df === 0
+    || hausman?.statistic === null
+    || hausman?.statistic === undefined
+    || hausman?.pValue === null
+    || hausman?.pValue === undefined
+  const recommendedModel = rec?.preferred === "fixed_effects"
+    ? "固定效应（FE）"
+    : rec?.preferred === "random_effects"
+      ? "随机效应（RE）"
+      : "暂不可判定"
 
   const output = [
     `${TOOL_LABEL}已完成。`,
@@ -220,8 +231,10 @@ async function executePanel(params: PanelParams, ctx: Tool.Context) {
       { term: "固定效应 FE", estimate: primaryFe?.estimate ?? null, stdError: primaryFe?.stdError, pValue: primaryFe?.pValue },
     ]),
     "",
-    `Hausman 检验：H = ${numberText(hausman?.statistic, 3)}（df = ${hausman?.df ?? 0}），p = ${numberText(hausman?.pValue)}`,
-    `推荐模型：${rec?.preferred === "fixed_effects" ? "固定效应（FE）" : "随机效应（RE）"}`,
+    hausmanUndetermined
+      ? `Hausman 检验不可判定（df = ${hausman?.df ?? 0}）`
+      : `Hausman 检验：H = ${numberText(hausman?.statistic, 3)}（df = ${hausman?.df ?? 0}），p = ${numberText(hausman?.pValue)}`,
+    `推荐模型：${recommendedModel}`,
     `推荐理由：${rec?.reason ?? "无"}`,
     "",
     ARTIFACT_SAVED_NOTICE,
@@ -280,7 +293,9 @@ async function executePanel(params: PanelParams, ctx: Tool.Context) {
           analysisArtifact(relativeWithinProject(visibleCoefficientsPath), { visibility: "user_default" }),
         ],
         warnings: result.warnings,
-        conclusion: `${TOOL_LABEL}已完成；Hausman ${hausman?.rejectRe ? "显著拒绝 RE" : "未拒绝 RE"}，推荐使用${rec?.preferred === "fixed_effects" ? "固定效应" : "随机效应"}。`,
+        conclusion: hausmanUndetermined
+          ? `${TOOL_LABEL}已完成；Hausman 检验不可判定，不能据此选择 FE 或 RE；推荐模型暂不可判定。`
+          : `${TOOL_LABEL}已完成；Hausman ${hausman?.rejectRe ? "显著拒绝 RE" : "未拒绝 RE"}，推荐使用${recommendedModel}。`,
       }),
     },
   }

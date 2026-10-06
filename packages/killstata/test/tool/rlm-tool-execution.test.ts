@@ -17,7 +17,7 @@ afterAll(() => {
 describe("RLM model-facing execution", () => {
   test("robust_regression returns a Chinese result with down-weight diagnostics", async () => {
     const previousPython = process.env.KILLSTATA_PYTHON
-    process.env.KILLSTATA_PYTHON = path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+    process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")
 
     const dataPath = path.join(tempDir, "test_rlm.csv")
     const rows = ["y,x1,x2"]

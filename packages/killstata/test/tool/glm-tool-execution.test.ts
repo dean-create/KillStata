@@ -23,7 +23,7 @@ afterAll(() => {
 describe("GLM model-facing execution", () => {
   test("logit_regression returns a Chinese result with marginal effects and no internal leakage", async () => {
     const previousPython = process.env.KILLSTATA_PYTHON
-    process.env.KILLSTATA_PYTHON = path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+    process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")
 
     // 构造有真实信号的二元结果：employed 由 train + age 通过 logistic 生成
     const dataPath = path.join(tempDir, "employment.csv")

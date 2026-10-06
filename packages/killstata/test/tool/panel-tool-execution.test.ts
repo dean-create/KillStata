@@ -4,6 +4,7 @@ import os from "os"
 import path from "path"
 import { Instance } from "../../src/project/instance"
 import { PanelRandomEffectsTool } from "../fixtures/legacy/tool/panel"
+import { validatePanelBackendResult } from "../fixtures/legacy/tool/panel-backend"
 import { registerCanonicalDataset } from "../helpers/canonical-dataset"
 
 /**
@@ -19,10 +20,49 @@ afterAll(() => {
   fs.rmSync(tempDir, { recursive: true, force: true })
 })
 
+describe("legacy panel backend result contract", () => {
+  test("accepts an explicitly undetermined Hausman recommendation", () => {
+    const coefficient = {
+      term: "training",
+      estimate: 1,
+      stdError: 0.1,
+      statistic: 10,
+      pValue: 0.001,
+      confLow: 0.8,
+      confHigh: 1.2,
+    }
+    const result = validatePanelBackendResult({
+      success: true,
+      method: "panel_random_effects",
+      backend: "linearmodels",
+      statsmodelsVersion: "0.14.0",
+      linearmodelsVersion: "7.0",
+      rowsInput: 300,
+      rowsUsed: 300,
+      droppedRows: 0,
+      covariance: "robust",
+      entityVar: "firm_id",
+      timeVar: "year",
+      nEntities: 30,
+      nPeriods: 10,
+      randomEffects: { coefficients: [coefficient], primary: coefficient, sigmaEntity: 1 },
+      fixedEffects: { coefficients: [coefficient], primary: coefficient },
+      hausman: { statistic: null, df: 0, pValue: null, alpha: 0.05, rejectRe: null },
+      recommendation: { preferred: "undetermined", reason: "Hausman 检验不可判定" },
+      warnings: [],
+      resultPath: "analysis/results.json",
+      coefficientsPath: "analysis/coefficients.csv",
+    })
+
+    expect(result.hausman).toMatchObject({ statistic: null, df: 0, pValue: null, rejectRe: null })
+    expect(result.recommendation?.preferred).toBe("undetermined")
+  })
+})
+
 describe("panel random effects model-facing execution", () => {
   test("panel_random_effects returns a Chinese result with Hausman + recommendation", async () => {
     const previousPython = process.env.KILLSTATA_PYTHON
-    process.env.KILLSTATA_PYTHON = path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+    process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")
 
     // 真实企业销售面板：30 家公司 × 10 年
     // treatment 必须随时间变化, 否则会被个体固定效应完全吸收 → FE 估不出。

@@ -137,10 +137,11 @@
 - Test: `packages/killstata/test/web/local-web-browser-flow-host.ts`
 - Update: `PLAN.md` and `PROGRESS.md`
 
-- [x] Run Desktop unit/integration tests, CLI/Web tests, typechecks, Web production builds, Tauri debug bundle, and release package dry-run. Desktop: 365 pass / 2 skip. CLI full suite: 2161 pass / 5 skip / 3 fail; see `PROGRESS.md` before publish.
+- [x] Run Desktop unit/integration tests, CLI/Web tests, typechecks, Web production builds, Tauri debug bundle, and release package dry-run. Desktop: 365 pass / 2 skip. Latest local Core suite: 2165 pass / 5 skip / 0 fail (2170 tests, 309 files, 10533 assertions); CLI typecheck and `git diff --check` pass.
 - [x] Compare shared Desktop/Web start, submitted “1” research record, settings, and reasoning behavior; test Web at 1440×900 and 390×844. Fix and verify the narrow-screen settings overlay regression.
 - [x] Verify local loopback and private-LAN share separately. Share route/session tests block credential mutation; installed candidate activates the fake host profile in an isolated visitor workspace. No data was submitted to an external Provider and no second physical device was available.
 - [x] Finish the adversarial review and create Draft PR #6 with the known CLI full-suite failure disclosed.
 - [x] Restore clean-checkout typecheck dependencies from committed history into tracked source/test fixtures without copying modified local `trash/` files; CLI typecheck and focused legacy tests pass locally.
-- [x] Commit and push the clean-checkout repair (`f9e576b`); local CLI typecheck and 188 focused tests pass. GitHub CI rerun is pending.
-- [ ] Resolve or get an explicit decision on the composite-panel CLI gate; complete Linux host and second-device verification; obtain final approval before public npm publish.
+- [x] Diagnose the 11-failure GitHub run: use the absolute setup-python interpreter and PYTHONPATH; make model tests respect injected Python; use the actual managed runtime root in permission tests; align the legacy panel fixture with undetermined Hausman results.
+- [x] Rerun the full Core suite with locked dependencies and CI's 20-second test timeout; all 2165 tests pass, 5 skip.
+- [ ] Commit/push these CI fixes and confirm fresh clean-checkout GitHub checks; complete Linux host and second-device verification; obtain final approval before public npm publish.
