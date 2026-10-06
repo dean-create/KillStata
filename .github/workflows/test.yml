@@ -50,3 +50,29 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/packages/killstata-econometrics-engine/src
         run: |
           "${{ steps.setup-python.outputs.python-path }}" -m unittest discover -s packages/killstata-econometrics-engine/tests -p 'test_*.py'
+
+  native-web-smoke:
+    name: Native Web startup (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Set up Node for authenticated HTTP verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the runner-native CLI and bundled Web assets
+        working-directory: packages/killstata
+        run: bun run script/build.ts --single --skip-install
+
+      - name: Start the native CLI Web host and fetch its authenticated UI assets
+        working-directory: packages/killstata
+        run: node test/release/native-web-smoke.mjs
