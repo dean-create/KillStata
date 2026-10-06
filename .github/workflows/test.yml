@@ -53,6 +53,7 @@ jobs:
 
   native-web-smoke:
     name: Native Web startup (${{ matrix.os }})
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:

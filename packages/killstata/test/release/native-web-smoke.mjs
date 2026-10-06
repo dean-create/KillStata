@@ -36,14 +36,21 @@ const exited = new Promise((resolve) => {
   child.once("error", () => resolve(true))
 })
 let stdout = ""
+let stderr = ""
 child.stdout.setEncoding("utf8")
-child.stderr.resume()
+child.stderr.setEncoding("utf8")
 child.stdout.on("data", (chunk) => { stdout += chunk })
+child.stderr.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-8_000) })
+
+function startupFailure(message) {
+  const detail = stderr.trim().replace(/token=[A-Za-z0-9_-]+/gi, "token=[redacted]")
+  return new Error(detail ? `${message}\n${detail}` : message)
+}
 
 function waitForLaunchUrl() {
   return new Promise((resolve, reject) => {
     let settled = false
-    const timeout = setTimeout(() => reject(new Error("Native CLI did not print its Web launch URL")), 30_000)
+    const timeout = setTimeout(() => finish(reject, startupFailure("Native CLI did not print its Web launch URL")), 30_000)
     const finish = (callback, value) => {
       if (settled) return
       settled = true
@@ -62,7 +69,7 @@ function waitForLaunchUrl() {
     })
     child.once("exit", (code) => {
       inspect()
-      finish(reject, new Error(`Native CLI exited before Web startup (code ${code ?? "unknown"})`))
+      finish(reject, startupFailure(`Native CLI exited before Web startup (code ${code ?? "unknown"})`))
     })
     inspect()
   })
@@ -70,17 +77,23 @@ function waitForLaunchUrl() {
 
 try {
   const launchUrl = await waitForLaunchUrl()
-  const launchResponse = await fetch(launchUrl, { redirect: "manual" })
+  const launchResponse = await fetch(launchUrl, {
+    redirect: "manual",
+    signal: AbortSignal.timeout(10_000),
+  })
   assert.equal(launchResponse.status, 303, "launch token should exchange for an authenticated browser session")
 
   const setCookies = typeof launchResponse.headers.getSetCookie === "function"
     ? launchResponse.headers.getSetCookie()
     : [launchResponse.headers.get("set-cookie") ?? ""]
-  const webCookie = setCookies.find((cookie) => cookie.startsWith("killstata_web="))?.split(";", 1)[0]
-  assert.ok(webCookie, "launch response should set the HttpOnly Web session cookie")
+  const webCookieHeader = setCookies.find((cookie) => cookie.startsWith("killstata_web="))
+  assert.ok(webCookieHeader, "launch response should set the Web session cookie")
+  assert.match(webCookieHeader, /;\s*HttpOnly(?:;|$)/i, "Web session cookie should be HttpOnly")
+  assert.match(webCookieHeader, /;\s*SameSite=Strict(?:;|$)/i, "Web session cookie should use SameSite=Strict")
+  const webCookie = webCookieHeader.split(";", 1)[0]
 
   const pageUrl = new URL(launchResponse.headers.get("location"), launchUrl)
-  const pageResponse = await fetch(pageUrl, { headers: { cookie: webCookie } })
+  const pageResponse = await fetch(pageUrl, { headers: { cookie: webCookie }, signal: AbortSignal.timeout(10_000) })
   assert.equal(pageResponse.status, 200, "authenticated launch should serve the Web UI")
   const html = await pageResponse.text()
   assert.match(html, /<html\b/i, "Web response should contain the app document")
@@ -91,7 +104,10 @@ try {
   assert.ok(assetPaths.some((asset) => asset.endsWith(".css")), "Web document should reference CSS")
 
   for (const assetPath of assetPaths) {
-    const assetResponse = await fetch(new URL(assetPath, pageUrl), { headers: { cookie: webCookie } })
+    const assetResponse = await fetch(new URL(assetPath, pageUrl), {
+      headers: { cookie: webCookie },
+      signal: AbortSignal.timeout(10_000),
+    })
     assert.equal(assetResponse.status, 200, `Web asset should load: ${assetPath.split("/").at(-1)}`)
   }
 
