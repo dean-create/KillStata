@@ -97,15 +97,28 @@ describe("legacy panel backend result contract", () => {
 })
 
 describe("panel random effects model-facing execution", () => {
-  test("does not present RE when the session engine returns an indeterminate Hausman result", async () => {
+  test("does not present RE when session Hausman statistics or recommendation conflict", async () => {
     const previousPython = process.env.KILLSTATA_PYTHON
     process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")
     const dataPath = path.join(tempDir, "undetermined_panel.csv")
     fs.writeFileSync(dataPath, "firm_id,year,sales,training,size,age\n1,1,10,1,2,3\n", "utf-8")
     const invalidHausmanResults = [
-      { statistic: null, df: 0, pValue: null, alpha: 0.05, rejectRe: null },
-      { statistic: -1, df: 1.5, pValue: 1.2, alpha: 0.05, rejectRe: false },
-      { statistic: 1, df: 1, pValue: 0.3, alpha: 0.05, rejectRe: true },
+      {
+        hausman: { statistic: null, df: 0, pValue: null, alpha: 0.05, rejectRe: null },
+        message: "Hausman 检验不可判定",
+      },
+      {
+        hausman: { statistic: -1, df: 1.5, pValue: 1.2, alpha: 0.05, rejectRe: false },
+        message: "Hausman 检验不可判定",
+      },
+      {
+        hausman: { statistic: 1, df: 1, pValue: 0.3, alpha: 0.05, rejectRe: true },
+        message: "Hausman 检验不可判定",
+      },
+      {
+        hausman: { statistic: 1, df: 1, pValue: 0.01, alpha: 0.05, rejectRe: true },
+        message: "Hausman 检验结果与模型推荐不一致",
+      },
     ] as const
     let responseIndex = 0
     const validateSpy = spyOn(EconometricsEngineClient.prototype, "validate").mockImplementation(async (methodID, arguments_) => ({
@@ -119,7 +132,7 @@ describe("panel random effects model-facing execution", () => {
       const coefficientsPath = path.join(payload.output_dir, "coefficients.csv")
       const result = {
         ...panelBackendResult("random_effects"),
-        hausman: invalidHausmanResults[responseIndex++]!,
+        hausman: invalidHausmanResults[responseIndex++]!.hausman,
         recommendation: { preferred: "random_effects", reason: "Hausman 检验不显著，推荐随机效应（RE）" },
         resultPath,
         coefficientsPath,
@@ -157,7 +170,7 @@ describe("panel random effects model-facing execution", () => {
             ask: async () => undefined,
           } as never)
 
-          expect(result.output).toContain("Hausman 检验不可判定")
+          expect(result.output).toContain(invalidHausmanResults[index]!.message)
           expect(result.output).toContain("推荐模型：暂不可判定")
           expect(result.output).not.toContain("推荐模型：随机效应（RE）")
           expect(result.output).not.toContain("推荐理由：Hausman 检验不显著")

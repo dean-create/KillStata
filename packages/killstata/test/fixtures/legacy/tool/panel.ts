@@ -20,7 +20,7 @@ import { ARTIFACT_SAVED_NOTICE, analysisArtifact, analysisMetric, createToolAnal
 import { refreshExperimentLog } from "../../../../src/tool/analysis-experiment-log"
 import { numberText } from "../../../../src/util/number-text"
 import { renderCoefficientTable } from "../../../../src/util/coefficient-table"
-import { isHausmanUndetermined, runPanelBackend, type PanelMethod, type PanelPayload } from "./panel-backend"
+import { expectedHausmanRecommendation, runPanelBackend, type PanelMethod, type PanelPayload } from "./panel-backend"
 import { type PrincipleChecks, buildPrincipleChecks, standardDiagnosticStatus } from "../../../../src/runtime/principle-checks"
 
 const METHOD = "panel_random_effects" as const
@@ -206,17 +206,24 @@ async function executePanel(params: PanelParams, ctx: Tool.Context) {
   const primaryFe = result.fixedEffects?.primary
   const hausman = result.hausman
   const rec = result.recommendation
-  const hausmanUndetermined = rec?.preferred === "undetermined" || isHausmanUndetermined(hausman)
+  const expectedRecommendation = expectedHausmanRecommendation(hausman)
+  const recommendationMismatch = rec?.preferred !== expectedRecommendation
+  const hausmanUndetermined = expectedRecommendation === undefined || recommendationMismatch
   const recommendedModel = hausmanUndetermined
     ? "暂不可判定"
-    : rec?.preferred === "fixed_effects"
+    : expectedRecommendation === "fixed_effects"
       ? "固定效应（FE）"
-      : rec?.preferred === "random_effects"
+      : expectedRecommendation === "random_effects"
         ? "随机效应（RE）"
         : "暂不可判定"
   const recommendationReason = hausmanUndetermined
     ? "Hausman 检验信息不足或相互矛盾，不能据此选择 FE 或 RE。"
     : rec?.reason ?? "无"
+  const hausmanSummary = expectedRecommendation === undefined
+    ? "Hausman 检验不可判定，不能据此选择 FE 或 RE"
+    : recommendationMismatch
+      ? "Hausman 检验结果与模型推荐不一致，不能据此选择 FE 或 RE"
+      : `Hausman 检验：H = ${numberText(hausman?.statistic, 3)}（df = ${hausman?.df ?? 0}），p = ${numberText(hausman?.pValue)}`
 
   const output = [
     `${TOOL_LABEL}已完成。`,
@@ -231,9 +238,7 @@ async function executePanel(params: PanelParams, ctx: Tool.Context) {
       { term: "固定效应 FE", estimate: primaryFe?.estimate ?? null, stdError: primaryFe?.stdError, pValue: primaryFe?.pValue },
     ]),
     "",
-    hausmanUndetermined
-      ? "Hausman 检验不可判定，不能据此选择 FE 或 RE"
-      : `Hausman 检验：H = ${numberText(hausman?.statistic, 3)}（df = ${hausman?.df ?? 0}），p = ${numberText(hausman?.pValue)}`,
+    hausmanSummary,
     `推荐模型：${recommendedModel}`,
     `推荐理由：${recommendationReason}`,
     "",

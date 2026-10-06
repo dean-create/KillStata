@@ -87,9 +87,10 @@ function hasUsableHausmanStatistics(hausman: Partial<PanelHausman> | undefined) 
     && hausman.alpha < 1
 }
 
-export function isHausmanUndetermined(hausman: Partial<PanelHausman> | undefined) {
-  if (!hausman || !hasUsableHausmanStatistics(hausman)) return true
-  return typeof hausman.rejectRe !== "boolean" || hausman.rejectRe !== (hausman.pValue! < hausman.alpha!)
+export function expectedHausmanRecommendation(hausman: Partial<PanelHausman> | undefined) {
+  if (!hausman || !hasUsableHausmanStatistics(hausman)) return undefined
+  if (typeof hausman.rejectRe !== "boolean" || hausman.rejectRe !== (hausman.pValue! < hausman.alpha!)) return undefined
+  return hausman.rejectRe ? "fixed_effects" as const : "random_effects" as const
 }
 
 const CoefficientSchema = z
@@ -175,22 +176,16 @@ const SuccessResultSchema = z
     if (value.nPeriods < 2) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "面板时间期数过少" })
     }
-    if (!hasUsableHausmanStatistics(value.hausman)) {
+    const expectedRecommendation = expectedHausmanRecommendation(value.hausman)
+    if (!expectedRecommendation) {
       if (value.hausman.rejectRe !== null) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hausman 检验不可判定时不能提供拒绝标记" })
       }
       if (value.recommendation.preferred !== "undetermined") {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hausman 检验不可判定时不能推荐 FE 或 RE" })
       }
-    } else {
-      const expectedRejectRe = value.hausman.pValue! < value.hausman.alpha
-      if (value.hausman.rejectRe !== expectedRejectRe) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hausman 拒绝标记必须与 p 值和 alpha 一致" })
-      }
-      const expectedRecommendation = expectedRejectRe ? "fixed_effects" : "random_effects"
-      if (value.recommendation.preferred !== expectedRecommendation) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hausman 检验结论与模型推荐不一致" })
-      }
+    } else if (value.recommendation.preferred !== expectedRecommendation) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hausman 检验结论与模型推荐不一致" })
     }
   })
 
