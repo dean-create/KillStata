@@ -37,6 +37,12 @@ The previous Draft PR #6 head failed GitHub typecheck because the clean checkout
 - Review follow-up added cross-field validation for Hausman df/statistic/p-value/alpha, requires `rejectRe === (pValue < alpha)`, and verifies recommendation agreement. Session output suppresses FE/RE recommendations, reasons, and p-value display for missing, malformed, or inconsistent metrics. Panel contract/session-output tests pass 9/9, including the `p == alpha` boundary.
 - The Desktop parity lifecycle test timed out just over its 5-second default twice during the parallel full suite but passed in 1.99 seconds when isolated. Its per-test timeout is now 10 seconds; the full Desktop suite passes 365 tests with 2 skips. Desktop typecheck and the standalone Web production build pass.
 
+## Clean-checkout private workbook handling
+
+- The first fresh GitHub run at `abf9490` passed typecheck but failed three scripted DID journeys because `data/did.xlsx` is intentionally ignored/private and absent from GitHub's checkout. All other Core tests passed; the missing workbook caused `ENOENT` at fixture copy.
+- The three tests now use `hasLocalRealData("did.xlsx")` and `localRealDataPath("did.xlsx")`. A clean-data simulation with the CI Python environment yields 3 explicit skips, 3 passes, and 0 failures; using the configured private local workbook yields 6 passes and 0 failures across those files. The workbook remains untracked.
+- This test-portability fix needs a new GitHub run.
+
 ## Not verified
 
 - Access from a second physical LAN device.

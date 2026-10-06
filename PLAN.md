@@ -10,8 +10,8 @@
 - 本机完整 Core 全量为 **2165 通过、5 跳过、0 失败**（2170 tests / 309 files / 10533 assertions）；审查后新增 Hausman 统计一致性与 session 输出用例，聚焦 panel 契约/session 输出 9/9、CLI typecheck 通过，等待新 CI 完整运行。
 - Desktop 全量复跑 **365 通过 / 2 跳过**；parity lifecycle 测试在并行运行下耗时略超默认 5 秒，已仅将该测试限制调为 10 秒，未改变行为断言。Desktop typecheck、Web build 通过。
 - 独立审查提出 Hausman metrics/recommendation 不一致风险；展示层对不完整、超范围或决策标记冲突的统计量隐藏 FE/RE 推荐；validator 还验证 `rejectRe` 与 `pValue < alpha` 一致。面板契约/session 输出测试 9/9，覆盖有效 FE/RE、`p == alpha`、异常数值、错误推荐和错误理由。
-- Draft PR #6 已开；当前最新 GitHub 结果仍对应修复前提交。将完成 follow-up review、推送并重新跑 clean-checkout CI。
-- 仍待完成：新 GitHub CI、Linux 主机启动、第二台局域网设备验收、真实模型 Provider 验收；npm 发布前需最终用户批准。当前公开 registry 仍为 `killstata@0.1.27`，`0.1.30` 未发布。
+- 最新 GitHub head `abf9490` 的 typecheck 通过；Core 2105 pass / 69 skip / 3 fail，三项因 checkout 缺少被忽略的私有 `data/did.xlsx`。三个回放现仅在没有本地/配置 workbook 时 skip；无数据模拟 3 skip / 3 pass / 0 fail，私有 workbook 本机验证 6 pass / 0 fail。
+- 仍待完成：提交推送 workbook-portability 修复并确认新 clean-checkout CI、Linux 主机启动、第二台局域网设备验收、真实模型 Provider 验收；npm 发布前需最终用户批准。当前公开 registry 仍为 `killstata@0.1.27`，`0.1.30` 未发布。
 
 ---
 

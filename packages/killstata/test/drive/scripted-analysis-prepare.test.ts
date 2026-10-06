@@ -14,6 +14,7 @@ import { methodSchemaIDsVisibleToModel } from "@/runtime/tool-schema-provenance"
 import { readDatasetManifest } from "@/tool/analysis-state"
 import { AnalysisIntent } from "@/tool/analysis-intent"
 import { DEEPSEEK_DEFAULT_MODEL_ID, DEEPSEEK_PROVIDER_ID } from "@/provider/deepseek-policy"
+import { hasLocalRealData, localRealDataPath } from "../helpers/local-real-data"
 
 const spies: Array<{ mockRestore(): void }> = []
 
@@ -57,10 +58,10 @@ function strings(value: unknown): string[] {
 }
 
 describe("scripted real-data analysis preparation", () => {
-  test("registers, imports and diagnoses did.xlsx, loads Python OLS Schema, and prepares without executing", async () => {
+  test.skipIf(!hasLocalRealData("did.xlsx"))("registers, imports and diagnoses did.xlsx, loads Python OLS Schema, and prepares without executing", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "killstata-analysis-prepare-e2e-"))
     const source = path.join(root, "did.xlsx")
-    fs.copyFileSync(path.resolve(import.meta.dir, "../../../../data/did.xlsx"), source)
+    fs.copyFileSync(localRealDataPath("did.xlsx"), source)
     const visibleByRound: string[][] = []
     const schemaIDsByRound: string[][] = []
     const modelTurns: string[][] = []

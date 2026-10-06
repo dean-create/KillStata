@@ -12,6 +12,7 @@ import { EconometricsEngineClient } from "@/runtime/services/econometrics-engine
 import { RuntimeTaskLedger } from "@/runtime/task-ledger"
 import { AnalysisIntent } from "@/tool/analysis-intent"
 import { DEEPSEEK_DEFAULT_MODEL_ID, DEEPSEEK_PROVIDER_ID } from "@/provider/deepseek-policy"
+import { hasLocalRealData, localRealDataPath } from "../helpers/local-real-data"
 
 const spies: Array<{ mockRestore(): void }> = []
 
@@ -47,11 +48,11 @@ function completeTools(calls: ScriptedToolCall[]) {
   })()
 }
 
-test("real did.xlsx OLS executes only by PreparedSpec specId and current user method authorization", async () => {
+test.skipIf(!hasLocalRealData("did.xlsx"))("real did.xlsx OLS executes only by PreparedSpec specId and current user method authorization", async () => {
   if (!process.env.KILLSTATA_PYTHON) throw new Error("该回放必须使用受管 Python Registry；禁止静默跳过")
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "killstata-prepared-spec-execution-"))
   const source = path.join(root, "did.xlsx")
-  fs.copyFileSync(path.resolve(import.meta.dir, "../../../../data/did.xlsx"), source)
+  fs.copyFileSync(localRealDataPath("did.xlsx"), source)
   const modelToolsByRound: string[][] = []
   const executeSpy = spyOn(EconometricsEngineClient.prototype, "execute")
   spies.push(executeSpy)

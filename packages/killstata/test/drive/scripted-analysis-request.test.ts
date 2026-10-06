@@ -12,6 +12,7 @@ import { RuntimeTaskLedger } from "@/runtime/task-ledger"
 import { AnalysisIntent } from "@/tool/analysis-intent"
 import { readDatasetManifest } from "@/tool/analysis-state"
 import { DEEPSEEK_DEFAULT_MODEL_ID, DEEPSEEK_PROVIDER_ID } from "@/provider/deepseek-policy"
+import { hasLocalRealData, localRealDataPath } from "../helpers/local-real-data"
 
 const spies: Array<{ mockRestore(): void }> = []
 
@@ -44,9 +45,9 @@ function completeTool(toolName: string, toolCallId: string, input: Record<string
 }
 
 describe("data-bearing turn analysis request gate", () => {
-  test("registers against the user message, then rebuilds the tool pool before import", async () => {
+  test.skipIf(!hasLocalRealData("did.xlsx"))("registers against the user message, then rebuilds the tool pool before import", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "killstata-analysis-request-flow-"))
-    const source = path.resolve(import.meta.dir, "../../../../data/did.xlsx")
+    const source = localRealDataPath("did.xlsx")
     fs.copyFileSync(source, path.join(root, "did.xlsx"))
     const stagedSource = path.join(root, "did.xlsx")
 

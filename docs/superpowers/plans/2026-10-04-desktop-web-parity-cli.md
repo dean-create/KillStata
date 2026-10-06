@@ -146,4 +146,5 @@
 - [x] Rerun the full Core suite with locked dependencies and CI's 20-second test timeout; all 2165 tests pass, 5 skip.
 - [x] Review follow-up: reject Hausman flags/recommendations that contradict missing or invalid statistics; require `rejectRe === (pValue < alpha)`; prevent the session result from showing an RE recommendation or reason when metrics are malformed or contradictory. Panel contract/session-output tests pass 9/9, including the `p == alpha` boundary.
 - [x] Rerun the full Desktop suite after raising only the slow parity test's local timeout to 10 seconds; 365 pass / 2 skip. Desktop typecheck and Web production build pass.
-- [ ] Commit/push these CI fixes and confirm fresh clean-checkout GitHub checks; complete Linux host and second-device verification; obtain final approval before public npm publish.
+- [x] Make the three real-DID scripted journeys portable: use the local-data helper, run when a private workbook is configured, and skip explicitly in a clean checkout without it. Verified 3 skip / 3 pass without data and 6 pass / 0 fail with local `did.xlsx`.
+- [ ] Commit/push the missing-workbook test fix and confirm fresh clean-checkout GitHub checks; complete Linux host and second-device verification; obtain final approval before public npm publish.
