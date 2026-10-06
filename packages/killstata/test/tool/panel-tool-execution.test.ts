@@ -1,8 +1,9 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
 import { Instance } from "../../src/project/instance"
+import { EconometricsEngineClient } from "../../src/runtime/services/econometrics-engine-client"
 import { PanelRandomEffectsTool } from "../fixtures/legacy/tool/panel"
 import { validatePanelBackendResult } from "../fixtures/legacy/tool/panel-backend"
 import { registerCanonicalDataset } from "../helpers/canonical-dataset"
@@ -20,46 +21,133 @@ afterAll(() => {
   fs.rmSync(tempDir, { recursive: true, force: true })
 })
 
+function panelBackendResult(preferred: "undetermined" | "fixed_effects" | "random_effects" = "undetermined") {
+  const coefficient = {
+    term: "training",
+    estimate: 1,
+    stdError: 0.1,
+    statistic: 10,
+    pValue: 0.001,
+    confLow: 0.8,
+    confHigh: 1.2,
+  }
+  return {
+    success: true,
+    method: "panel_random_effects",
+    backend: "linearmodels",
+    statsmodelsVersion: "0.14.0",
+    linearmodelsVersion: "7.0",
+    rowsInput: 300,
+    rowsUsed: 300,
+    droppedRows: 0,
+    covariance: "robust",
+    entityVar: "firm_id",
+    timeVar: "year",
+    nEntities: 30,
+    nPeriods: 10,
+    randomEffects: { coefficients: [coefficient], primary: coefficient, sigmaEntity: 1 },
+    fixedEffects: { coefficients: [coefficient], primary: coefficient },
+    hausman: { statistic: null, df: 0, pValue: null, alpha: 0.05, rejectRe: null },
+    recommendation: { preferred, reason: "Hausman 检验不可判定" },
+    warnings: [],
+    resultPath: "analysis/results.json",
+    coefficientsPath: "analysis/coefficients.csv",
+  }
+}
+
 describe("legacy panel backend result contract", () => {
   test("accepts an explicitly undetermined Hausman recommendation", () => {
-    const coefficient = {
-      term: "training",
-      estimate: 1,
-      stdError: 0.1,
-      statistic: 10,
-      pValue: 0.001,
-      confLow: 0.8,
-      confHigh: 1.2,
-    }
-    const result = validatePanelBackendResult({
-      success: true,
-      method: "panel_random_effects",
-      backend: "linearmodels",
-      statsmodelsVersion: "0.14.0",
-      linearmodelsVersion: "7.0",
-      rowsInput: 300,
-      rowsUsed: 300,
-      droppedRows: 0,
-      covariance: "robust",
-      entityVar: "firm_id",
-      timeVar: "year",
-      nEntities: 30,
-      nPeriods: 10,
-      randomEffects: { coefficients: [coefficient], primary: coefficient, sigmaEntity: 1 },
-      fixedEffects: { coefficients: [coefficient], primary: coefficient },
-      hausman: { statistic: null, df: 0, pValue: null, alpha: 0.05, rejectRe: null },
-      recommendation: { preferred: "undetermined", reason: "Hausman 检验不可判定" },
-      warnings: [],
-      resultPath: "analysis/results.json",
-      coefficientsPath: "analysis/coefficients.csv",
-    })
+    const result = validatePanelBackendResult(panelBackendResult())
 
     expect(result.hausman).toMatchObject({ statistic: null, df: 0, pValue: null, rejectRe: null })
     expect(result.recommendation?.preferred).toBe("undetermined")
   })
+
+  test("accepts FE/RE recommendations that agree with a determinate Hausman result", () => {
+    for (const [rejectRe, preferred] of [
+      [true, "fixed_effects"],
+      [false, "random_effects"],
+    ] as const) {
+      const result = validatePanelBackendResult({
+        ...panelBackendResult(preferred),
+        hausman: { statistic: 1, df: 1, pValue: 0.3, alpha: 0.05, rejectRe },
+      })
+      expect(result.recommendation?.preferred).toBe(preferred)
+    }
+  })
+
+  test("rejects a random-effects recommendation when Hausman is indeterminate", () => {
+    expect(() => validatePanelBackendResult(panelBackendResult("random_effects")))
+      .toThrow("面板随机效应结果结构不完整")
+  })
+
+  test("rejects a Hausman rejection flag when its test statistics are missing", () => {
+    expect(() => validatePanelBackendResult({
+      ...panelBackendResult(),
+      hausman: { statistic: null, df: 0, pValue: null, alpha: 0.05, rejectRe: false },
+    })).toThrow("面板随机效应结果结构不完整")
+  })
 })
 
 describe("panel random effects model-facing execution", () => {
+  test("does not present RE when the session engine returns an indeterminate Hausman result", async () => {
+    const previousPython = process.env.KILLSTATA_PYTHON
+    process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+    const sessionID = "panel-undetermined-result-test"
+    const dataPath = path.join(tempDir, "undetermined_panel.csv")
+    fs.writeFileSync(dataPath, "firm_id,year,sales,training,size,age\n1,1,10,1,2,3\n", "utf-8")
+    const validateSpy = spyOn(EconometricsEngineClient.prototype, "validate").mockImplementation(async (methodID, arguments_) => ({
+      registry_version: 1,
+      method_id: methodID,
+      arguments: arguments_,
+    }))
+    const executeSpy = spyOn(EconometricsEngineClient.prototype, "execute").mockImplementation(async (payload) => {
+      fs.mkdirSync(payload.output_dir, { recursive: true })
+      const resultPath = path.join(payload.output_dir, "results.json")
+      const coefficientsPath = path.join(payload.output_dir, "coefficients.csv")
+      const result = { ...panelBackendResult("random_effects"), resultPath, coefficientsPath }
+      fs.writeFileSync(resultPath, JSON.stringify(result), "utf-8")
+      fs.writeFileSync(coefficientsPath, "term,estimate\ntraining,1\n", "utf-8")
+      return { payload: result } as never
+    })
+
+    try {
+      await Instance.provide({ directory: tempDir, fn: async () => {
+        const source = registerCanonicalDataset({ sessionID, sourcePath: dataPath, datasetId: "dataset_panel_undetermined" })
+        const tool = await PanelRandomEffectsTool.init()
+        const result = await tool.execute({
+          ...source,
+          dependentVar: "sales",
+          treatmentVar: "training",
+          covariates: ["size", "age"],
+          entityVar: "firm_id",
+          timeVar: "year",
+          covariance: "robust",
+        }, {
+          sessionID,
+          messageID: "message",
+          callID: "call",
+          agent: "analyst",
+          abort: new AbortController().signal,
+          metadata: () => undefined,
+          ask: async () => undefined,
+        } as never)
+
+        expect(result.output).toContain("Hausman 检验不可判定")
+        expect(result.output).toContain("推荐模型：暂不可判定")
+        expect(result.output).not.toContain("推荐模型：随机效应（RE）")
+        expect(result.metadata.analysisView.conclusion).toContain("不能据此选择 FE 或 RE")
+        expect(validateSpy).toHaveBeenCalledTimes(1)
+        expect(executeSpy).toHaveBeenCalledTimes(1)
+      } })
+    } finally {
+      validateSpy.mockRestore()
+      executeSpy.mockRestore()
+      if (previousPython === undefined) delete process.env.KILLSTATA_PYTHON
+      else process.env.KILLSTATA_PYTHON = previousPython
+    }
+  }, 60_000)
+
   test("panel_random_effects returns a Chinese result with Hausman + recommendation", async () => {
     const previousPython = process.env.KILLSTATA_PYTHON
     process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")

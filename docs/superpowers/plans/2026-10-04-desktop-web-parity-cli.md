@@ -144,4 +144,6 @@
 - [x] Restore clean-checkout typecheck dependencies from committed history into tracked source/test fixtures without copying modified local `trash/` files; CLI typecheck and focused legacy tests pass locally.
 - [x] Diagnose the 11-failure GitHub run: use the absolute setup-python interpreter and PYTHONPATH; make model tests respect injected Python; use the actual managed runtime root in permission tests; align the legacy panel fixture with undetermined Hausman results.
 - [x] Rerun the full Core suite with locked dependencies and CI's 20-second test timeout; all 2165 tests pass, 5 skip.
+- [x] Review follow-up: reject Hausman decision flags/recommendations that contradict missing or zero-df statistics; prevent the visitor-facing legacy result from labeling the model RE when its test is indeterminate. The panel contract and output execution slice passes 6/6, covering valid FE/RE decisions and contradictory payloads.
+- [x] Rerun the full Desktop suite after raising only the slow parity test's local timeout to 10 seconds; 365 pass / 2 skip. Desktop typecheck and Web production build pass.
 - [ ] Commit/push these CI fixes and confirm fresh clean-checkout GitHub checks; complete Linux host and second-device verification; obtain final approval before public npm publish.

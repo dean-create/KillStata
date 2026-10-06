@@ -20,7 +20,7 @@ import { ARTIFACT_SAVED_NOTICE, analysisArtifact, analysisMetric, createToolAnal
 import { refreshExperimentLog } from "../../../../src/tool/analysis-experiment-log"
 import { numberText } from "../../../../src/util/number-text"
 import { renderCoefficientTable } from "../../../../src/util/coefficient-table"
-import { runPanelBackend, type PanelMethod, type PanelPayload } from "./panel-backend"
+import { isHausmanUndetermined, runPanelBackend, type PanelMethod, type PanelPayload } from "./panel-backend"
 import { type PrincipleChecks, buildPrincipleChecks, standardDiagnosticStatus } from "../../../../src/runtime/principle-checks"
 
 const METHOD = "panel_random_effects" as const
@@ -206,17 +206,14 @@ async function executePanel(params: PanelParams, ctx: Tool.Context) {
   const primaryFe = result.fixedEffects?.primary
   const hausman = result.hausman
   const rec = result.recommendation
-  const hausmanUndetermined = rec?.preferred === "undetermined"
-    || hausman?.df === 0
-    || hausman?.statistic === null
-    || hausman?.statistic === undefined
-    || hausman?.pValue === null
-    || hausman?.pValue === undefined
-  const recommendedModel = rec?.preferred === "fixed_effects"
-    ? "固定效应（FE）"
-    : rec?.preferred === "random_effects"
-      ? "随机效应（RE）"
-      : "暂不可判定"
+  const hausmanUndetermined = rec?.preferred === "undetermined" || isHausmanUndetermined(hausman)
+  const recommendedModel = hausmanUndetermined
+    ? "暂不可判定"
+    : rec?.preferred === "fixed_effects"
+      ? "固定效应（FE）"
+      : rec?.preferred === "random_effects"
+        ? "随机效应（RE）"
+        : "暂不可判定"
 
   const output = [
     `${TOOL_LABEL}已完成。`,

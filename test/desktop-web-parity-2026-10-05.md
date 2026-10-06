@@ -34,10 +34,13 @@ The previous Draft PR #6 head failed GitHub typecheck because the clean checkout
 - A full local CI-shaped rerun with the locked Python environment initially showed three unrelated clean-home issues: the log test classified `/tmp` as a temporary path, permission tests hard-coded the developer home, and schema normalization ignored the explicit interpreter outside an Instance context. The final rerun used the machine's normal `HOME` and the CI-style absolute interpreter.
 - The permission fixture now derives its runner from `Global.Path.data`; Python model tests use injected `KILLSTATA_PYTHON`; the schema normalization test checks the explicit interpreter first. The legacy panel fixture and schema now retain an explicitly undetermined Hausman recommendation rather than defaulting to RE.
 - Final local Core rerun: 2165 pass, 5 skip, 0 fail; 2170 tests across 309 files, 10533 assertions. The absolute-interpreter workflow change parses as YAML; CLI typecheck and `git diff --check` pass. These fixes are not yet on the PR head; fresh GitHub CI is still required.
+- Review follow-up added cross-field validation: an unavailable Hausman test must have a null decision flag and an `undetermined` recommendation; a valid test recommendation must agree with its rejection flag. The result presenter also withholds FE/RE wording when Hausman is unavailable. The mismatch tests failed before the fix; panel contract/output execution passes 6/6, including a mocked session response with inconsistent RE recommendation.
+- The Desktop parity lifecycle test timed out just over its 5-second default twice during the parallel full suite but passed in 1.99 seconds when isolated. Its per-test timeout is now 10 seconds; the full Desktop suite passes 365 tests with 2 skips. Desktop typecheck and the standalone Web production build pass.
 
 ## Not verified
 
 - Access from a second physical LAN device.
 - A real external model Provider request.
 - Native runtime startup on a Linux host.
+- Fresh GitHub CI for the follow-up commit, including the final two panel Schema cases.
 - Public npm publication. The registry still serves `killstata@0.1.27`; `0.1.30` remains an unpublished candidate pending the review gate and final approval.

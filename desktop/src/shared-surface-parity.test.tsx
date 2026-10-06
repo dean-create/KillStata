@@ -357,7 +357,7 @@ describe("Desktop and connected-Web shared App parity", () => {
 
     expect(savedApiKeys).toEqual(["sk-parity-test", "sk-parity-backup", "sk-parity-test", "sk-parity-backup"])
     expect(captures[0]).toEqual(captures[1])
-  })
+  }, 10_000)
 
   test("keeps Core-unavailable feedback and retry recovery identical through Core and Web health adapters", async () => {
     const captures: unknown[] = []

@@ -69,6 +69,14 @@ export type PanelBackendResult = {
   message?: string
 }
 
+export function isHausmanUndetermined(hausman: Partial<PanelHausman> | undefined) {
+  return hausman?.df === undefined
+    || hausman.df === 0
+    || hausman.statistic == null
+    || hausman.pValue == null
+    || hausman.rejectRe == null
+}
+
 const CoefficientSchema = z
   .object({
     term: z.string().min(1),
@@ -151,6 +159,19 @@ const SuccessResultSchema = z
     }
     if (value.nPeriods < 2) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "面板时间期数过少" })
+    }
+    if (isHausmanUndetermined(value.hausman)) {
+      if (value.hausman.rejectRe !== null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hausman 检验不可判定时不能提供拒绝标记" })
+      }
+      if (value.recommendation.preferred !== "undetermined") {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hausman 检验不可判定时不能推荐 FE 或 RE" })
+      }
+    } else {
+      const expectedRecommendation = value.hausman.rejectRe === true ? "fixed_effects" : "random_effects"
+      if (value.recommendation.preferred !== expectedRecommendation) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hausman 检验结论与模型推荐不一致" })
+      }
     }
   })
 

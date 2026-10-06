@@ -6,9 +6,11 @@
 - Desktop/Web 的默认模式、“1”研究记录、设置与 reasoning 折叠已做视觉/交互对照；Web 在 1440×900 与 390×844 可用。窄屏设置面板被工作区抽屉遮挡的问题已红绿修复。
 - `killstata web` 默认 loopback；显式 `--share` 才开放私有 LAN 访客。候选 `0.1.30` 的 12 个 tarball（11 native + launcher）SHA-512 manifest 匹配，隔离安装的 `--version`、`web --help`、loopback 和 `--share` 启动通过。
 - 安装包分享页已在同一台 Mac 经私有网卡连入隔离测试档案：访客 Core ready、模型档案只读、无 API Key；未提交数据给外部 Provider。第二台物理设备尚未验收。
-- 修复上一轮 CI 根因：CI Python 绝对路径和 PYTHONPATH；7 个旧模型测试尊重显式 `KILLSTATA_PYTHON`；permission safety 测试从 `Global.Path.data` 构造 managed runtime 路径；panel legacy fixture 正确允许 Hausman 不可判定。各问题均先复现失败再修复。
-- 当前本机验证：Core **2165 pass / 5 skip / 0 fail**，共 2170 tests、309 files、10533 assertions；CLI typecheck、diff check、workflow YAML 解析通过。此次运行采用 CI 的 20 秒单测限制和锁定依赖，未改 HOME。
-- Draft PR #6 的最新远端结果仍对应上述修复前提交；本地修复尚待提交推送并触发新的 clean-checkout GitHub CI。
+- 修复上一轮 CI 根因：CI 使用绝对 Python/PYTHONPATH；7 个旧模型测试尊重注入的 `KILLSTATA_PYTHON`；permission safety 测试从 `Global.Path.data` 构造 managed runtime 路径。
+- 独立复审发现无效 Hausman 指标与 `random_effects` 推荐可能冲突。展示层现在在检验不可判定时不显示 FE/RE 推荐；legacy Schema 同时拒绝错误推荐和缺失统计量上的拒绝标记。反例先红后绿，面板契约+输出执行测试 6/6 通过，并覆盖有效 FE/RE 决策。
+- 最新完整本机 Core suite（最终复审新增的两条反例之前）：**2165 pass / 5 skip / 0 fail**，2170 tests、309 files、10533 assertions。之后新增两条 panel Schema 反例，聚焦 panel 测试 4/4、CLI typecheck 通过；等待新 GitHub 全量门禁。
+- Desktop 全量在并行 Web build 下重复暴露一项 5.09 秒用例超时；同一用例隔离耗时 1.99 秒。仅将该 parity 测试的单项限制调为 10 秒后，全量 Desktop **365 pass / 2 skip**；Desktop typecheck 和 Web 生产构建通过。
+- Draft PR #6 的远端结果仍对应修复前提交；当前 follow-up 待复审、推送并触发新的 clean-checkout GitHub CI。
 - npm registry 仍为 `killstata@0.1.27`；候选 `0.1.30` 未发布。尚待：新 GitHub CI、Linux 主机启动、第二台设备访问、真实 Provider 验收及发布审批。
 - 本轮详细验证记录：`test/desktop-web-parity-2026-10-05.md`。
 
