@@ -11,7 +11,8 @@
 - Desktop 全量复跑 **365 通过 / 2 跳过**；parity lifecycle 测试在并行运行下耗时略超默认 5 秒，已仅将该测试限制调为 10 秒，未改变行为断言。Desktop typecheck、Web build 通过。
 - 独立审查提出 Hausman metrics/recommendation 不一致风险；展示层对不完整、超范围或决策标记冲突的统计量隐藏 FE/RE 推荐；validator 还验证 `rejectRe` 与 `pValue < alpha` 一致。面板契约/session 输出测试 9/9，覆盖有效 FE/RE、`p == alpha`、异常数值、错误推荐和错误理由。
 - 最新 GitHub test 工作流全绿：Core 2105 pass / 72 skip / 0 fail（2177 tests / 309 files），Desktop/Web 365 pass / 2 skip，Python engine 150 pass；三条私有 workbook 回放在 clean checkout 明确跳过。
-- 独立 `typecheck` 与 Nix hash jobs 卡在无 runner 接单的 Blacksmith 队列；两个 workflow 已改到 `ubuntu-latest`，待推送核验。仍待 Linux 主机启动、第二台局域网设备验收、真实模型 Provider 验收；npm 发布前需最终用户批准。公开 registry 仍为 `killstata@0.1.27`，`0.1.30` 未发布。
+- 独立 `typecheck` 已在 `ubuntu-latest` 通过；Nix hash updater 也开始运行，但在缺失的可选 `patches/` fileset 路径上失败。`nix/node_modules.nix` 现对该目录使用 `lib.fileset.maybeMissing`；待下一轮 Nix/test 检查验证。
+- 仍待 Linux 主机启动、第二台局域网设备验收、真实模型 Provider 验收；npm 发布前需最终用户批准。公开 registry 仍为 `killstata@0.1.27`，`0.1.30` 未发布。
 
 ---
 

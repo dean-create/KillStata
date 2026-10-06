@@ -11,7 +11,7 @@
 - 最新完整 GitHub test suite：**Core 2105 pass / 72 skip / 0 fail**（2177 tests / 309 files）；Desktop/Web 365 pass / 2 skip；Python engine 150 pass。clean checkout 缺失的三条私有 workbook 回放按设计跳过。
 - Desktop 全量在并行 Web build 下重复暴露一项 5.09 秒用例超时；同一用例隔离耗时 1.99 秒。仅将该 parity 测试的单项限制调为 10 秒后，全量 Desktop **365 pass / 2 skip**；Desktop typecheck 和 Web 生产构建通过。
 - 三个 scripted DID 用例已改用 `hasLocalRealData` / `localRealDataPath`：无 workbook 显式 skip，有本地 workbook 继续完整运行。clean-data 模拟 3 skip / 3 pass / 0 fail；私有本地 workbook 下 6 pass / 0 fail，数据仍未跟踪。
-- 独立 `typecheck` 与 Nix hash job 仍排队在没有 runner 接单的 Blacksmith 队列；两个 workflow 已改用 `ubuntu-latest`，待推送确认。
+- 独立 `typecheck` 已在 `ubuntu-latest` 通过；Nix updater 在 hash 计算前因 `nix/node_modules.nix` 引用 checkout 中不存在的可选 `patches/` 目录而失败。该目录没有跟踪文件；fileset 已改用 `lib.fileset.maybeMissing`，等待下一轮 Nix/test 工作流。
 - npm registry 仍为 `killstata@0.1.27`；候选 `0.1.30` 未发布。尚待：新 GitHub CI、Linux 主机启动、第二台设备访问、真实 Provider 验收及发布审批。
 - 本轮详细验证记录：`test/desktop-web-parity-2026-10-05.md`。
 

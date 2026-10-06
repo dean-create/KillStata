@@ -43,6 +43,7 @@ The previous Draft PR #6 head failed GitHub typecheck because the clean checkout
 - The three tests now use `hasLocalRealData("did.xlsx")` and `localRealDataPath("did.xlsx")`. A clean-data simulation with the CI Python environment yields 3 explicit skips, 3 passes, and 0 failures; using the configured private local workbook yields 6 passes and 0 failures across those files. The workbook remains untracked.
 - Fresh GitHub test run at `b158b714` passed: Core 2105 pass / 72 skip / 0 fail; Desktop/Web 365 pass / 2 skip; Python engine 150 pass. The three private workbook journeys skipped because the workbook is absent from clean checkout.
 - The separate `typecheck` and `Update Nix Hashes` checks remain queued on `blacksmith-4vcpu-ubuntu-2404` with no runner assigned. Both workflow files now target the same `ubuntu-latest` runner that completed the test workflow; YAML parses, but the new checks still need a fresh run.
+- On head `1e84054`, the `ubuntu-latest` typecheck passed and Nix hash update started, then failed before hash calculation because the source fileset included absent optional `patches/`. The repo has no tracked patch files; `nix/node_modules.nix` now wraps that path with `lib.fileset.maybeMissing`. The next clean Nix run must confirm it.
 
 ## Not verified
 
