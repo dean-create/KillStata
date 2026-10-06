@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { runQuantileBackend } from "../../../../trash/killstata-legacy-econometrics/tool/quantile-backend"
+import { runQuantileBackend } from "../fixtures/legacy/tool/quantile-backend"
 
 /**
  * B 级数值对标（独立实现）：分位数回归。

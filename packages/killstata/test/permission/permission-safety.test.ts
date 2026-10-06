@@ -86,7 +86,7 @@ describe("safetyCheck（敏感路径免疫 allow）", () => {
     for (const file of files) {
       const source = fs.readFileSync(
         legacyFiles.has(file)
-          ? path.join(import.meta.dir, "../../../..", "trash/killstata-legacy-econometrics/tool", file)
+          ? path.join(import.meta.dir, "../fixtures/legacy/tool", file)
           : path.join(import.meta.dir, "../../src/tool", file),
         "utf-8",
       )

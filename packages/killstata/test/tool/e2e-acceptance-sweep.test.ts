@@ -39,7 +39,7 @@ function ok(r: any) {
 
 describe("① 二元结果 — Logit/Probit (Spector 文献值数据)", () => {
   test("logit_regression", async () => {
-    const { runGlmBackend } = await import("../../../../trash/killstata-legacy-econometrics/tool/glm-backend")
+    const { runGlmBackend } = await import("../fixtures/legacy/tool/glm-backend")
     const r = await runGlmBackend({
       pythonCommand: PYTHON,
       cwd: ROOT,
@@ -60,7 +60,7 @@ describe("① 二元结果 — Logit/Probit (Spector 文献值数据)", () => {
   })
 
   test("probit_regression", async () => {
-    const { runGlmBackend } = await import("../../../../trash/killstata-legacy-econometrics/tool/glm-backend")
+    const { runGlmBackend } = await import("../fixtures/legacy/tool/glm-backend")
     const r = await runGlmBackend({
       pythonCommand: PYTHON,
       cwd: ROOT,
@@ -82,7 +82,7 @@ describe("① 二元结果 — Logit/Probit (Spector 文献值数据)", () => {
 
 describe("② 计数结果 — Poisson (合成计数数据, 400 obs)", () => {
   test("poisson_regression", async () => {
-    const { runCountBackend } = await import("../../../../trash/killstata-legacy-econometrics/tool/count-backend")
+    const { runCountBackend } = await import("../fixtures/legacy/tool/count-backend")
     const r = await runCountBackend({
       pythonCommand: PYTHON,
       cwd: ROOT,
@@ -104,7 +104,7 @@ describe("② 计数结果 — Poisson (合成计数数据, 400 obs)", () => {
 
 describe("③ 分位数回归 (异方差合成数据, 400 obs)", () => {
   test("quantile_regression with 3 quantiles", async () => {
-    const { runQuantileBackend } = await import("../../../../trash/killstata-legacy-econometrics/tool/quantile-backend")
+    const { runQuantileBackend } = await import("../fixtures/legacy/tool/quantile-backend")
     const r = await runQuantileBackend({
       pythonCommand: PYTHON,
       cwd: ROOT,
@@ -128,7 +128,7 @@ describe("③ 分位数回归 (异方差合成数据, 400 obs)", () => {
 
 describe("④ 面板随机效应 + Hausman (两个 fixture)", () => {
   test("RE-DGP → recommend RE", async () => {
-    const { runPanelBackend } = await import("../../../../trash/killstata-legacy-econometrics/tool/panel-backend")
+    const { runPanelBackend } = await import("../fixtures/legacy/tool/panel-backend")
     const r = await runPanelBackend({
       pythonCommand: PYTHON,
       cwd: ROOT,
@@ -149,7 +149,7 @@ describe("④ 面板随机效应 + Hausman (两个 fixture)", () => {
     expect(r.recommendation?.preferred).toBe("random_effects")
   })
   test("FE-DGP → recommend FE", async () => {
-    const { runPanelBackend } = await import("../../../../trash/killstata-legacy-econometrics/tool/panel-backend")
+    const { runPanelBackend } = await import("../fixtures/legacy/tool/panel-backend")
     const r = await runPanelBackend({
       pythonCommand: PYTHON,
       cwd: ROOT,
@@ -173,7 +173,7 @@ describe("④ 面板随机效应 + Hausman (两个 fixture)", () => {
 
 describe("⑤ 面板 FE + DID (pyfixest backends)", () => {
   test("legacy did_static backend smoke test with source-unverified fixture", async () => {
-    const { runPyfixestBackend } = await import("../../../../trash/killstata-legacy-econometrics/tool/pyfixest-backend")
+    const { runPyfixestBackend } = await import("../fixtures/legacy/tool/pyfixest-backend")
     const r = await runPyfixestBackend({
       pythonCommand: PYTHON,
       cwd: ROOT,
@@ -198,7 +198,7 @@ describe("⑤ 面板 FE + DID (pyfixest backends)", () => {
 
 describe("⑥ 断点回归 RDD (Lee 2008 via rdrobust; 复用 quantile_sim 的 y/x 列)", () => {
   test("rdd_sharp on quantile_sim (mock data, tests backend wiring)", async () => {
-    const { runRddBackend } = await import("../../../../trash/killstata-legacy-econometrics/tool/rdd-backend")
+    const { runRddBackend } = await import("../fixtures/legacy/tool/rdd-backend")
     const r = await runRddBackend({
       pythonCommand: PYTHON,
       cwd: ROOT,
@@ -218,7 +218,7 @@ describe("⑥ 断点回归 RDD (Lee 2008 via rdrobust; 复用 quantile_sim 的 y
 
 describe("⑦ 多分类 Logit — multinomial_sim (3 类合成数据, 400 obs)", () => {
   test("multinomial_logit on multinomial_sim", async () => {
-    const { runMultinomialBackend } = await import("../../../../trash/killstata-legacy-econometrics/tool/multinomial-backend")
+    const { runMultinomialBackend } = await import("../fixtures/legacy/tool/multinomial-backend")
     const r = await runMultinomialBackend({
       pythonCommand: PYTHON,
       cwd: ROOT,

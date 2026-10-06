@@ -7,7 +7,7 @@ import {
   resolveDidCluster,
   resolveHdfeCovariance,
   SaturatedDidEventStudyTool,
-} from "../../../../trash/killstata-legacy-econometrics/tool/pyfixest"
+} from "../fixtures/legacy/tool/pyfixest"
 
 describe("PyFixest tool contracts", () => {
   test("defines four independent model-facing tools", () => {

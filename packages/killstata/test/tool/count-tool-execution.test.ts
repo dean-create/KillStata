@@ -3,7 +3,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { Instance } from "../../src/project/instance"
-import { PoissonRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/count"
+import { PoissonRegressionTool } from "../fixtures/legacy/tool/count"
 import { registerCanonicalDataset } from "../helpers/canonical-dataset"
 
 /**

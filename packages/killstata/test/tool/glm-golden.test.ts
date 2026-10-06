@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { runGlmBackend } from "../../../../trash/killstata-legacy-econometrics/tool/glm-backend"
+import { runGlmBackend } from "../fixtures/legacy/tool/glm-backend"
 
 /**
  * A 级数值对标：Spector & Mazzeo (1980) 的 GRE 教学效果数据（statsmodels 自带、

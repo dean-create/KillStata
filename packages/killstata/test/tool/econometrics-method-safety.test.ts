@@ -7,7 +7,7 @@ import { resolveRuntimePythonCommand } from "@/killstata/runtime-config"
 import { Instance } from "@/project/instance"
 import { recordWorkflowStageSuccess } from "@/runtime/workflow"
 import { appendStage, createDatasetManifest } from "@/tool/analysis-state"
-import { OlsRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/econometrics-method-tools"
+import { OlsRegressionTool } from "../fixtures/legacy/tool/econometrics-method-tools"
 
 async function supportsEconometricsRuntime() {
   const configuredPython = process.env.KILLSTATA_PYTHON?.trim()

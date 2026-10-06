@@ -7,18 +7,18 @@ import {
   EconometricsRecommendTool,
   PropensityScoreConstructionTool,
   PropensityScoreVisualizationTool,
-} from "../../../../trash/killstata-legacy-econometrics/tool/econometrics-method-tools"
-import { OlsRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/ols"
-import { PanelFeTool } from "../../../../trash/killstata-legacy-econometrics/tool/panel-fe"
-import { IvTool } from "../../../../trash/killstata-legacy-econometrics/tool/iv"
-import { HdfeRegressionTool, DidStaticTool, Did2sTool, SaturatedDidEventStudyTool } from "../../../../trash/killstata-legacy-econometrics/tool/pyfixest"
-import { LogitRegressionTool, ProbitRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/glm"
-import { PoissonRegressionTool, NegativeBinomialRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/count"
-import { MultinomialLogitTool } from "../../../../trash/killstata-legacy-econometrics/tool/multinomial"
-import { RobustRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/rlm"
-import { WlsRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/wls"
-import { QuantileRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/quantile"
-import { PanelRandomEffectsTool } from "../../../../trash/killstata-legacy-econometrics/tool/panel"
+} from "../fixtures/legacy/tool/econometrics-method-tools"
+import { OlsRegressionTool } from "../fixtures/legacy/tool/ols"
+import { PanelFeTool } from "../fixtures/legacy/tool/panel-fe"
+import { IvTool } from "../fixtures/legacy/tool/iv"
+import { HdfeRegressionTool, DidStaticTool, Did2sTool, SaturatedDidEventStudyTool } from "../fixtures/legacy/tool/pyfixest"
+import { LogitRegressionTool, ProbitRegressionTool } from "../fixtures/legacy/tool/glm"
+import { PoissonRegressionTool, NegativeBinomialRegressionTool } from "../fixtures/legacy/tool/count"
+import { MultinomialLogitTool } from "../fixtures/legacy/tool/multinomial"
+import { RobustRegressionTool } from "../fixtures/legacy/tool/rlm"
+import { WlsRegressionTool } from "../fixtures/legacy/tool/wls"
+import { QuantileRegressionTool } from "../fixtures/legacy/tool/quantile"
+import { PanelRandomEffectsTool } from "../fixtures/legacy/tool/panel"
 import { EconometricsEngineClient } from "@/runtime/services/econometrics-engine-client"
 
 /**

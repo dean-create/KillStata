@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { runCountBackend } from "../../../../trash/killstata-legacy-econometrics/tool/count-backend"
+import { runCountBackend } from "../fixtures/legacy/tool/count-backend"
 
 /**
  * B 级数值对标（跨库独立实现）：Poisson 计数回归。

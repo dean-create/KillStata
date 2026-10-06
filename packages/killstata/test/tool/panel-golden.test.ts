@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { runPanelBackend } from "../../../../trash/killstata-legacy-econometrics/tool/panel-backend"
+import { runPanelBackend } from "../fixtures/legacy/tool/panel-backend"
 
 /**
  * B 级数值对标（跨库独立实现）：面板随机效应估计。

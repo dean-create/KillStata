@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test"
 import {
   classifyPsmDiagnosticPrecondition,
   formatPsmDiagnosticPreconditionMessage,
-} from "../../../../trash/killstata-legacy-econometrics/tool/psm-backend"
-import { psmDiagnosticRequiresUserDecision } from "../../../../trash/killstata-legacy-econometrics/tool/econometrics-method-tools"
+} from "../fixtures/legacy/tool/psm-backend"
+import { psmDiagnosticRequiresUserDecision } from "../fixtures/legacy/tool/econometrics-method-tools"
 
 describe("PSM 诊断前提分类", () => {
   test("把处理变量不是 0/1 的确定性失败分类为不可重试前提问题", () => {

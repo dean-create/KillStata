@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { runRlmBackend } from "../../../../trash/killstata-legacy-econometrics/tool/rlm-backend"
+import { runRlmBackend } from "../fixtures/legacy/tool/rlm-backend"
 
 /**
  * B 级数值对标：RLM 稳健回归。

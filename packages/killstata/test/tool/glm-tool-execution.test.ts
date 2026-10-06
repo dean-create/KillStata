@@ -3,7 +3,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { Instance } from "../../src/project/instance"
-import { LogitRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/glm"
+import { LogitRegressionTool } from "../fixtures/legacy/tool/glm"
 import { registerCanonicalDataset } from "../helpers/canonical-dataset"
 
 /**

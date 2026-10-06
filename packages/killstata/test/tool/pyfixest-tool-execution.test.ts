@@ -3,7 +3,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { Instance } from "../../src/project/instance"
-import { Did2sTool, HdfeRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/pyfixest"
+import { Did2sTool, HdfeRegressionTool } from "../fixtures/legacy/tool/pyfixest"
 import { registerCanonicalDataset } from "../helpers/canonical-dataset"
 
 let tempDir = ""

@@ -3,7 +3,7 @@ import { execFileSync } from "child_process"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { runPyfixestBackend } from "../../../../trash/killstata-legacy-econometrics/tool/pyfixest-backend"
+import { runPyfixestBackend } from "../fixtures/legacy/tool/pyfixest-backend"
 
 /**
  * 对标权威性分级（PLAN.md 缺口 2）：hdfe_regression / did2s /

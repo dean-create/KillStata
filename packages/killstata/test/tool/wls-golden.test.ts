@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { runWlsBackend } from "../../../../trash/killstata-legacy-econometrics/tool/wls-backend"
+import { runWlsBackend } from "../fixtures/legacy/tool/wls-backend"
 
 const PYTHON = process.env.KILLSTATA_PYTHON ?? path.join(os.homedir(), ".killstata", "venv", "bin", "python")
 const WLS_SIM = path.join(import.meta.dir, "..", "fixtures", "golden", "wls_sim.csv")

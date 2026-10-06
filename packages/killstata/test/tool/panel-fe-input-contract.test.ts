@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { PanelFeTool } from "../../../../trash/killstata-legacy-econometrics/tool/panel-fe"
+import { PanelFeTool } from "../fixtures/legacy/tool/panel-fe"
 
 describe("panel_fe_regression input contract", () => {
   test("treats blank optional routing and clustering fields as omitted", async () => {

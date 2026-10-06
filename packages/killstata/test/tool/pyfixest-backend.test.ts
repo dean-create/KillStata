@@ -3,7 +3,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { execFileSync } from "child_process"
-import { runPyfixestBackend, validatePyfixestBackendResult } from "../../../../trash/killstata-legacy-econometrics/tool/pyfixest-backend"
+import { runPyfixestBackend, validatePyfixestBackendResult } from "../fixtures/legacy/tool/pyfixest-backend"
 
 let tempDir = ""
 

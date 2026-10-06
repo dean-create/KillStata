@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { runOlsBackend } from "../../../../trash/killstata-legacy-econometrics/tool/ols-backend"
+import { runOlsBackend } from "../fixtures/legacy/tool/ols-backend"
 
 const STDERR_MARKER = "KILLSTATA_BACKEND_STDERR_MARKER"
 

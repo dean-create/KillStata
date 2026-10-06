@@ -8,8 +8,8 @@ import { Instance } from "@/project/instance"
 import { recordWorkflowStageSuccess } from "@/runtime/workflow"
 import { DataImportTool } from "@/tool/data-import"
 import { DataPreprocessTool } from "@/tool/data-preprocess"
-import { EconometricsRecommendTool, PanelFeRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/econometrics-method-tools"
-import { HdfeRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/pyfixest"
+import { EconometricsRecommendTool, PanelFeRegressionTool } from "../fixtures/legacy/tool/econometrics-method-tools"
+import { HdfeRegressionTool } from "../fixtures/legacy/tool/pyfixest"
 import {
   loadRealPaperDatasetContract,
   resolveRealPaperDatasets,

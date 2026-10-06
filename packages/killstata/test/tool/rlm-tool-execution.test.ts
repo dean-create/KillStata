@@ -3,7 +3,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { Instance } from "../../src/project/instance"
-import { RobustRegressionTool } from "../../../../trash/killstata-legacy-econometrics/tool/rlm"
+import { RobustRegressionTool } from "../fixtures/legacy/tool/rlm"
 import { registerCanonicalDataset } from "../helpers/canonical-dataset"
 
 let tempDir = ""

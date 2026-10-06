@@ -5,9 +5,9 @@ import path from "path"
 import { Instance } from "@/project/instance"
 import { ToolRegistry } from "@/tool/registry"
 import { recordWorkflowStageSuccess } from "@/runtime/workflow"
-import { OlsRegressionTool as NewOlsTool } from "../../../../trash/killstata-legacy-econometrics/tool/ols"
-import { PanelFeTool } from "../../../../trash/killstata-legacy-econometrics/tool/panel-fe"
-import { IvTool } from "../../../../trash/killstata-legacy-econometrics/tool/iv"
+import { OlsRegressionTool as NewOlsTool } from "../fixtures/legacy/tool/ols"
+import { PanelFeTool } from "../fixtures/legacy/tool/panel-fe"
+import { IvTool } from "../fixtures/legacy/tool/iv"
 import {
   ALL_ECONOMETRICS_ESTIMATOR_TOOL_IDS,
   MODEL_ADMITTED_ECONOMETRICS_DIAGNOSTIC_TOOL_IDS,
