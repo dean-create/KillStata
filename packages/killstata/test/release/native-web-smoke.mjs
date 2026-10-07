@@ -7,9 +7,15 @@ import path from "node:path"
 const packageRoot = path.resolve(import.meta.dirname, "../..")
 const platform = process.platform === "win32" ? "windows" : process.platform
 const extension = process.platform === "win32" ? ".exe" : ""
-const binaryPath = process.argv[2]
-  ? path.resolve(process.argv[2])
-  : path.join(packageRoot, "dist", `killstata-${platform}-${process.arch}`, "bin", `killstata${extension}`)
+const smokeArgs = process.argv.slice(2)
+const explicitBinaryPath = smokeArgs.find((argument) => argument !== "--baseline")
+const baseline = smokeArgs.includes("--baseline")
+const targetName = [`killstata-${platform}-${process.arch}`, baseline ? "baseline" : undefined]
+  .filter(Boolean)
+  .join("-")
+const binaryPath = explicitBinaryPath
+  ? path.resolve(explicitBinaryPath)
+  : path.join(packageRoot, "dist", targetName, "bin", `killstata${extension}`)
 
 if (!existsSync(binaryPath)) {
   throw new Error(`Native CLI binary missing for ${platform}/${process.arch}`)
@@ -111,7 +117,7 @@ try {
     assert.equal(assetResponse.status, 200, `Web asset should load: ${assetPath.split("/").at(-1)}`)
   }
 
-  console.log(`Native Web smoke passed for ${platform}/${process.arch}`)
+  console.log(`Native Web smoke passed: ${path.basename(path.dirname(path.dirname(binaryPath)))}`)
 } finally {
   if (child.exitCode === null && !child.killed) child.kill()
   let shutdownTimeout
