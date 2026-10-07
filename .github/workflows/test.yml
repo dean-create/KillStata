@@ -78,22 +78,13 @@ jobs:
         working-directory: packages/killstata
         run: node test/release/native-web-smoke.mjs
 
-      - name: Build the x64 baseline CLI on x64 runners
-        if: ${{ runner.arch == 'X64' }}
+      # Bun 1.3.5 fails to extract its Windows baseline runtime on windows-latest.
+      - name: Build the x64 baseline CLI where the runner toolchain supports it
+        if: ${{ runner.arch == 'X64' && runner.os != 'Windows' }}
         working-directory: packages/killstata
         run: bun run script/build.ts --single --baseline --skip-install
 
-      - name: Start the baseline CLI Web host and fetch its authenticated UI assets
-        if: ${{ runner.arch == 'X64' }}
-        working-directory: packages/killstata
-        run: node test/release/native-web-smoke.mjs --baseline
-
-      - name: Build the x64 baseline CLI on x64 runners
-        if: ${{ runner.arch == 'X64' }}
-        working-directory: packages/killstata
-        run: bun run script/build.ts --single --baseline --skip-install
-
-      - name: Start the baseline CLI Web host and fetch its authenticated UI assets
-        if: ${{ runner.arch == 'X64' }}
+      - name: Start the x64 baseline Web host and fetch its authenticated UI assets
+        if: ${{ runner.arch == 'X64' && runner.os != 'Windows' }}
         working-directory: packages/killstata
         run: node test/release/native-web-smoke.mjs --baseline
