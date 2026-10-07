@@ -12,6 +12,7 @@ export type RuntimeQueueState = {
     type: string
     priority: number
     createdAt: number
+    delivery?: "queued" | "steer"
   }[]
 }
 
@@ -52,12 +53,85 @@ export type RuntimeExecPolicyTuiState = {
   createdAt: string
 }
 
+export type RuntimeContextCacheTuiState = {
+  observationCount: number
+  truncated: boolean
+  uncachedInputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  promptTokens: number
+  hitRatio: number
+  breakCount: number
+  breakReasons: Record<string, number>
+  lastBreakReason?: string
+  updatedAt: string
+}
+
+export type RuntimeContextUsageTuiState = {
+  providerID: string
+  modelID: string
+  contextLimit: number | null
+  inputBudget: number | null
+  reserveTokens: number
+  estimatedPromptTokens: number
+  estimatedSystemTokens: number
+  estimatedToolTokens: number
+  estimatedMessageTokens: number
+  actual?: {
+    inputTokens: number
+    outputTokens: number
+    reasoningTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    promptTokens: number
+    usedTokens: number
+  }
+  usedTokens: number
+  remainingTokens: number | null
+  percentage: number | null
+  source: "estimated" | "actual"
+  compactionState: "none" | "pending" | "microcompact" | "summary"
+  updatedAt: string
+  cache?: RuntimeContextCacheTuiState
+}
+
+export type RuntimeContextActionTuiState = {
+  action: "offload" | "read-bound" | "history-snip" | "progressive" | "microcompact" | "collapse" | "prune" | "summary" | "restoring" | "failed"
+  operationId?: string
+  beforeTokens?: number
+  afterTokens?: number
+  savedEstimate?: number
+  restoredReferences?: number
+  removedTurns?: number
+  clearedParts?: number
+  emergency?: boolean
+  reason?: "pressure" | "time-gap"
+  summarySource?: "model" | "fallback"
+  failureStreak?: number
+  updatedAt: string
+}
+
 export type RuntimeContextTuiState = {
   historyVersion: number
   tokenEstimate: number
+  capsule?: {
+    capsuleHash: string
+    datasetId?: string
+    stageId?: string
+    scope: string
+    rowCount?: number
+    rowsUsed?: number
+    qualityGate: string
+    panelStatus: string
+    observedSpecifications: number
+    conflicts: string[]
+    tokenEstimate: number
+  }
   activeStageId?: string
   latestVerifierStatus?: "pass" | "warn" | "block"
   createdAt: string
+  usage?: RuntimeContextUsageTuiState
+  lastAction?: RuntimeContextActionTuiState
 }
 
 export type RuntimeAgentControlTuiState = {

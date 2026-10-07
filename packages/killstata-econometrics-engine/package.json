@@ -1,0 +1,7 @@
+{
+  "name": "@killstata/econometrics-engine",
+  "private": true,
+  "version": "0.2.0",
+  "description": "KillStata standalone Python econometrics engine",
+  "type": "module"
+}

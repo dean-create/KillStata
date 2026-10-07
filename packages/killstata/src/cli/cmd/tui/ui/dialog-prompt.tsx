@@ -44,7 +44,7 @@ export function DialogPrompt(props: DialogPromptProps) {
         <text fg={theme.textMuted}>esc</text>
       </box>
       <box gap={1}>
-        {props.description}
+        {props.description?.()}
         <textarea
           onSubmit={() => {
             props.onConfirm?.(textarea.plainText)
@@ -67,7 +67,7 @@ export function DialogPrompt(props: DialogPromptProps) {
           keyBindings={[{ name: "return", action: "submit" }]}
           ref={(val: TextareaRenderable) => (textarea = val)}
           initialValue={props.value}
-          placeholder={props.placeholder ?? "Enter text"}
+          placeholder={props.placeholder ?? "输入文本"}
           textColor={theme.text}
           focusedTextColor={theme.text}
           cursorColor={theme.text}

@@ -5,7 +5,12 @@ import { Instance } from "../../project/instance"
 import { buildCustomProviderConfig, normalizeApiKey, normalizeBaseURL } from "../../provider/provider-catalog"
 import { cmd } from "./cmd"
 import { UI } from "../ui"
-import { describeRuntimePythonSource, getRuntimePythonStatus, userConfigPath, writeUserConfigPatch } from "@/killstata/runtime-config"
+import {
+  describeRuntimePythonSource,
+  getRuntimePythonStatus,
+  userConfigPath,
+  writeUserConfigPatch,
+} from "@/killstata/runtime-config"
 import { DEEPSEEK_PROVIDER_ID } from "@/provider/deepseek-policy"
 
 type Finding = { level: "ok" | "warn" | "error"; label: string; detail: string }
@@ -47,7 +52,11 @@ async function configureProvider(existing: Awaited<ReturnType<typeof Config.get>
     return { providerID: DEEPSEEK_PROVIDER_ID, modelID: "deepseek-chat" }
   }
 
-  const name = await prompts.text({ message: "Provider name", placeholder: "My provider", validate: (value) => (value?.trim() ? undefined : "Required") })
+  const name = await prompts.text({
+    message: "Provider name",
+    placeholder: "My provider",
+    validate: (value) => (value?.trim() ? undefined : "Required"),
+  })
   if (prompts.isCancel(name)) throw new UI.CancelledError()
   const baseURL = await prompts.text({
     message: "Provider base URL",
@@ -62,15 +71,27 @@ async function configureProvider(existing: Awaited<ReturnType<typeof Config.get>
     },
   })
   if (prompts.isCancel(baseURL)) throw new UI.CancelledError()
-  const modelID = await prompts.text({ message: "Default model ID", placeholder: "model-name", validate: (value) => (value?.trim() ? undefined : "Required") })
+  const modelID = await prompts.text({
+    message: "Default model ID",
+    placeholder: "model-name",
+    validate: (value) => (value?.trim() ? undefined : "Required"),
+  })
   if (prompts.isCancel(modelID)) throw new UI.CancelledError()
-  const key = await prompts.password({ message: `${name.trim()} API key`, validate: (value) => (normalizeApiKey(value ?? "") ? undefined : "API key is required") })
+  const key = await prompts.password({
+    message: `${name.trim()} API key`,
+    validate: (value) => (normalizeApiKey(value ?? "") ? undefined : "API key is required"),
+  })
   if (prompts.isCancel(key)) throw new UI.CancelledError()
   await Auth.set("custom", { type: "api", key: normalizeApiKey(key) })
   return {
     providerID: "custom",
     modelID: modelID.trim(),
-    providerConfig: buildCustomProviderConfig({ providerID: "custom", providerName: name.trim(), baseURL, modelID: modelID.trim() }),
+    providerConfig: buildCustomProviderConfig({
+      providerID: "custom",
+      providerName: name.trim(),
+      baseURL,
+      modelID: modelID.trim(),
+    }),
   }
 }
 
@@ -79,7 +100,11 @@ export async function runKillstataConfigWizard() {
   UI.empty()
   prompts.intro("Advanced model settings")
   const provider = await configureProvider(await Config.get())
-  await writeUserConfigPatch({ $schema: "https://killstata.io/config.json", model: `${provider.providerID}/${provider.modelID}`, provider: provider.providerConfig })
+  await writeUserConfigPatch({
+    $schema: "https://killstata.io/config.json",
+    model: `${provider.providerID}/${provider.modelID}`,
+    provider: provider.providerConfig,
+  })
   prompts.log.success(`Saved advanced settings to ${userConfigPath()}`)
   prompts.outro("Model settings updated")
 }
@@ -89,9 +114,24 @@ export async function runKillstataConfigDoctor() {
   prompts.intro("KillStata diagnostics")
   const findings: Finding[] = []
   const runtime = await getRuntimePythonStatus()
-  if (!runtime.ok) findings.push({ level: "warn", label: "Data analysis engine", detail: "It will be prepared automatically the first time you analyze data." })
-  else if (runtime.missing.length) findings.push({ level: "warn", label: "Data analysis engine", detail: `Using ${describeRuntimePythonSource(runtime.source)}; missing: ${runtime.missing.join(", ")}. It will be repaired automatically when needed.` })
-  else findings.push({ level: "ok", label: "Data analysis engine", detail: `${runtime.version ?? "ready"} (${describeRuntimePythonSource(runtime.source)})` })
+  if (!runtime.ok)
+    findings.push({
+      level: "warn",
+      label: "Data analysis engine",
+      detail: "It will be prepared automatically the first time you analyze data.",
+    })
+  else if (runtime.missing.length)
+    findings.push({
+      level: "warn",
+      label: "Data analysis engine",
+      detail: `Using ${describeRuntimePythonSource(runtime.source)}; missing: ${runtime.missing.join(", ")}. It will be repaired automatically when needed.`,
+    })
+  else
+    findings.push({
+      level: "ok",
+      label: "Data analysis engine",
+      detail: `${runtime.version ?? "ready"} (${describeRuntimePythonSource(runtime.source)})`,
+    })
 
   const config = await Config.get()
   const model = configuredModel(config)
@@ -101,11 +141,19 @@ export async function runKillstataConfigDoctor() {
     findings.push({
       level: credential?.type === "api" ? "ok" : "warn",
       label: "Model credential",
-      detail: credential?.type === "api" ? `${model.providerID}/${model.modelID}` : `No saved API key for ${model.providerID}. Run \`killstata config\` only to change advanced model settings.`,
+      detail:
+        credential?.type === "api"
+          ? `${model.providerID}/${model.modelID}`
+          : `No saved API key for ${model.providerID}. Run \`killstata config\` only to change advanced model settings.`,
     })
   } else {
     const credential = auth[DEEPSEEK_PROVIDER_ID]
-    findings.push({ level: credential?.type === "api" ? "ok" : "warn", label: "Model credential", detail: credential?.type === "api" ? "DeepSeek API key saved" : "No API key saved yet. Start KillStata to add one." })
+    findings.push({
+      level: credential?.type === "api" ? "ok" : "warn",
+      label: "Model credential",
+      detail:
+        credential?.type === "api" ? "DeepSeek API key saved" : "No API key saved yet. Start KillStata to add one.",
+    })
   }
   findings.push({ level: "ok", label: "Advanced config", detail: userConfigPath() })
   logFindings(findings)
@@ -115,12 +163,16 @@ export async function runKillstataConfigDoctor() {
 const ConfigDoctorCommand = cmd({
   command: "doctor",
   describe: "check the model credential and automatic data-analysis engine",
-  async handler() { await Instance.provide({ directory: process.cwd(), fn: runKillstataConfigDoctor }) },
+  async handler() {
+    await Instance.provide({ directory: process.cwd(), fn: runKillstataConfigDoctor })
+  },
 })
 
 export const ConfigCommand = cmd({
   command: "config",
   describe: "advanced model settings (not needed for normal setup)",
   builder: (yargs) => yargs.command(ConfigDoctorCommand),
-  async handler() { await Instance.provide({ directory: process.cwd(), fn: runKillstataConfigWizard }) },
+  async handler() {
+    await Instance.provide({ directory: process.cwd(), fn: runKillstataConfigWizard })
+  },
 })

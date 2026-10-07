@@ -64,12 +64,22 @@ export namespace Command {
   }
 
   export const Default = {
-    PROGRESS: "progress",
-    RESULTS: "results",
     DOCTOR: "doctor",
+    REASONING: "reasoning",
   } as const
 
-  export function capabilityTags(command: Pick<Info, "availability" | "queueBehavior" | "workflowAware" | "immediate" | "remoteSafe" | "repairOnlyAllowed" | "requiresTrustedArtifacts">) {
+  export function capabilityTags(
+    command: Pick<
+      Info,
+      | "availability"
+      | "queueBehavior"
+      | "workflowAware"
+      | "immediate"
+      | "remoteSafe"
+      | "repairOnlyAllowed"
+      | "requiresTrustedArtifacts"
+    >,
+  ) {
     return [
       command.workflowAware ? "workflow" : undefined,
       ...(command.availability ?? []),
@@ -80,7 +90,20 @@ export namespace Command {
     ].filter((item, index, arr): item is string => typeof item === "string" && arr.indexOf(item) === index)
   }
 
-  export function resolveCapability(command: Pick<Info, "availability" | "queueBehavior" | "workflowAware" | "immediate" | "remoteSafe" | "repairOnlyAllowed" | "requiresTrustedArtifacts" | "visibleWhen" | "blockedReason">) {
+  export function resolveCapability(
+    command: Pick<
+      Info,
+      | "availability"
+      | "queueBehavior"
+      | "workflowAware"
+      | "immediate"
+      | "remoteSafe"
+      | "repairOnlyAllowed"
+      | "requiresTrustedArtifacts"
+      | "visibleWhen"
+      | "blockedReason"
+    >,
+  ) {
     return {
       availability: command.availability,
       queueBehavior: command.queueBehavior,
@@ -121,9 +144,9 @@ export namespace Command {
             ? "artifact"
             : input.action
     return [
-      `You are handling the /${commandName} command.`,
-      `Always call the workflow tool with action="${input.action}" first.`,
-      "If the user supplied $ARGUMENTS, treat them as an optional stage identifier or filter and pass them through when appropriate.",
+      `你正在处理 /${commandName} 命令。`,
+      `先调用 pipeline 工具并传 action="${input.action}"。`,
+      "用户提供的 $ARGUMENTS 可能是 stage 标识或筛选条件；确有需要时再传入。",
       ...input.guidance,
     ].join("\n")
   }
@@ -148,45 +171,11 @@ export namespace Command {
     const cfg = await Config.get()
 
     const result: Record<string, Info> = {
-      // 只保留三个命令。其余「看阶段/看任务/看时间线/看工具」的命令都删了 —— 那些问题
-      // 直接用自然语言问就行，不该逼用户背命令。
-      [Default.PROGRESS]: {
-        name: Default.PROGRESS,
-        description: "分析进度：现在做到哪一步、下一步是什么",
-        workflowAware: true,
-        availability: ["workflow"],
-        queueBehavior: "queued",
-        remoteSafe: true,
-        hints: ["$ARGUMENTS"],
-        template: workflowTemplate({
-          action: "status",
-          guidance: [
-            "Summarize the active workflow run, active stage, latest failure, verifier state, and trusted artifacts.",
-            "Keep the answer procedural and stage-oriented.",
-          ],
-        }),
-      },
-      [Default.RESULTS]: {
-        name: Default.RESULTS,
-        description: "分析结果：已产出的数据、诊断和回归结果",
-        workflowAware: true,
-        availability: ["workflow"],
-        queueBehavior: "queued",
-        remoteSafe: true,
-        requiresTrustedArtifacts: false,
-        hints: ["$ARGUMENTS"],
-        template: workflowTemplate({
-          action: "artifacts",
-          guidance: [
-            "List artifact paths clearly and identify which ones are trusted for downstream reporting.",
-          ],
-        }),
-      },
       [Default.DOCTOR]: {
         name: Default.DOCTOR,
-        description: "环境检查：Python、模型、依赖是否就绪",
+        description: "环境检查：python、模型、依赖是否就绪",
         workflowAware: true,
-        availability: ["workflow"],
+        availability: ["pipeline"],
         queueBehavior: "immediate",
         immediate: true,
         remoteSafe: true,
@@ -195,9 +184,18 @@ export namespace Command {
         template: workflowTemplate({
           action: "doctor",
           guidance: [
-            "Highlight missing dependencies, workflow blockers, and the minimum repair needed before the next stage can continue.",
+            "说明缺失依赖、工作流阻塞点，以及继续下一阶段前所需的最小修复。",
           ],
         }),
+      },
+      [Default.REASONING]: {
+        name: Default.REASONING,
+        description: "设置或查看当前模型的推理等级（不调用模型）",
+        queueBehavior: "immediate",
+        immediate: true,
+        remoteSafe: true,
+        hints: ["$ARGUMENTS"],
+        template: "",
       },
     }
 

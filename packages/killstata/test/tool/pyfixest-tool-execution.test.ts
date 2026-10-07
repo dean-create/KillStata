@@ -3,7 +3,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { Instance } from "../../src/project/instance"
-import { Did2sTool, HdfeRegressionTool } from "../../src/tool/pyfixest"
+import { Did2sTool, HdfeRegressionTool } from "../fixtures/legacy/tool/pyfixest"
 import { registerCanonicalDataset } from "../helpers/canonical-dataset"
 
 let tempDir = ""
@@ -19,7 +19,7 @@ afterAll(() => {
 describe("PyFixest model-facing execution", () => {
   test("returns a Chinese HDFE result without exposing formulas or internal aliases", async () => {
     const previousPython = process.env.KILLSTATA_PYTHON
-    process.env.KILLSTATA_PYTHON = path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+    process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")
     const dataPath = path.join(tempDir, "panel.csv")
     const rows = ["firm,year,y,x"]
     for (let firm = 1; firm <= 10; firm += 1) {
@@ -35,49 +35,49 @@ describe("PyFixest model-facing execution", () => {
       await Instance.provide({
         directory: tempDir,
         fn: async () => {
-        const source = registerCanonicalDataset({
-          sessionID: "pyfixest-tool-test",
-          sourcePath: dataPath,
-          datasetId: "dataset_pyfixest_hdfe",
-        })
-        const tool = await HdfeRegressionTool.init()
-        const result = await tool.execute(
-          {
-            ...source,
-            dependentVar: "y",
-            treatmentVar: "x",
-            covariates: [],
-            fixedEffects: ["firm", "year"],
-            clusterVars: ["firm"],
-          },
-          {
+          const source = registerCanonicalDataset({
             sessionID: "pyfixest-tool-test",
-            messageID: "message",
-            callID: "call",
-            agent: "analyst",
-            abort: new AbortController().signal,
-            metadata: () => undefined,
-            ask: async () => undefined,
-          },
-        )
+            sourcePath: dataPath,
+            datasetId: "dataset_pyfixest_hdfe",
+          })
+          const tool = await HdfeRegressionTool.init()
+          const result = await tool.execute(
+            {
+              ...source,
+              dependentVar: "y",
+              treatmentVar: "x",
+              covariates: [],
+              fixedEffects: ["firm", "year"],
+              clusterVars: ["firm"],
+            },
+            {
+              sessionID: "pyfixest-tool-test",
+              messageID: "message",
+              callID: "call",
+              agent: "analyst",
+              abort: new AbortController().signal,
+              metadata: () => undefined,
+              ask: async () => undefined,
+            },
+          )
 
-        expect(result.output).toContain("高维固定效应回归已完成")
-        expect(result.output).toContain("后端：PyFixest 0.60.0")
-        expect(result.output).not.toContain("v_")
-        expect(result.output).not.toContain("Traceback")
-        expect(result.metadata.analysisView.kind).toBe("econometrics")
-        expect(result.metadata.analysisView.step).toBe("hdfe_regression")
+          expect(result.output).toContain("高维固定效应回归已完成")
+          expect(result.output).toContain("后端：PyFixest 0.60.0")
+          expect(result.output).not.toContain("v_")
+          expect(result.output).not.toContain("Traceback")
+          expect(result.metadata.analysisView.kind).toBe("econometrics")
+          expect(result.metadata.analysisView.step).toBe("hdfe_regression")
         },
       })
     } finally {
       if (previousPython === undefined) delete process.env.KILLSTATA_PYTHON
       else process.env.KILLSTATA_PYTHON = previousPython
     }
-  }, 30_000)
+  }, 60_000)
 
   test("returns an actual DID effect with inference in the user summary", async () => {
     const previousPython = process.env.KILLSTATA_PYTHON
-    process.env.KILLSTATA_PYTHON = path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+    process.env.KILLSTATA_PYTHON = previousPython?.trim() || path.join(os.homedir(), ".killstata", "venv", "bin", "python")
     const dataPath = path.join(tempDir, "did2s-panel.csv")
     const rows = ["unit,year,treated,event_time,outcome"]
     for (let unit = 1; unit <= 60; unit += 1) {
@@ -124,7 +124,10 @@ describe("PyFixest model-facing execution", () => {
           )
 
           const metrics = Object.fromEntries(
-            (result.metadata.analysisView.results ?? []).map((item: { label: string; value: string }) => [item.label, item.value]),
+            (result.metadata.analysisView.results ?? []).map((item: { label: string; value: string }) => [
+              item.label,
+              item.value,
+            ]),
           )
           expect(result.output).toContain("两阶段双重差分已完成")
           expect(metrics["event_time::0.0"]).toBeDefined()

@@ -1,0 +1,11 @@
+{
+  "description": "贸易额(连续非负)做 PPML——Poisson 伪极大似然,契约层不因非整数拒绝",
+  "modelArgs": {
+    "datasetId": "trade_06",
+    "stageId": "stage_000",
+    "dependentVar": "trade_value",
+    "treatmentVar": "rta",
+    "covariates": ["distance", "gdp"]
+  },
+  "expect": "pass"
+}

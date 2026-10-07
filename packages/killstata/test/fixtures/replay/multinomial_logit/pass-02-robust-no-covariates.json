@@ -1,0 +1,11 @@
+{
+  "description": "稳健标准误 + 简易双变量 MNL",
+  "modelArgs": {
+    "datasetId": "mode_choice",
+    "stageId": "stage_000",
+    "dependentVar": "mode",
+    "treatmentVar": "distance",
+    "covariance": "robust"
+  },
+  "expect": "pass"
+}

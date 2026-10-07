@@ -6,10 +6,10 @@ import { Storage } from "../storage/storage"
 export namespace Todo {
   export const Info = z
     .object({
-      content: z.string().describe("Brief description of the task"),
-      status: z.string().describe("Current status of the task: pending, in_progress, completed, cancelled"),
-      priority: z.string().describe("Priority level of the task: high, medium, low"),
-      id: z.string().describe("Unique identifier for the todo item"),
+      content: z.string().describe("任务的简短说明"),
+      status: z.string().describe("任务状态：pending、in_progress、completed 或 cancelled"),
+      priority: z.string().describe("优先级：high、medium 或 low"),
+      id: z.string().describe("待办事项的唯一标识"),
     })
     .meta({ ref: "Todo" })
   export type Info = z.infer<typeof Info>

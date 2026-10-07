@@ -1,12 +1,14 @@
 {
-  "description": "Card (1995) 式识别依据：到大学的地理距离影响是否上大学，但不直接影响工资水平",
+  "description": "Card (1995) 式 IV：到大学距离影响教育年限但不直接影响工资",
   "modelArgs": {
-    "datasetId": "card1995",
+    "datasetId": "card_1995",
     "stageId": "stage_000",
-    "dependentVar": "log_wage",
-    "endogenousVar": "education",
-    "instrumentVar": "near_college",
-    "instrumentJustification": "到最近大学的地理距离影响个体是否选择上大学（相关性），但控制家庭背景后不直接影响工资水平（外生性与排除限制），参见 Card (1995) 的研究设计。"
+    "dependentVar": "lwage",
+    "treatmentVar": "educ",
+    "instrumentVars": [
+      "nearc4"
+    ],
+    "instrumentJustification": "Card (1995) 中到四年制大学的距离改变上学成本，在控制变量给定下不直接进入工资方程。"
   },
   "expect": "pass"
 }

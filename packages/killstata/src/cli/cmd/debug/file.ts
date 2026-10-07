@@ -38,18 +38,6 @@ const FileReadCommand = cmd({
   },
 })
 
-const FileStatusCommand = cmd({
-  command: "status",
-  describe: "show file status information",
-  builder: (yargs) => yargs,
-  async handler() {
-    await bootstrap(process.cwd(), async () => {
-      const status = await File.status()
-      process.stdout.write(JSON.stringify(status, null, 2) + EOL)
-    })
-  },
-})
-
 const FileListCommand = cmd({
   command: "list <path>",
   describe: "list files in a directory",
@@ -88,7 +76,6 @@ export const FileCommand = cmd({
   builder: (yargs) =>
     yargs
       .command(FileReadCommand)
-      .command(FileStatusCommand)
       .command(FileListCommand)
       .command(FileSearchCommand)
       .command(FileTreeCommand)

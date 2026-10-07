@@ -1,12 +1,17 @@
 import type { SubagentContract, SubagentWriteIntent, ToolExecutionTraits } from "./types"
-import { toolSideEffectLevel } from "./tool-catalog"
+import { Tool } from "@/tool/tool"
 
-export function toolExecutionTraits(toolName: string, args?: unknown): ToolExecutionTraits {
-  const sideEffectLevel = toolSideEffectLevel(toolName, args)
+export function toolExecutionTraits(execution: Tool.ExecutionPolicy | undefined, args?: unknown): ToolExecutionTraits {
+  const resolved = execution?.resolve ? execution.resolve(args) : execution ?? ToolExecutionFallback
+  const sideEffectLevel = resolved.sideEffect
+  const requiresConfirmation = resolved.approval === "confirm"
 
   if (sideEffectLevel === "none") {
     return {
-      concurrencySafe: true,
+      concurrencySafe: resolved.concurrency === "parallel",
+      approval: resolved.approval,
+      confirmation: resolved.approval === "confirm" ? resolved.confirmation : undefined,
+      requiresConfirmation: false,
       sideEffectLevel: "none",
       interruptBehavior: "cancel",
       resultBudget: 12_000,
@@ -16,6 +21,9 @@ export function toolExecutionTraits(toolName: string, args?: unknown): ToolExecu
   if (sideEffectLevel === "session") {
     return {
       concurrencySafe: false,
+      approval: resolved.approval,
+      confirmation: resolved.approval === "confirm" ? resolved.confirmation : undefined,
+      requiresConfirmation,
       sideEffectLevel: "session",
       interruptBehavior: "continue",
     }
@@ -24,16 +32,30 @@ export function toolExecutionTraits(toolName: string, args?: unknown): ToolExecu
   if (sideEffectLevel === "filesystem") {
     return {
       concurrencySafe: false,
+      approval: resolved.approval,
+      confirmation: resolved.approval === "confirm" ? resolved.confirmation : undefined,
+      requiresConfirmation,
       sideEffectLevel: "filesystem",
       interruptBehavior: "continue",
     }
   }
 
   return {
-    concurrencySafe: false,
+    concurrencySafe: resolved.concurrency === "parallel",
+    approval: resolved.approval,
+    confirmation: resolved.approval === "confirm" ? resolved.confirmation : undefined,
+    requiresConfirmation,
     sideEffectLevel: "external",
     interruptBehavior: "continue",
   }
+}
+
+const ToolExecutionFallback: Tool.ExecutionPolicy = {
+  readOnly: false,
+  approval: "blocked",
+  concurrency: "serial",
+  sideEffect: "external",
+  timeout: { kind: "bounded", timeoutMs: Tool.Timeout.DEFAULT_MS },
 }
 
 export function subagentWriteIntent(agent: string): SubagentWriteIntent {

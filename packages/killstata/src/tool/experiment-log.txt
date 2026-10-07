@@ -1,9 +1,7 @@
-Read the experiment log for a dataset: every regression that has been run, the data stage it used, and how the results changed between attempts.
+# 计量实验记录
+只读查看某个数据集已经运行过的全部计量规格、所用 stage 和各次结果变化。估计完成后日志会自动更新，不需要手工创建。
 
-The log is written automatically after each estimation — you do not need to generate it. Use this tool to answer questions like:
-
-- "How many specifications have we tried?"
-- "What happened to the coefficient after we dropped 2015-2018?"
-- "Which sample gave the most significant result?"
-
-The log records every attempt, including the ones that were not significant. When reporting findings, disclose the specifications that were tried rather than only the one that worked — selectively reporting a single significant specification while hiding the rest is p-hacking.
+- 适合回答“尝试了多少组规格”“改变样本窗口后核心系数如何变化”“每次用了哪个数据阶段”等复现问题。
+- 报告时必须披露相关的全部已尝试规格，包括不显著、失败或被诊断阻断的结果；不得只挑最显著的一次，否则会形成 p-hacking。
+- 日志是执行索引，不自动证明因果识别成立。关键数字仍需回到对应结构化结果和诊断产物核对。
+- 不得把日志中不存在的规格、数字、用户授权或结论补写为事实，也不得用此工具启动新估计。

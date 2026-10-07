@@ -5,10 +5,9 @@ import os from "os"
 
 const app = "killstata"
 
-const data = path.join(xdgData!, app)
-const cache = path.join(xdgCache!, app)
-const config = path.join(xdgConfig!, app)
-const state = path.join(xdgState!, app)
+function xdgRoot(env: string, fallback: string | undefined, defaultRoot: string) {
+  return process.env[env] || fallback || path.join(os.homedir(), defaultRoot)
+}
 
 export namespace Global {
   export const Path = {
@@ -16,12 +15,24 @@ export namespace Global {
     get home() {
       return process.env.KILLSTATA_TEST_HOME || os.homedir()
     },
-    data,
-    bin: path.join(data, "bin"),
-    log: path.join(data, "log"),
-    cache,
-    config,
-    state,
+    get data() {
+      return path.join(xdgRoot("XDG_DATA_HOME", xdgData, ".local/share"), app)
+    },
+    get bin() {
+      return path.join(this.data, "bin")
+    },
+    get log() {
+      return path.join(this.data, "log")
+    },
+    get cache() {
+      return path.join(xdgRoot("XDG_CACHE_HOME", xdgCache, ".cache"), app)
+    },
+    get config() {
+      return path.join(xdgRoot("XDG_CONFIG_HOME", xdgConfig, ".config"), app)
+    },
+    get state() {
+      return path.join(xdgRoot("XDG_STATE_HOME", xdgState, ".local/state"), app)
+    },
     // Allow overriding models.dev URL for offline deployments
     get modelsDevUrl() {
       return process.env.KILLSTATA_MODELS_URL || "https://models.dev"

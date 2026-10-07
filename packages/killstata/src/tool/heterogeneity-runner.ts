@@ -1,78 +1,35 @@
 import fs from "fs"
 import path from "path"
-import { spawn } from "child_process"
-import z from "zod"
+import { createHash } from "node:crypto"
 import DESCRIPTION from "./heterogeneity-runner.txt"
-import { PY_READ_CSV_FALLBACK } from "./python-snippets"
 import { Tool } from "./tool"
+import { ToolModel } from "./model-contracts"
 import { Instance } from "../project/instance"
-import { Log } from "../util/log"
 import { createEconometricsNumericSnapshot } from "./analysis-grounding"
 import { loadResultBundle, generatedArtifactRoot } from "./analysis-artifacts"
 import {
   finalOutputsPath,
+  inferBranch,
   inferRunId,
-  projectErrorsRoot,
-  projectTempRoot,
   publishVisibleOutput,
-  readDatasetManifest,
+  projectInternalRoot,
+  projectStateRoot,
   resolveArtifactInput,
 } from "./analysis-state"
-import { relativeWithinProject, resolveToolPath } from "./analysis-path"
+import { relativeWithinProject, resolveDatasetStagePath, resolveManagedProjectPath, resolveToolPath } from "./analysis-path"
 import { createToolDisplay } from "./analysis-display"
 import { analysisArtifact, analysisMetric, createToolAnalysisView } from "./analysis-user-view"
+import { runEngineMethodBackend } from "@/runtime/services/econometrics-engine-backend"
+import { resolveRuntimePythonCommand } from "@/killstata/runtime-config"
+import { pythonCapabilityInput } from "./python-capability-schema"
+import { activeOrLatestStage, canonicalDataStageForWorkflow, getActiveWorkflowRun } from "@/runtime/workflow/state"
+import { RuntimeTaskLedger } from "@/runtime/task-ledger"
+import type { AnalysisToolRunRecord, RuntimeTaskRecord } from "@/runtime/types"
 
-const log = Log.create({ service: "heterogeneity-runner-tool" })
-const PYTHON_RESULT_PREFIX = "__KILLSTATA_JSON__"
-const PYTHON_CMD = process.env.KILLSTATA_PYTHON ?? (process.platform === "win32" ? "python" : "python3")
+export type HeterogeneityRunnerInput = Record<string, any>
+export const HeterogeneityRunnerInputSchema = pythonCapabilityInput<HeterogeneityRunnerInput>()
 
-const MethodFamilySchema = z.enum(["fe", "did", "iv", "psm", "rdd"])
-
-const AlternativeSpecificationSchema = z
-  .object({
-    name: z.string(),
-    dependentVar: z.string().optional(),
-    treatmentVar: z.string().optional(),
-    covariates: z.array(z.string()).optional(),
-    notes: z.string().optional(),
-  })
-  .passthrough()
-
-const PlaceboSchema = z.union([
-  z.boolean(),
-  z
-    .object({
-      variables: z.array(z.string()).optional(),
-      notes: z.string().optional(),
-    })
-    .passthrough(),
-])
-
-export const HeterogeneityRunnerInputSchema = z.object({
-  datasetId: z.string().optional(),
-  stageId: z.string().optional(),
-  baselineResultDir: z.string().optional(),
-  baselineOutputKey: z.string().optional(),
-  directResultPath: z.string().optional(),
-  methodFamily: MethodFamilySchema,
-  dependentVar: z.string(),
-  treatmentVar: z.string(),
-  entityVar: z.string().optional(),
-  timeVar: z.string().optional(),
-  clusterVar: z.string().optional(),
-  covariates: z.array(z.string()).default([]),
-  heterogeneityVars: z.array(z.string()).default([]),
-  mechanismVars: z.array(z.string()).default([]),
-  placebo: PlaceboSchema.optional(),
-  alternativeSpecifications: z.array(AlternativeSpecificationSchema).default([]),
-  runId: z.string().optional(),
-  branch: z.string().default("main"),
-  outputDir: z.string().optional(),
-})
-
-export type HeterogeneityRunnerInput = z.infer<typeof HeterogeneityRunnerInputSchema>
-
-export type HeterogeneitySpecResult = {
+type HeterogeneitySpecResult = {
   spec_id: string
   spec_type: "heterogeneity" | "mechanism" | "placebo" | "alternative_spec"
   status: "success" | "failed" | "skipped"
@@ -83,15 +40,9 @@ export type HeterogeneitySpecResult = {
   coefficients_path?: string
   narrative_path?: string
   changed_specification: string
+  grounded_numbers?: { coefficient?: number; std_error?: number; p_value?: number; r_squared?: number; rows_used?: number }
   key_effect_direction?: "positive" | "negative" | "zeroish"
   key_effect_significance?: "p<0.01" | "p<0.05" | "p<0.1" | "not_significant" | "unavailable"
-  grounded_numbers?: {
-    coefficient?: number
-    std_error?: number
-    p_value?: number
-    r_squared?: number
-    rows_used?: number
-  }
   diagnostic_flags: string[]
   primary_term?: string
   raw_primary_term?: string
@@ -105,138 +56,438 @@ type PythonRunnerResult = {
   output_dir: string
   warnings?: string[]
   specs: HeterogeneitySpecResult[]
-  error?: string
-  traceback?: string
-  error_log_path?: string
 }
 
-function encodePythonPayload(payload: unknown) {
-  return Buffer.from(JSON.stringify(payload), "utf-8").toString("base64")
-}
+const SAFE_SPEC_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
+const SPEC_ARTIFACTS = {
+  result_path: "results.json",
+  diagnostics_path: "diagnostics.json",
+  metadata_path: "model_metadata.json",
+  coefficients_path: "coefficient_table.csv",
+  narrative_path: "narrative.md",
+} as const
 
-function parsePythonResult<T>(stdout: string) {
-  const lines = stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-  for (let idx = lines.length - 1; idx >= 0; idx -= 1) {
-    const line = lines[idx]
-    if (!line.startsWith(PYTHON_RESULT_PREFIX)) continue
-    return JSON.parse(line.slice(PYTHON_RESULT_PREFIX.length)) as T
-  }
-  throw new Error(`Python produced no parseable output.\n${stdout}`)
-}
-
-async function runInlinePython(input: { script: string; cwd: string }) {
-  const tempDir = projectTempRoot()
-  fs.mkdirSync(tempDir, { recursive: true })
-  const tempScriptPath = path.join(
-    tempDir,
-    `heterogeneity_runner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.py`,
-  )
-  fs.writeFileSync(tempScriptPath, input.script, "utf-8")
-
-  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const proc = spawn(PYTHON_CMD, [tempScriptPath], {
-      cwd: input.cwd,
-      env: {
-        ...process.env,
-        PYTHONIOENCODING: "utf-8",
-      },
-    })
-    let stdout = ""
-    let stderr = ""
-    proc.stdout?.on("data", (chunk) => {
-      stdout += chunk.toString()
-    })
-    proc.stderr?.on("data", (chunk) => {
-      stderr += chunk.toString()
-    })
-    proc.on("error", (error) => {
-      fs.rmSync(tempScriptPath, { force: true })
-      reject(error)
-    })
-    proc.on("close", (code) => {
-      fs.rmSync(tempScriptPath, { force: true })
-      resolve({ code, stdout, stderr })
-    })
+async function sha256File(filePath: string) {
+  const hash = createHash("sha256")
+  await new Promise<void>((resolve, reject) => {
+    const stream = fs.createReadStream(filePath)
+    stream.on("data", (chunk) => hash.update(chunk))
+    stream.once("error", reject)
+    stream.once("end", resolve)
   })
+  return `sha256:${hash.digest("hex")}`
 }
 
-function significanceLabel(pValue?: number) {
-  if (pValue === undefined || !Number.isFinite(pValue)) return "unavailable" as const
-  if (pValue < 0.01) return "p<0.01" as const
-  if (pValue < 0.05) return "p<0.05" as const
-  if (pValue < 0.1) return "p<0.1" as const
+function sha256Value(value: unknown) {
+  const serialized = JSON.stringify(value)
+  if (serialized === undefined) throw new Tool.InputValidationError("异质性参数无法规范化，未生成生命周期记录。")
+  return `sha256:${createHash("sha256").update(serialized).digest("hex")}`
+}
+
+function isWithinDirectory(root: string, target: string) {
+  const relative = path.relative(root, target)
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))
+}
+
+function rejectOutputSymlinkComponents(outputRoot: string, target: string) {
+  const absoluteTarget = path.resolve(target)
+  if (!isWithinDirectory(outputRoot, absoluteTarget)) {
+    throw new Tool.InputValidationError("Python 异质性规格路径超出 Harness 输出目录。")
+  }
+  let current = outputRoot
+  for (const segment of path.relative(outputRoot, absoluteTarget).split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment)
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) {
+        throw new Tool.InputValidationError("Python 异质性规格路径不能包含符号链接。")
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") break
+      throw error
+    }
+  }
+}
+
+function writeHeterogeneityOutputFile(outputRoot: string, target: string, content: string) {
+  const absoluteTarget = path.resolve(target)
+  rejectOutputSymlinkComponents(outputRoot, absoluteTarget)
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | (fs.constants.O_NOFOLLOW ?? 0)
+  let descriptor: number
+  try {
+    descriptor = fs.openSync(absoluteTarget, flags, 0o600)
+  } catch (error) {
+    if (fs.existsSync(absoluteTarget) && fs.lstatSync(absoluteTarget).isSymbolicLink()) {
+      throw new Tool.InputValidationError("异质性产物路径不能是符号链接。", { cause: error })
+    }
+    throw error
+  }
+  try {
+    fs.writeFileSync(descriptor, content, "utf-8")
+  } finally {
+    fs.closeSync(descriptor)
+  }
+}
+
+function requireHeterogeneityPath(actual: unknown, expected: string, outputRoot: string, label: string) {
+  if (typeof actual !== "string" || !actual.trim()) {
+    throw new Tool.InputValidationError(`Python 异质性结果缺少${label}路径。`)
+  }
+  if (path.resolve(actual) !== path.resolve(expected)) {
+    throw new Tool.InputValidationError(`Python 异质性${label}路径与 Harness 预定规格产物不一致。`)
+  }
+  rejectOutputSymlinkComponents(outputRoot, expected)
+  let canonicalActual: string
+  let canonicalExpected: string
+  try {
+    canonicalActual = fs.realpathSync(actual)
+    canonicalExpected = fs.realpathSync(expected)
+  } catch {
+    throw new Tool.InputValidationError(`Python 异质性${label}文件不存在或不可读取。`)
+  }
+  if (!isWithinDirectory(outputRoot, canonicalActual) || canonicalActual !== canonicalExpected) {
+    throw new Tool.InputValidationError(`Python 异质性${label}路径与 Harness 预定规格产物不一致。`)
+  }
+  return canonicalActual
+}
+
+export function validateHeterogeneityRunnerOutputPaths(
+  result: PythonRunnerResult,
+  expectedOutputDir: string,
+  expectedCanonicalOutputDir?: string,
+): PythonRunnerResult {
+  const validSpecTypes = new Set(["heterogeneity", "mechanism", "placebo", "alternative_spec"])
+  const validStatuses = new Set(["success", "failed", "skipped"])
+  if (result.success !== true || !Array.isArray(result.specs) ||
+      result.warnings !== undefined && (!Array.isArray(result.warnings) || result.warnings.some((warning) => typeof warning !== "string"))) {
+    throw new Tool.InputValidationError("Python 异质性结果没有通过批次输出契约校验。")
+  }
+  let outputRoot: string
+  let returnedOutputRoot: string
+  try {
+    outputRoot = fs.realpathSync(expectedOutputDir)
+    returnedOutputRoot = fs.realpathSync(result.output_dir)
+  } catch {
+    throw new Tool.InputValidationError("Python 异质性输出目录不存在或不可读取。")
+  }
+  if (returnedOutputRoot !== outputRoot || (expectedCanonicalOutputDir && outputRoot !== expectedCanonicalOutputDir)) {
+    throw new Tool.InputValidationError("Python 异质性输出目录与 Harness 预定目录不一致。")
+  }
+  const seen = new Set<string>()
+  const specs = result.specs.map((spec) => {
+    if (typeof spec.spec_id !== "string" || !SAFE_SPEC_ID.test(spec.spec_id) || seen.has(spec.spec_id)) {
+      throw new Tool.InputValidationError("Python 异质性规格标识无效或重复。")
+    }
+    if (!validSpecTypes.has(spec.spec_type)) throw new Tool.InputValidationError("Python 异质性规格类型无效。")
+    if (!validStatuses.has(spec.status)) throw new Tool.InputValidationError("Python 异质性规格状态无效。")
+    if (typeof spec.changed_specification !== "string" || !Array.isArray(spec.diagnostic_flags) ||
+        spec.diagnostic_flags.some((flag) => typeof flag !== "string")) {
+      throw new Tool.InputValidationError("Python 异质性规格的变更说明或诊断结果字段无效。")
+    }
+    seen.add(spec.spec_id)
+    const expectedDir = path.join(outputRoot, "specs", spec.spec_id)
+    if (spec.status !== "success") {
+      if (spec.result_dir || spec.result_path || spec.diagnostics_path || spec.metadata_path || spec.coefficients_path || spec.narrative_path) {
+        throw new Tool.InputValidationError("未成功的异质性规格不能声明可读取的结果路径。")
+      }
+      return spec
+    }
+    const resultDir = requireHeterogeneityPath(spec.result_dir, expectedDir, outputRoot, "规格目录")
+    const normalized: HeterogeneitySpecResult = { ...spec, result_dir: resultDir }
+    for (const [field, filename] of Object.entries(SPEC_ARTIFACTS) as Array<[keyof typeof SPEC_ARTIFACTS, string]>) {
+      const actual = spec[field]
+      const expected = path.join(expectedDir, filename)
+      const canonical = requireHeterogeneityPath(actual, expected, outputRoot, filename)
+      if (!fs.statSync(canonical).isFile()) throw new Tool.InputValidationError(`Python 异质性产物不是普通文件：${filename}。`)
+      normalized[field] = canonical
+    }
+    return normalized
+  })
+  return { ...result, output_dir: outputRoot, specs }
+}
+
+function significanceLabel(value?: number) {
+  if (value === undefined || !Number.isFinite(value)) return "unavailable" as const
+  if (value < 0.01) return "p<0.01" as const
+  if (value < 0.05) return "p<0.05" as const
+  if (value < 0.1) return "p<0.1" as const
   return "not_significant" as const
 }
 
-function effectDirection(coefficient?: number) {
-  if (coefficient === undefined || !Number.isFinite(coefficient)) return undefined
-  if (Math.abs(coefficient) < 1e-10) return "zeroish" as const
-  return coefficient > 0 ? "positive" : "negative"
+function effectDirection(value?: number) {
+  if (value === undefined || !Number.isFinite(value)) return undefined
+  if (Math.abs(value) < 1e-10) return "zeroish" as const
+  return value > 0 ? "positive" as const : "negative" as const
 }
 
 function assertBaselineHealthy(bundle: ReturnType<typeof loadResultBundle>) {
-  const resultBlocking = Array.isArray(bundle.results.blocking_errors) ? bundle.results.blocking_errors : []
-  if (bundle.results.qa_status === "fail" || resultBlocking.length > 0) {
-    throw new Error(`Baseline result has blocking QA issues: ${resultBlocking.join(" | ") || "qa_status=fail"}`)
+  const blocking = Array.isArray(bundle.results.blocking_errors) ? bundle.results.blocking_errors : []
+  if (bundle.results.qa_status === "fail" || blocking.length > 0) {
+    throw new Error(`基准结果存在阻断性数据质量问题：${blocking.join("；") || "质量检查未通过"}`)
   }
-  const fromDiagnostics = Array.isArray(bundle.diagnostics?.post_estimation_gates)
-    ? bundle.diagnostics.post_estimation_gates
-    : []
-  const fromResult = Array.isArray(bundle.results.post_estimation_gates) ? bundle.results.post_estimation_gates : []
-  const blockingGate = [...fromDiagnostics, ...fromResult].find(
-    (gate: any) => gate && gate.passed === false && gate.severity === "blocking",
-  )
-  if (blockingGate) {
-    throw new Error(`Baseline result has blocking post-estimation gate: ${String(blockingGate.gate ?? "unknown")}`)
+  const gates = [
+    ...(Array.isArray(bundle.diagnostics?.post_estimation_gates) ? bundle.diagnostics.post_estimation_gates : []),
+    ...(Array.isArray(bundle.results.post_estimation_gates) ? bundle.results.post_estimation_gates : []),
+  ]
+  if (gates.some((gate: any) => gate?.passed === false && gate?.severity === "blocking")) {
+    throw new Error("基准结果未通过估计后门禁；不能在不可信基准上生成扩展结果。")
   }
 }
 
-function resolveAnalysisDataPath(input: {
-  datasetId?: string
-  stageId?: string
-  baselineBundle: ReturnType<typeof loadResultBundle>
+type HeterogeneityBaselineSpecification = {
+  methodID: string
+  arguments: Record<string, unknown>
+}
+
+type HeterogeneityRunnerSpecification = {
+  entityVar?: string
+  timeVar?: string
+  clusterVar?: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value))
+}
+
+function stringList(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined
+}
+
+function dataDiagnosisFingerprint(stage: unknown, stageId: string) {
+  if (!isRecord(stage) || stage.stageId !== stageId || !isRecord(stage.metadata)) return undefined
+  const diagnosis = stage.metadata.dataDiagnosis
+  if (!isRecord(diagnosis) || diagnosis.stage_id !== stageId) return undefined
+  return typeof diagnosis.data_fingerprint === "string" && /^sha256:[0-9a-f]{64}$/.test(diagnosis.data_fingerprint)
+    ? diagnosis.data_fingerprint
+    : undefined
+}
+
+function sortedEqual(left: string[], right: string[]) {
+  return [...left].sort().join("\0") === [...right].sort().join("\0")
+}
+
+function validateBaselineSpecification(input: {
+  output: { key: string; metadata?: Record<string, unknown> }
+  methodFamily: "fe" | "did"
+  dependentVar: string
+  treatmentVar: string
+  entityVar?: string
+  timeVar?: string
+  clusterVar?: string
+  covariates: string[]
+}):
+  | { ok: true; methodSpecification: HeterogeneityBaselineSpecification; runnerSpecification: HeterogeneityRunnerSpecification }
+  | { ok: false; message: string } {
+  const methodKey = input.output.key.slice(0, -"_result".length)
+  const rawSpecification = input.output.metadata?.methodSpecification
+  if (!isRecord(rawSpecification) || typeof rawSpecification.methodID !== "string" || !isRecord(rawSpecification.arguments)) {
+    return {
+      ok: false,
+      message: "当前基准结果缺少 Harness 保存的原始方法规格，无法核对变量、固定效应和聚类设置。尚未运行异质性扩展；请先通过当前 Harness 重新执行并保存基准规格。",
+    }
+  }
+  const methodSpecification = { methodID: rawSpecification.methodID, arguments: rawSpecification.arguments }
+  if (methodSpecification.methodID !== methodKey) {
+    return { ok: false, message: "基准结果记录中的方法规格与结果输出键不一致，无法确认应扩展的估计量。尚未运行异质性扩展。" }
+  }
+
+  const methodNames: Record<string, string> = {
+    panel_fe_regression: "面板固定效应",
+    hdfe_regression: "高维固定效应",
+    did_static: "传统双重差分",
+    did2s: "DID2S 两阶段估计",
+    did_event_study_saturated: "饱和事件研究",
+  }
+  const methodName = methodNames[methodSpecification.methodID] ?? methodSpecification.methodID
+  if (input.methodFamily !== "fe" || !["panel_fe_regression", "hdfe_regression"].includes(methodSpecification.methodID)) {
+    return {
+      ok: false,
+      message: `选中的基准是“${methodName}”，但当前异质性执行器实际使用 OLS + 虚拟变量固定效应；这与该基准的估计量不一致，不能静默替换成 LSDV。尚未运行任何扩展规格。请保留当前基准，或先确认是否需要实现与该方法一致的扩展。`,
+    }
+  }
+
+  const args = methodSpecification.arguments
+  const mismatches: string[] = []
+  if (args.dependentVar !== input.dependentVar) mismatches.push(`因变量（基准=${String(args.dependentVar)}，本次=${input.dependentVar}）`)
+  if (args.treatmentVar !== input.treatmentVar) mismatches.push(`核心解释变量（基准=${String(args.treatmentVar)}，本次=${input.treatmentVar}）`)
+  const baselineCovariates = stringList(args.covariates)
+  if (!baselineCovariates || !sortedEqual(baselineCovariates, input.covariates)) {
+    mismatches.push(`控制变量（基准=${JSON.stringify(baselineCovariates ?? "无法核验")}，本次=${JSON.stringify(input.covariates)}）`)
+  }
+
+  let entityVar: string | undefined
+  let timeVar: string | undefined
+  let clusterVar: string | undefined
+  let covarianceSupported = false
+  if (methodSpecification.methodID === "panel_fe_regression") {
+    entityVar = typeof args.entityVar === "string" ? args.entityVar : undefined
+    timeVar = typeof args.timeVar === "string" ? args.timeVar : undefined
+    const covariance = args.covariance ?? "robust"
+    if (covariance === "robust") covarianceSupported = true
+    if (covariance === "clustered" && (typeof args.clusterVar === "string" || entityVar)) {
+      covarianceSupported = true
+      // panel_fe/runner.py defaults clusterVar to entityVar when clustered covariance is selected.
+      clusterVar = typeof args.clusterVar === "string" ? args.clusterVar : entityVar
+    }
+  } else {
+    const fixedEffects = stringList(args.fixedEffects)
+    const clusterVars = args.clusterVars === undefined ? [] : stringList(args.clusterVars)
+    const covariance = args.covariance ?? "HC1"
+    if (fixedEffects && fixedEffects.length === 2 && typeof input.entityVar === "string" && typeof input.timeVar === "string" && sortedEqual(fixedEffects, [input.entityVar, input.timeVar])) {
+      entityVar = input.entityVar
+      timeVar = input.timeVar
+    } else {
+      mismatches.push(`实体/时间固定效应（基准=${JSON.stringify(fixedEffects ?? "无法核验")}，本次=${JSON.stringify([input.entityVar, input.timeVar])}）`)
+    }
+    if (clusterVars && covariance === "HC1" && clusterVars.length === 0) covarianceSupported = true
+    if (clusterVars && covariance === "CRV1" && clusterVars.length === 1) {
+      covarianceSupported = true
+      clusterVar = clusterVars[0]
+    }
+  }
+
+  if (!entityVar || input.entityVar && input.entityVar !== entityVar) mismatches.push(`实体固定效应（基准=${entityVar ?? "无法核验"}，本次=${input.entityVar ?? "未提供"}）`)
+  if (!timeVar || input.timeVar && input.timeVar !== timeVar) mismatches.push(`时间固定效应（基准=${timeVar ?? "无法核验"}，本次=${input.timeVar ?? "未提供"}）`)
+  if (!covarianceSupported) mismatches.push("协方差/聚类口径")
+  if (input.clusterVar && input.clusterVar !== clusterVar) mismatches.push(`聚类变量（基准=${clusterVar ?? "未使用聚类"}，本次=${input.clusterVar}）`)
+  if (mismatches.length > 0) {
+    return {
+      ok: false,
+      message: `异质性参数与“${methodName}”基准规格不一致或无法一一映射：${[...new Set(mismatches)].join("、")}。尚未运行扩展；请恢复基准中的原变量、固定效应和可支持的聚类口径，或先向用户确认是否要改变研究规格。`,
+    }
+  }
+  return { ok: true, methodSpecification, runnerSpecification: { entityVar, timeVar, clusterVar } }
+}
+
+function trustedBaselineBundle(input: {
+  datasetId: string
+  stageId: string
+  methodFamily: "fe" | "did"
+  baselineOutputKey?: string
+  dependentVar: string
+  treatmentVar: string
+  entityVar?: string
+  timeVar?: string
+  clusterVar?: string
+  covariates: string[]
 }) {
+  const artifactInput = resolveArtifactInput({ datasetId: input.datasetId, stageId: input.stageId })
+  if (!artifactInput.manifest || !artifactInput.stage) {
+    throw new Tool.InputValidationError("当前数据阶段不可用；请重新完成数据检查后再运行异质性分析。")
+  }
+  const supportedMethodIDs = input.methodFamily === "fe"
+    ? new Set(["panel_fe_regression", "hdfe_regression"])
+    : new Set(["did_static", "did2s", "did_event_study_saturated"])
+  const candidates = artifactInput.manifest.finalOutputs.filter((output) => {
+    if (
+      output.stageId !== artifactInput.stage!.stageId ||
+      !output.key.endsWith("_result")
+    ) return false
+    // finalOutputs.branch 是交付物目录的命名空间（如 econometrics/panel_fe_regression），
+    // 而 stage.branch 是规范化数据分支（通常为 main）；数据血缘应由同一 manifest + stageId 绑定。
+    return supportedMethodIDs.has(output.key.slice(0, -"_result".length))
+  })
+  const duplicateKeyCounts = new Map<string, number>()
+  for (const output of candidates) duplicateKeyCounts.set(output.key, (duplicateKeyCounts.get(output.key) ?? 0) + 1)
+  const choices = candidates.map((output, index) => ({
+    output,
+    selector: (duplicateKeyCounts.get(output.key) ?? 0) > 1
+      ? `${output.key}@${output.runId ?? output.createdAt}#${index + 1}`
+      : output.key,
+  }))
+  const requestedKey = input.baselineOutputKey?.trim()
+  const selectedChoice = requestedKey
+    ? choices.find((choice) => choice.selector === requestedKey)
+    : choices.length === 1 ? choices[0] : undefined
+  if (!selectedChoice) {
+    const available = choices.map((choice) => choice.selector)
+    const reason = available.length === 0
+      ? "当前数据阶段没有已发布的可用 FE/DID 基准结果。"
+      : requestedKey
+        ? `输出键“${requestedKey}”不是当前数据阶段中唯一有效的基准结果标识。`
+        : "当前数据阶段有多个基准结果，不能替你选择分析对象。"
+    const guidance = available.length
+      ? `可选基准输出键：${available.join("、")}。请询问用户要基于哪一个结果继续。`
+      : "请先完成并核验一个 FE/DID 基准估计，再决定是否运行扩展分析。"
+    return {
+      requiresUserDecision: true as const,
+      decisionKind: "baseline_selection" as const,
+      message: `${reason} ${guidance}`,
+      availableOutputKeys: available,
+    }
+  }
+
+  const selected = selectedChoice.output
+  if (selected.stageId !== artifactInput.stage.stageId) {
+    throw new Tool.InputValidationError("选中的基准结果与当前规范化数据阶段不一致。")
+  }
+  const specification = validateBaselineSpecification({
+    output: selected,
+    methodFamily: input.methodFamily,
+    dependentVar: input.dependentVar,
+    treatmentVar: input.treatmentVar,
+    entityVar: input.entityVar,
+    timeVar: input.timeVar,
+    clusterVar: input.clusterVar,
+    covariates: input.covariates,
+  })
+  if (!specification.ok) {
+    return {
+      requiresUserDecision: true as const,
+      decisionKind: "baseline_compatibility" as const,
+      message: specification.message,
+      availableOutputKeys: [selectedChoice.selector],
+    }
+  }
+  let resultPath: string
+  try {
+    const stateRoot = resolveManagedProjectPath({ filePath: projectStateRoot(), managedRoot: projectInternalRoot() })
+    resultPath = resolveManagedProjectPath({ filePath: selected.path, managedRoot: stateRoot })
+  } catch (error) {
+    if (!(error instanceof Tool.InputValidationError)) throw error
+    const detail = error instanceof Error ? error.message : "路径无法核验"
+    throw new Tool.InputValidationError(`基准结果不在 KillStata 受管产物目录中，已拒绝读取。${detail}`, { cause: error })
+  }
+
+  const loaded = loadResultBundle({ directResultPath: resultPath })
+  if (loaded.stageId && loaded.stageId !== artifactInput.stage.stageId) {
+    throw new Tool.InputValidationError("基准结果文件中的 stageId 与受管产物记录不一致。")
+  }
+  if (loaded.branch && loaded.branch !== selected.branch) {
+    throw new Tool.InputValidationError("基准结果文件中的分支与受管产物记录不一致。")
+  }
+  const bundle = {
+    ...loaded,
+    manifest: artifactInput.manifest,
+    datasetId: input.datasetId,
+    stageId: artifactInput.stage.stageId,
+    runId: selected.runId,
+    branch: selected.branch,
+  }
+  if (bundle.stageId !== artifactInput.stage.stageId) {
+    throw new Tool.InputValidationError("基准结果文件中的 stageId 与受管产物记录不一致。")
+  }
+  const resultMethod = bundle.results.method ?? bundle.results.method_id
+  if (typeof resultMethod === "string" && resultMethod !== selected.key.slice(0, -"_result".length)) {
+    throw new Tool.InputValidationError("基准结果文件中的方法 ID 与受管产物输出键不一致。")
+  }
+  return {
+    requiresUserDecision: false as const,
+    bundle,
+    manifest: artifactInput.manifest,
+    stage: artifactInput.stage,
+    methodSpecification: specification.methodSpecification,
+    runnerSpecification: specification.runnerSpecification,
+  }
+}
+
+function resolveAnalysisDataPath(input: { datasetId?: string; stageId?: string; baselineBundle: ReturnType<typeof loadResultBundle> }) {
   const datasetId = input.datasetId ?? input.baselineBundle.datasetId
   if (datasetId) {
-    const artifact = resolveArtifactInput({
-      datasetId,
-      stageId: input.stageId ?? input.baselineBundle.stageId,
-    })
+    const artifact = resolveArtifactInput({ datasetId, stageId: input.stageId ?? input.baselineBundle.stageId })
     if (artifact.resolvedInputPath) return artifact.resolvedInputPath
   }
-  const fromBundle = input.baselineBundle.sourcePath
-  if (fromBundle && fs.existsSync(fromBundle)) return fromBundle
-  throw new Error("Unable to resolve canonical analysis dataset for heterogeneity_runner.")
-}
-
-function renderNarrative(title: string, specs: HeterogeneitySpecResult[]) {
-  const lines = [`# ${title}`, ""]
-  if (specs.length === 0) {
-    lines.push("- No eligible specifications were executed for this section.")
-    lines.push("")
-    return lines.join("\n")
-  }
-  for (const spec of specs) {
-    lines.push(`## ${spec.title ?? spec.spec_id}`)
-    lines.push(`- Status: ${spec.status}`)
-    lines.push(`- Changed specification: ${spec.changed_specification}`)
-    if (spec.status === "success" && spec.grounded_numbers) {
-      lines.push(
-        `- Grounded result: coefficient=${spec.grounded_numbers.coefficient?.toFixed(6) ?? "NA"}, p-value=${spec.grounded_numbers.p_value?.toFixed(6) ?? "NA"}, rows=${spec.grounded_numbers.rows_used ?? "NA"}.`,
-      )
-      lines.push(
-        `- Interpretation: primary effect is ${spec.key_effect_direction ?? "unavailable"} and ${spec.key_effect_significance ?? "unavailable"}.`,
-      )
-    }
-    if (spec.diagnostic_flags.length) lines.push(`- Diagnostic flags: ${spec.diagnostic_flags.join(" | ")}`)
-    if (spec.warning) lines.push(`- Warning: ${spec.warning}`)
-    if (spec.error) lines.push(`- Error: ${spec.error}`)
-    lines.push("")
-  }
-  return lines.join("\n")
+  if (input.baselineBundle.sourcePath && fs.existsSync(input.baselineBundle.sourcePath)) return input.baselineBundle.sourcePath
+  throw new Error("无法定位规范化分析数据；请提供有效的数据集、阶段或基准结果引用。")
 }
 
 function relativeSpec(spec: HeterogeneitySpecResult) {
@@ -251,553 +502,296 @@ function relativeSpec(spec: HeterogeneitySpecResult) {
   }
 }
 
-function buildPythonScript(payloadB64: string) {
-  return `
-import base64
-import json
-from datetime import datetime
-from pathlib import Path
-import traceback
-
-import numpy as np
-import pandas as pd
-import statsmodels.formula.api as smf
-
-RESULT_PREFIX = "${PYTHON_RESULT_PREFIX}"
-ERRORS_DIR = r"${projectErrorsRoot().replace(/\\/g, "\\\\")}"
-PAYLOAD = json.loads(base64.b64decode("${payloadB64}").decode("utf-8"))
-
-def emit(result):
-    print(f"{RESULT_PREFIX}{json.dumps(result, ensure_ascii=False)}")
-
-def save_json(file_path, payload):
-    Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-
-def q(name):
-    escaped = str(name).replace("\\\\", "\\\\\\\\").replace('"', '\\\\\\"')
-    return f'Q("{escaped}")'
-
-${PY_READ_CSV_FALLBACK}
-
-def read_table(file_path):
-    suffix = Path(file_path).suffix.lower()
-    if suffix == ".csv":
-        return read_csv_with_fallback(file_path)
-    if suffix in [".xlsx", ".xls"]:
-        return pd.read_excel(file_path)
-    if suffix == ".dta":
-        return pd.read_stata(file_path)
-    if suffix == ".parquet":
-        return pd.read_parquet(file_path)
-    raise ValueError(f"Unsupported input format: {suffix}")
-
-def to_numeric_if_possible(series):
-    converted = pd.to_numeric(series, errors="coerce")
-    if converted.notna().sum() >= max(1, int(len(series) * 0.6)):
-        return converted
-    return series
-
-def load_df():
-    df = read_table(PAYLOAD["data_path"]).copy()
-    for column in df.columns:
-        df[column] = to_numeric_if_possible(df[column])
-    return df
-
-def significance_label(p_value):
-    if p_value is None or pd.isna(p_value):
-        return "unavailable"
-    p_value = float(p_value)
-    if p_value < 0.01:
-        return "p<0.01"
-    if p_value < 0.05:
-        return "p<0.05"
-    if p_value < 0.1:
-        return "p<0.1"
-    return "not_significant"
-
-def direction_label(value):
-    if value is None or pd.isna(value):
-        return None
-    value = float(value)
-    if abs(value) < 1e-10:
-        return "zeroish"
-    return "positive" if value > 0 else "negative"
-
-def build_formula(dependent_var, terms, entity_var=None, time_var=None):
-    rhs = [term for term in terms if term]
-    if entity_var:
-        rhs.append(f"C({q(entity_var)})")
-    if time_var:
-        rhs.append(f"C({q(time_var)})")
-    return f"{q(dependent_var)} ~ " + " + ".join(rhs)
-
-def fit_formula(df, dependent_var, treatment_var, covariates, primary_term, entity_var=None, time_var=None, cluster_var=None, extra_terms=None):
-    needed = [dependent_var, treatment_var, *covariates]
-    if entity_var:
-        needed.append(entity_var)
-    if time_var:
-        needed.append(time_var)
-    if cluster_var:
-        needed.append(cluster_var)
-    missing = sorted({col for col in needed if col and col not in df.columns})
-    if missing:
-        raise ValueError(f"Missing columns: {missing}")
-
-    work = df[needed].copy()
-    for column in [dependent_var, treatment_var, *covariates]:
-        work[column] = pd.to_numeric(work[column], errors="coerce")
-    if extra_terms:
-        for name, series in extra_terms.items():
-            work[name] = series
-    subset = [dependent_var, treatment_var, *covariates]
-    if extra_terms:
-        subset.extend(extra_terms.keys())
-    work = work.dropna(subset=subset)
-    if len(work) < 20:
-        raise ValueError("Too few usable rows after dropping missing values")
-
-    terms = [q(treatment_var), *[q(item) for item in covariates]]
-    if extra_terms:
-        terms.extend(extra_terms.keys())
-    formula = build_formula(dependent_var, terms, entity_var=entity_var, time_var=time_var)
-
-    fit_kwargs = {}
-    cov_type = "HC1"
-    if cluster_var and cluster_var in work.columns and work[cluster_var].nunique(dropna=True) > 1:
-        cov_type = "cluster"
-        fit_kwargs = {"cov_kwds": {"groups": work[cluster_var]}}
-    model = smf.ols(formula, data=work).fit(cov_type=cov_type, **fit_kwargs)
-    if primary_term not in model.params.index:
-        raise ValueError(f"Primary term not found in fitted model: {primary_term}")
-    return model, work, cov_type
-
-def persist_spec(spec_dir, spec, model, work, cov_type, dependent_var, treatment_var, covariates, primary_term, raw_primary_term):
-    spec_dir.mkdir(parents=True, exist_ok=True)
-    conf_int = model.conf_int()
-    rows = []
-    for term in model.params.index:
-        display_term = "primary_term" if term == primary_term else term
-        rows.append({
-            "term": display_term,
-            "raw_term": term,
-            "coefficient": float(model.params[term]),
-            "std_error": float(model.bse[term]),
-            "p_value": float(model.pvalues[term]),
-            "ci_lower": float(conf_int.loc[term, 0]),
-            "ci_upper": float(conf_int.loc[term, 1]),
-        })
-    coeff_df = pd.DataFrame(rows)
-    coefficients_path = spec_dir / "coefficient_table.csv"
-    coeff_df.to_csv(coefficients_path, index=False, encoding="utf-8-sig")
-
-    diagnostics = {
-        "core": {
-            "covariance_type": cov_type,
-            "cluster_var": spec.get("cluster_var"),
-            "cluster_count": int(work[spec["cluster_var"]].nunique()) if spec.get("cluster_var") and spec["cluster_var"] in work.columns else None,
-        },
-        "qa": {
-            "warnings": [],
-            "blocking_errors": [],
-            "rows_used": int(len(work)),
-        },
-        "post_estimation_gates": [],
+function renderNarrative(title: string, specs: HeterogeneitySpecResult[]) {
+  const lines = [`# ${title}`, ""]
+  if (specs.length === 0) return `${lines.join("\n")}暂无符合条件的扩展规格。\n`
+  for (const spec of specs) {
+    lines.push(`## ${spec.title ?? spec.spec_id}`)
+    lines.push(`- 状态：${spec.status === "success" ? "完成" : spec.status === "skipped" ? "跳过" : "失败"}`)
+    lines.push(`- 变化：${spec.changed_specification}`)
+    if (spec.grounded_numbers) {
+      lines.push(`- 核心结果：系数=${spec.grounded_numbers.coefficient ?? "不可用"}，p值=${spec.grounded_numbers.p_value ?? "不可用"}，有效样本=${spec.grounded_numbers.rows_used ?? "不可用"}`)
     }
-    metadata = {
-        "dependent_var": dependent_var,
-        "treatment_var": "primary_term",
-        "raw_treatment_var": treatment_var,
-        "covariates": covariates,
-        "entity_var": spec.get("entity_var"),
-        "time_var": spec.get("time_var"),
-        "cluster_var": spec.get("cluster_var"),
-        "rows_used": int(len(work)),
-        "spec_id": spec["spec_id"],
-        "spec_type": spec["spec_type"],
-        "raw_primary_term": raw_primary_term,
-        "output_kind": "regression",
-    }
-
-    result = {
-        "success": True,
-        "method": PAYLOAD["method_family"],
-        "dataset_id": PAYLOAD.get("dataset_id"),
-        "stage_id": PAYLOAD.get("stage_id"),
-        "run_id": PAYLOAD.get("run_id"),
-        "branch": PAYLOAD.get("branch"),
-        "dependent_var": dependent_var,
-        "treatment_var": "primary_term",
-        "raw_treatment_var": treatment_var,
-        "coefficient": float(model.params[primary_term]),
-        "std_error": float(model.bse[primary_term]),
-        "p_value": float(model.pvalues[primary_term]),
-        "r_squared": float(model.rsquared),
-        "rows_used": int(len(work)),
-        "qa_status": "pass",
-        "warnings": [],
-        "blocking_errors": [],
-        "spec_id": spec["spec_id"],
-        "spec_type": spec["spec_type"],
-        "changed_specification": spec["changed_specification"],
-        "output_path": str(spec_dir / "results.json"),
-        "coefficients_path": str(coefficients_path),
-        "diagnostics_path": str(spec_dir / "diagnostics.json"),
-        "metadata_path": str(spec_dir / "model_metadata.json"),
-        "narrative_path": str(spec_dir / "narrative.md"),
-    }
-    summary_line = f"{spec['title']}: coefficient={result['coefficient']:.6f}, p-value={result['p_value']:.6f}, rows={result['rows_used']}"
-    with open(result["narrative_path"], "w", encoding="utf-8") as f:
-        f.write("# Specification Narrative\\n\\n")
-        f.write(f"- Title: {spec['title']}\\n")
-        f.write(f"- Changed specification: {spec['changed_specification']}\\n")
-        f.write(f"- Grounded result: {summary_line}\\n")
-    save_json(result["diagnostics_path"], diagnostics)
-    save_json(result["metadata_path"], metadata)
-    save_json(result["output_path"], result)
-    return result
-
-def safe_spec(spec, runner):
-    spec_dir = Path(PAYLOAD["output_dir"]) / "specs" / spec["spec_id"]
-    try:
-        outcome = spec["dependent_var"]
-        treatment = spec["treatment_var"]
-        covariates = spec.get("covariates") or []
-        model, work, cov_type, primary_term, raw_primary_term = runner(outcome, treatment, covariates, spec)
-        result = persist_spec(spec_dir, spec, model, work, cov_type, outcome, treatment, covariates, primary_term, raw_primary_term)
-        return {
-            "spec_id": spec["spec_id"],
-            "spec_type": spec["spec_type"],
-            "status": "success",
-            "result_dir": str(spec_dir),
-            "result_path": result["output_path"],
-            "diagnostics_path": result["diagnostics_path"],
-            "metadata_path": result["metadata_path"],
-            "coefficients_path": result["coefficients_path"],
-            "narrative_path": result["narrative_path"],
-            "changed_specification": spec["changed_specification"],
-            "key_effect_direction": direction_label(result["coefficient"]),
-            "key_effect_significance": significance_label(result["p_value"]),
-            "grounded_numbers": {
-                "coefficient": result["coefficient"],
-                "std_error": result["std_error"],
-                "p_value": result["p_value"],
-                "r_squared": result["r_squared"],
-                "rows_used": result["rows_used"],
-            },
-            "diagnostic_flags": [],
-            "primary_term": "primary_term",
-            "raw_primary_term": raw_primary_term,
-            "title": spec["title"],
-        }
-    except Exception as exc:
-        return {
-            "spec_id": spec["spec_id"],
-            "spec_type": spec["spec_type"],
-            "status": "failed",
-            "changed_specification": spec["changed_specification"],
-            "diagnostic_flags": ["execution_failed"],
-            "title": spec["title"],
-            "error": str(exc),
-        }
-
-def base_runner(df):
-    def run(outcome, treatment, covariates, spec):
-        extra_terms = {}
-        primary_term = q(treatment)
-        raw_primary_term = treatment
-        if spec["spec_type"] == "heterogeneity" and spec.get("mode") == "interaction":
-            extra_terms = spec["extra_terms"]
-            primary_term = spec["primary_term"]
-            raw_primary_term = spec["raw_primary_term"]
-        model, work, cov_type = fit_formula(
-            df,
-            dependent_var=outcome,
-            treatment_var=treatment,
-            covariates=covariates,
-            primary_term=primary_term,
-            entity_var=spec.get("entity_var"),
-            time_var=spec.get("time_var"),
-            cluster_var=spec.get("cluster_var"),
-            extra_terms=extra_terms,
-        )
-        return model, work, cov_type, primary_term, raw_primary_term
-    return run
-
-def interaction_spec(df, heter_var, template):
-    if heter_var not in df.columns:
-        return [{"spec_id": f"heter_interaction_{heter_var}", "spec_type": "heterogeneity", "status": "skipped", "changed_specification": f"interaction term for {heter_var}", "diagnostic_flags": ["missing_variable"], "title": f"Interaction: {heter_var}", "warning": f"Variable not found: {heter_var}"}]
-    series = df[heter_var]
-    numeric = pd.to_numeric(series, errors="coerce")
-    if numeric.notna().sum() >= max(10, int(len(series) * 0.6)):
-        centered = numeric - float(numeric.median())
-        extra_name = f"int_{heter_var}"
-        return [{
-            **template,
-            "spec_id": f"heter_interaction_{heter_var}",
-            "spec_type": "heterogeneity",
-            "mode": "interaction",
-            "title": f"Interaction: {heter_var}",
-            "changed_specification": f"Add treatment × {heter_var} interaction",
-            "extra_terms": {extra_name: df[template["treatment_var"]] * centered},
-            "primary_term": extra_name,
-            "raw_primary_term": f"{template['treatment_var']} × centered({heter_var})",
-        }]
-    levels = [item for item in pd.Series(series).dropna().astype(str).unique().tolist()][:6]
-    if len(levels) == 2:
-        focal = levels[1]
-        dummy_name = f"int_{heter_var}"
-        dummy = pd.Series(np.where(series.astype(str) == focal, 1.0, 0.0), index=df.index)
-        return [{
-            **template,
-            "spec_id": f"heter_interaction_{heter_var}",
-            "spec_type": "heterogeneity",
-            "mode": "interaction",
-            "title": f"Interaction: {heter_var}",
-            "changed_specification": f"Add treatment × 1[{heter_var}={focal}] interaction",
-            "extra_terms": {dummy_name: df[template["treatment_var"]] * dummy},
-            "primary_term": dummy_name,
-            "raw_primary_term": f"{template['treatment_var']} × 1[{heter_var}={focal}]",
-        }]
-    return [{
-        "spec_id": f"heter_interaction_{heter_var}",
-        "spec_type": "heterogeneity",
-        "status": "skipped",
-        "changed_specification": f"interaction term for {heter_var}",
-        "diagnostic_flags": ["unsupported_interaction_shape"],
-        "title": f"Interaction: {heter_var}",
-        "warning": f"Skipped interaction for {heter_var}: only binary or mostly numeric variables are supported in v1.",
-    }]
-
-def subsample_specs(df, heter_var, template):
-    if heter_var not in df.columns:
-        return [{"spec_id": f"heter_split_{heter_var}", "spec_type": "heterogeneity", "status": "skipped", "changed_specification": f"subsample split on {heter_var}", "diagnostic_flags": ["missing_variable"], "title": f"Split: {heter_var}", "warning": f"Variable not found: {heter_var}"}]
-    series = df[heter_var]
-    numeric = pd.to_numeric(series, errors="coerce")
-    specs = []
-    if numeric.notna().sum() >= max(10, int(len(series) * 0.6)):
-        threshold = float(numeric.median())
-        for side, mask in [("low", numeric <= threshold), ("high", numeric > threshold)]:
-            specs.append({
-                **template,
-                "spec_id": f"heter_split_{heter_var}_{side}",
-                "spec_type": "heterogeneity",
-                "title": f"Split {heter_var}: {side}",
-                "changed_specification": f"Estimate on subsample {heter_var} {'<=' if side == 'low' else '>'} median({threshold:.6f})",
-                "row_filter": mask.fillna(False).tolist(),
-            })
-        return specs
-    levels = [item for item in pd.Series(series).dropna().astype(str).unique().tolist()][:4]
-    for level in levels:
-        specs.append({
-            **template,
-            "spec_id": f"heter_split_{heter_var}_{str(level).replace(' ', '_')}",
-            "spec_type": "heterogeneity",
-            "title": f"Split {heter_var}: {level}",
-            "changed_specification": f"Estimate on subsample {heter_var}={level}",
-            "row_filter": (series.astype(str) == str(level)).fillna(False).tolist(),
-        })
-    return specs
-
-def main():
-    output_dir = Path(PAYLOAD["output_dir"])
-    output_dir.mkdir(parents=True, exist_ok=True)
-    df = load_df()
-    template = {
-        "dependent_var": PAYLOAD["dependent_var"],
-        "treatment_var": PAYLOAD["treatment_var"],
-        "covariates": PAYLOAD.get("covariates") or [],
-        "entity_var": PAYLOAD.get("entity_var"),
-        "time_var": PAYLOAD.get("time_var"),
-        "cluster_var": PAYLOAD.get("cluster_var"),
-    }
-    warnings = []
-    specs = []
-    runner = base_runner(df)
-
-    for heter_var in PAYLOAD.get("heterogeneity_vars") or []:
-        for spec in subsample_specs(df, heter_var, template):
-            if spec.get("status") == "skipped":
-                specs.append(spec)
-                continue
-            mask = pd.Series(spec.pop("row_filter"), index=df.index)
-            scoped_df = df.loc[mask].copy()
-            specs.append(safe_spec(spec, base_runner(scoped_df)))
-        for spec in interaction_spec(df, heter_var, template):
-            if spec.get("status") == "skipped":
-                specs.append(spec)
-                continue
-            specs.append(safe_spec(spec, runner))
-
-    for mechanism_var in PAYLOAD.get("mechanism_vars") or []:
-        spec = {
-            **template,
-            "spec_id": f"mechanism_{mechanism_var}",
-            "spec_type": "mechanism",
-            "title": f"Mechanism: {mechanism_var}",
-            "dependent_var": mechanism_var,
-            "changed_specification": f"Replace dependent variable with mechanism variable {mechanism_var}",
-        }
-        specs.append(safe_spec(spec, runner))
-
-    placebo = PAYLOAD.get("placebo") or False
-    placebo_vars = []
-    if isinstance(placebo, dict):
-        placebo_vars = placebo.get("variables") or []
-    elif placebo is True:
-        warnings.append("placebo=true received without explicit variables; skipped.")
-    for placebo_var in placebo_vars:
-        spec = {
-            **template,
-            "spec_id": f"placebo_{placebo_var}",
-            "spec_type": "placebo",
-            "title": f"Placebo: {placebo_var}",
-            "treatment_var": placebo_var,
-            "changed_specification": f"Use placebo treatment variable {placebo_var}",
-        }
-        specs.append(safe_spec(spec, runner))
-
-    for alt in PAYLOAD.get("alternative_specifications") or []:
-        spec = {
-            **template,
-            "spec_id": f"alternative_{str(alt.get('name', 'spec')).replace(' ', '_')}",
-            "spec_type": "alternative_spec",
-            "title": f"Alternative: {alt.get('name', 'spec')}",
-            "dependent_var": alt.get("dependentVar") or template["dependent_var"],
-            "treatment_var": alt.get("treatmentVar") or template["treatment_var"],
-            "covariates": alt.get("covariates") or template["covariates"],
-            "changed_specification": f"Alternative specification: {alt.get('name', 'spec')}",
-        }
-        specs.append(safe_spec(spec, runner))
-
-    emit({"success": True, "output_dir": str(output_dir), "warnings": warnings, "specs": specs})
-
-try:
-    main()
-except Exception as exc:
-    error_dir = Path(ERRORS_DIR)
-    error_dir.mkdir(parents=True, exist_ok=True)
-    error_path = error_dir / f"heterogeneity_runner_{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}_error.json"
-    payload = {"success": False, "error": str(exc), "traceback": traceback.format_exc(), "error_log_path": str(error_path)}
-    save_json(error_path, payload)
-    emit(payload)
-`
+    if (spec.warning) lines.push(`- 提示：${spec.warning}`)
+    if (spec.error) lines.push(`- 错误：${spec.error}`)
+    lines.push("")
+  }
+  return lines.join("\n")
 }
 
-export const HeterogeneityRunnerTool = Tool.define("heterogeneity_runner", {
+export const HeterogeneityRunnerTool = Tool.define<typeof HeterogeneityRunnerInputSchema, Record<string, any>>("heterogeneity_runner", Tool.Execution.managedFilesystem, ToolModel.forTool("heterogeneity_runner"), {
   description: DESCRIPTION,
   parameters: HeterogeneityRunnerInputSchema,
   async execute(params, ctx) {
-    const baselineBundle = loadResultBundle({
-      datasetId: params.datasetId,
-      resultDir: params.baselineResultDir,
-      outputKey: params.baselineOutputKey,
-      directResultPath: params.directResultPath,
-      runId: params.runId,
-    })
-    assertBaselineHealthy(baselineBundle)
-
-    const manifest = params.datasetId ? readDatasetManifest(params.datasetId) : baselineBundle.manifest
-    const stage = manifest?.datasetId
-      ? resolveArtifactInput({
-          datasetId: manifest.datasetId,
-          stageId: params.stageId ?? baselineBundle.stageId,
-        }).stage
+    const extra = ctx.extra as Record<string, unknown> | undefined
+    const modelInvocation = Boolean(extra?.model)
+    const sourceUserMessageId = typeof extra?.sourceUserMessageId === "string" ? extra.sourceUserMessageId : undefined
+    const ledger = RuntimeTaskLedger.listTasks(ctx.sessionID)
+    const analysisTask: RuntimeTaskRecord | undefined = sourceUserMessageId
+      ? ledger.tasks.find((item) =>
+          item.taskId === ledger.activeTaskId &&
+          item.messageID === sourceUserMessageId &&
+          item.analysisRequest?.sourceMessageId === sourceUserMessageId,
+        )
       : undefined
-    const runId = inferRunId({
-      requestedRunId: params.runId ?? baselineBundle.runId,
-      stage,
-    })
-
-    const dataPath = resolveAnalysisDataPath({
+    if (modelInvocation) {
+      const requestKind = analysisTask?.analysisRequest?.kind
+      const qualityInspectionOnly = extra?.qualityInspectionOnly === true
+      const recommendationOnly = extra?.recommendationOnly === true
+      const authorizedMethods = [
+        ...(Array.isArray(analysisTask?.metadata?.requiredToolIDs)
+          ? analysisTask.metadata.requiredToolIDs.filter((id): id is string => typeof id === "string")
+          : []),
+        ...(Array.isArray(analysisTask?.metadata?.confirmedToolIDs)
+          ? analysisTask.metadata.confirmedToolIDs.filter((id): id is string => typeof id === "string")
+          : []),
+      ]
+      if (requestKind !== "estimate" || !authorizedMethods.includes("heterogeneity_runner") || qualityInspectionOnly || recommendationOnly) {
+        const scopeReason = qualityInspectionOnly
+          ? "本轮明确只做数据质量检查"
+          : recommendationOnly
+            ? "本轮只请求方法推荐"
+            : requestKind === "estimate" && !authorizedMethods.includes("heterogeneity_runner")
+              ? "当前用户请求没有明确选择或确认异质性扩展"
+            : undefined
+        return {
+          title: "当前请求不允许运行异质性",
+          output: [
+            "异质性分析会运行多个独立扩展规格。",
+            scopeReason ?? (requestKind
+              ? `当前请求登记为“${requestKind}”，不是估计请求。`
+              : "当前模型调用没有绑定有效的估计请求。"),
+            "本次没有启动 Python，也没有运行任何估计。",
+            "如需执行，请由用户明确发起估计请求，并确认要运行的完整扩展规格集合。",
+          ].join("\n"),
+          metadata: {
+            requiresUserDecision: true,
+            estimateExecuted: false,
+            requestKind,
+            ...(qualityInspectionOnly ? { qualityInspectionOnly: true } : {}),
+            ...(recommendationOnly ? { recommendationOnly: true } : {}),
+          },
+        }
+      }
+    }
+    if (!params.datasetId || !params.stageId) {
+      throw new Tool.InputValidationError("异质性分析必须关联当前 Harness 数据集和阶段，不能通过基准文件路径直接执行。")
+    }
+    if (modelInvocation && (params.baselineResultDir || params.directResultPath)) {
+      throw new Tool.InputValidationError("模型不能指定基准结果文件路径；请使用当前阶段已发布的基准结果输出键。")
+    }
+    const workflow = getActiveWorkflowRun(ctx.sessionID)
+    const currentData = workflow ? canonicalDataStageForWorkflow(workflow, activeOrLatestStage(workflow)) : null
+    if (!currentData || currentData.datasetId !== params.datasetId || currentData.stageId !== params.stageId) {
+      throw new Tool.InputValidationError("异质性分析引用与当前会话的规范化数据阶段不一致；请使用当前阶段重新选择基准结果。")
+    }
+    const trustedBaseline = trustedBaselineBundle({
       datasetId: params.datasetId,
       stageId: params.stageId,
-      baselineBundle,
+      methodFamily: params.methodFamily,
+      baselineOutputKey: params.baselineOutputKey,
+      dependentVar: params.dependentVar,
+      treatmentVar: params.treatmentVar,
+      entityVar: params.entityVar,
+      timeVar: params.timeVar,
+      clusterVar: params.clusterVar,
+      covariates: params.covariates ?? [],
     })
-
-    const outputDir = params.outputDir
-      ? await resolveToolPath({
-          filePath: params.outputDir,
-          mode: "write",
+    if (trustedBaseline.requiresUserDecision) {
+      return {
+        title: trustedBaseline.decisionKind === "baseline_selection" ? "需要选择基准结果" : "基准规格需要确认",
+        output: trustedBaseline.message,
+        metadata: {
+          requiresUserDecision: true,
+          decisionKind: trustedBaseline.decisionKind,
+          baselineOutputChoices: trustedBaseline.availableOutputKeys,
+          datasetId: params.datasetId,
+          stageId: params.stageId,
+        },
+      }
+    }
+    const selectedBaseline = trustedBaseline
+    const baselineBundle = selectedBaseline.bundle
+    assertBaselineHealthy(baselineBundle)
+    const manifest = selectedBaseline.manifest
+    const stage = selectedBaseline.stage
+    const stageFingerprint = dataDiagnosisFingerprint(stage, params.stageId)
+    if (!stageFingerprint) {
+      throw new Tool.InputValidationError("当前数据阶段缺少有效的数据诊断指纹；尚未运行异质性扩展。请先重新检查当前数据阶段，再继续分析。")
+    }
+    if (modelInvocation && (
+      analysisTask?.analysisRequest?.kind !== "estimate" ||
+      analysisTask.analysisLifecycle?.requestId !== analysisTask.analysisRequest.requestId ||
+      analysisTask.analysisLifecycle.datasetId !== params.datasetId ||
+      analysisTask.analysisLifecycle.stageId !== params.stageId ||
+      analysisTask.analysisLifecycle.stageFingerprint !== stageFingerprint
+    )) {
+      throw new Tool.InputValidationError("当前请求的诊断数据集、阶段或内容指纹与异质性分析输入不一致；尚未运行 Python。请先刷新当前阶段诊断或重新提交本次分析请求。")
+    }
+    const branch = inferBranch({ requestedBranch: params.branch, stage, source: "model" })
+    const runId = inferRunId({ requestedRunId: params.runId ?? baselineBundle.runId, stage, source: "model" })
+    const pythonCommand = await resolveRuntimePythonCommand()
+    const resolvedDataPath = resolveAnalysisDataPath({ datasetId: params.datasetId, stageId: params.stageId, baselineBundle })
+    const dataPath = manifest?.datasetId && stage?.stageId
+      ? await resolveDatasetStagePath({
+          datasetId: manifest.datasetId,
+          filePath: resolvedDataPath,
           toolName: "heterogeneity_runner",
           sessionID: ctx.sessionID,
           messageID: ctx.messageID,
           callID: ctx.callID,
           ask: ctx.ask,
         })
-      : generatedArtifactRoot({
-          module: "heterogeneity_runner",
-          runId,
-          branch: params.branch,
+      : await resolveToolPath({
+          filePath: resolvedDataPath,
+          mode: "read",
+          toolName: "heterogeneity_runner",
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+          callID: ctx.callID,
+          ask: ctx.ask,
         })
-    fs.mkdirSync(outputDir, { recursive: true })
-
-    const payload = {
-      data_path: dataPath,
-      dataset_id: manifest?.datasetId ?? baselineBundle.datasetId ?? params.datasetId ?? null,
-      stage_id: params.stageId ?? baselineBundle.stageId ?? null,
-      run_id: runId,
-      branch: params.branch,
-      method_family: params.methodFamily,
-      dependent_var: params.dependentVar,
-      treatment_var: params.treatmentVar,
-      entity_var:
-        params.entityVar ??
-        (typeof baselineBundle.metadata?.entity_var === "string" ? baselineBundle.metadata.entity_var : null),
-      time_var:
-        params.timeVar ??
-        (typeof baselineBundle.metadata?.time_var === "string" ? baselineBundle.metadata.time_var : null),
-      cluster_var:
-        params.clusterVar ??
-        (typeof baselineBundle.metadata?.cluster_var === "string" ? baselineBundle.metadata.cluster_var : null),
-      covariates: params.covariates,
-      heterogeneity_vars: params.heterogeneityVars,
-      mechanism_vars: params.mechanismVars,
-      placebo: params.placebo ?? false,
-      alternative_specifications: params.alternativeSpecifications,
-      output_dir: outputDir,
-    }
-
-    log.info("run heterogeneity runner", {
-      datasetId: payload.dataset_id,
-      stageId: payload.stage_id,
-      outputDir,
-      methodFamily: params.methodFamily,
+    const sourceFileFingerprint = await sha256File(dataPath)
+    const inputFingerprint = sha256Value({
+      params,
+      baselineSpecification: selectedBaseline.runnerSpecification,
+      stageFingerprint,
+      sourceFileFingerprint,
     })
+    const requiredToolIDs = [
+      ...(Array.isArray(analysisTask?.metadata?.requiredToolIDs)
+        ? analysisTask.metadata.requiredToolIDs.filter((id): id is string => typeof id === "string")
+        : []),
+      ...(Array.isArray(analysisTask?.metadata?.confirmedToolIDs)
+        ? analysisTask.metadata.confirmedToolIDs.filter((id): id is string => typeof id === "string")
+        : []),
+    ]
+    const shouldTrackAnalysisRun = modelInvocation &&
+      analysisTask?.analysisRequest?.kind === "estimate" &&
+      analysisTask.analysisLifecycle?.requestId === analysisTask.analysisRequest.requestId &&
+      analysisTask.analysisRequest.sourceMessageId === sourceUserMessageId &&
+      requiredToolIDs.includes("heterogeneity_runner")
+    const operationId = typeof ctx.callID === "string" && ctx.callID.trim()
+      ? ctx.callID
+      : `heterogeneity_${runId}_${inputFingerprint.slice(-12)}`
+    const analysisOperationIdentity = shouldTrackAnalysisRun ? {
+      requestId: analysisTask!.analysisRequest!.requestId,
+      operationId,
+      toolID: "heterogeneity_runner",
+      datasetId: params.datasetId,
+      stageId: params.stageId,
+      stageFingerprint,
+      inputFingerprint,
+      authorizationMessageId: analysisTask!.analysisRequest!.sourceMessageId,
+    } : undefined
+    const outputDir = await resolveToolPath({
+      filePath: params.outputDir ?? generatedArtifactRoot({ module: "heterogeneity_runner", runId, branch }),
+      mode: "write",
+      toolName: "heterogeneity_runner",
+      sessionID: ctx.sessionID,
+      messageID: ctx.messageID,
+      callID: ctx.callID,
+      ask: ctx.ask,
+    })
+    let canonicalOutputDirBeforeRun: string | undefined
 
-    const { code, stdout, stderr } = await runInlinePython({
-      script: buildPythonScript(encodePythonPayload(payload)),
+    const runnerResult = await runEngineMethodBackend({
+      sessionID: ctx.sessionID,
+      pythonCommand,
       cwd: Instance.directory,
-    })
-    if (code !== 0) {
-      throw new Error(`heterogeneity_runner failed (exit code ${code})\n${stderr}\n${stdout}`)
+      methodID: "heterogeneity_runner",
+      payload: {
+        dataPath,
+        outputDir,
+        methodFamily: params.methodFamily,
+        dependentVar: params.dependentVar,
+        treatmentVar: params.treatmentVar,
+        entityVar: params.entityVar ?? (selectedBaseline
+          ? selectedBaseline.runnerSpecification.entityVar
+          : typeof baselineBundle.metadata?.entity_var === "string" ? baselineBundle.metadata.entity_var : undefined),
+        timeVar: params.timeVar ?? (selectedBaseline
+          ? selectedBaseline.runnerSpecification.timeVar
+          : typeof baselineBundle.metadata?.time_var === "string" ? baselineBundle.metadata.time_var : undefined),
+        clusterVar: params.clusterVar ?? (selectedBaseline
+          ? selectedBaseline.runnerSpecification.clusterVar
+          : typeof baselineBundle.metadata?.cluster_var === "string" ? baselineBundle.metadata.cluster_var : undefined),
+        covariates: params.covariates,
+        heterogeneityVars: params.heterogeneityVars,
+        mechanismVars: params.mechanismVars,
+        placebo: params.placebo ?? false,
+        alternativeSpecifications: params.alternativeSpecifications,
+      },
+      runtime: {
+        datasetId: manifest?.datasetId ?? baselineBundle.datasetId ?? params.datasetId,
+        stageId: params.stageId ?? baselineBundle.stageId,
+        runId,
+        branch,
+        outputDir,
+        expectedDataFingerprint: stageFingerprint,
+      },
+      abort: ctx.abort,
+      beforeExecute: () => {
+        if (analysisOperationIdentity) {
+          const begin = extra?.beginAnalysisToolRun
+          if (typeof begin !== "function") {
+            throw new Tool.InputValidationError("Harness 没有登记异质性运行状态；为避免未跟踪的估计，已停止执行。")
+          }
+          ;(begin as (operation: typeof analysisOperationIdentity) => void)(analysisOperationIdentity)
+        }
+        fs.mkdirSync(outputDir, { recursive: true })
+        canonicalOutputDirBeforeRun = fs.realpathSync(outputDir)
+      },
+    }) as unknown as PythonRunnerResult
+    const latestWorkflow = getActiveWorkflowRun(ctx.sessionID)
+    const latestCurrentData = latestWorkflow
+      ? canonicalDataStageForWorkflow(latestWorkflow, activeOrLatestStage(latestWorkflow))
+      : null
+    if (!latestCurrentData || latestCurrentData.datasetId !== params.datasetId || latestCurrentData.stageId !== params.stageId) {
+      throw new Tool.InputValidationError("异质性执行期间当前会话的规范化数据阶段发生变化；拒绝发布旧阶段结果。")
     }
-    const result = parsePythonResult<PythonRunnerResult>(stdout)
-    if (!result.success) {
-      throw new Error(`heterogeneity_runner failed: ${result.error ?? "unknown error"}\n${result.traceback ?? ""}`)
+    if (!canonicalOutputDirBeforeRun) throw new Tool.InputValidationError("异质性计算未完成执行目录初始化；结果没有登记。")
+    const result = validateHeterogeneityRunnerOutputPaths(runnerResult, outputDir, canonicalOutputDirBeforeRun)
+    if (!result.success || !Array.isArray(result.specs)) throw new Error("异质性 Python 引擎没有返回完整规格结果。")
+    const latestStagePath = manifest?.datasetId && stage?.stageId
+      ? resolveArtifactInput({ datasetId: manifest.datasetId, stageId: stage.stageId }).resolvedInputPath
+      : undefined
+    const latestDataPath = manifest?.datasetId && stage?.stageId && latestStagePath
+      ? await resolveDatasetStagePath({
+          datasetId: manifest.datasetId,
+          filePath: latestStagePath,
+          toolName: "heterogeneity_runner",
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+          callID: ctx.callID,
+          ask: ctx.ask,
+        })
+      : await resolveToolPath({
+          filePath: resolvedDataPath,
+          mode: "read",
+          toolName: "heterogeneity_runner",
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+          callID: ctx.callID,
+          ask: ctx.ask,
+        })
+    if (latestDataPath !== dataPath) {
+      throw new Tool.InputValidationError("异质性执行期间当前数据阶段发生变化；拒绝将规格结果登记到旧血缘。")
+    }
+    if (await sha256File(latestDataPath) !== sourceFileFingerprint) {
+      throw new Tool.InputValidationError("异质性执行期间当前数据内容发生变化；拒绝将结果登记到旧指纹。")
     }
 
     const finalizedSpecs: HeterogeneitySpecResult[] = []
     for (const spec of result.specs) {
-      if (
-        spec.status !== "success" ||
-        !spec.result_dir ||
-        !spec.result_path ||
-        !spec.coefficients_path ||
-        !spec.metadata_path
-      ) {
+      if (spec.status !== "success" || !spec.result_dir || !spec.result_path || !spec.coefficients_path || !spec.metadata_path) {
         finalizedSpecs.push(spec)
         continue
       }
-      const resultsPayload = JSON.parse(fs.readFileSync(spec.result_path, "utf-8")) as Record<string, any>
+      const resultPayload = JSON.parse(fs.readFileSync(spec.result_path, "utf-8")) as Record<string, any>
       const numericSnapshot = createEconometricsNumericSnapshot({
         outputDir: spec.result_dir,
         methodName: `heterogeneity_${spec.spec_type}`,
-        result: {
-          ...resultsPayload,
-          treatment_var: "primary_term",
-        },
+        result: { ...resultPayload, treatment_var: "primary_term" },
         coefficientsPath: spec.coefficients_path,
         diagnosticsPath: spec.diagnostics_path,
         metadataPath: spec.metadata_path,
@@ -805,207 +799,145 @@ export const HeterogeneityRunnerTool = Tool.define("heterogeneity_runner", {
         stageId: params.stageId ?? baselineBundle.stageId,
         runId,
       })
-      resultsPayload.numeric_snapshot_path = numericSnapshot.snapshotPath
-      fs.writeFileSync(spec.result_path, JSON.stringify(resultsPayload, null, 2), "utf-8")
+      resultPayload.numeric_snapshot_path = numericSnapshot.snapshotPath
+      writeHeterogeneityOutputFile(canonicalOutputDirBeforeRun, spec.result_path, JSON.stringify(resultPayload, null, 2))
       finalizedSpecs.push({
         ...spec,
-        grounded_numbers: spec.grounded_numbers ?? {
-          coefficient: resultsPayload.coefficient,
-          std_error: resultsPayload.std_error,
-          p_value: resultsPayload.p_value,
-          r_squared: resultsPayload.r_squared,
-          rows_used: resultsPayload.rows_used,
-        },
-        key_effect_direction: spec.key_effect_direction ?? effectDirection(resultsPayload.coefficient),
-        key_effect_significance: spec.key_effect_significance ?? significanceLabel(resultsPayload.p_value),
+        grounded_numbers: spec.grounded_numbers ?? { coefficient: resultPayload.coefficient, std_error: resultPayload.std_error, p_value: resultPayload.p_value, r_squared: resultPayload.r_squared, rows_used: resultPayload.rows_used },
+        key_effect_direction: spec.key_effect_direction ?? effectDirection(resultPayload.coefficient),
+        key_effect_significance: spec.key_effect_significance ?? significanceLabel(resultPayload.p_value),
       })
     }
 
     const heterogeneitySpecs = finalizedSpecs.filter((item) => item.spec_type === "heterogeneity")
     const mechanismSpecs = finalizedSpecs.filter((item) => item.spec_type === "mechanism")
-    const robustnessSpecs = finalizedSpecs.filter(
-      (item) => item.spec_type === "placebo" || item.spec_type === "alternative_spec",
-    )
-    // 三线表已从产品中移除：结果以结构化产物（results.json / coefficient_table.csv）为准，
-    // 呈现交给实验日志。这里保留空的路径对象，下游的可选字段自然全部落空。
-    const heterogeneityTablePaths: { markdown?: string; latex?: string; xlsx?: string } = {}
-
-    const heterogeneitySummaryPath = path.join(outputDir, "heterogeneity_summary.json")
-    const mechanismSummaryPath = path.join(outputDir, "mechanism_summary.json")
-    const robustnessSummaryPath = path.join(outputDir, "robustness_extension_summary.json")
-    const heterogeneityNarrativePath = path.join(outputDir, "heterogeneity_narrative.md")
-    const mechanismNarrativePath = path.join(outputDir, "mechanism_narrative.md")
-    const combinedBundlePath = path.join(outputDir, "combined_publication_bundle.json")
-
-    const heterogeneitySummary = {
-      baseline_result_dir: relativeWithinProject(baselineBundle.resultDir),
-      baseline_result_path: relativeWithinProject(baselineBundle.resultPath),
-      specs: heterogeneitySpecs.map(relativeSpec),
+    const robustnessSpecs = finalizedSpecs.filter((item) => item.spec_type === "placebo" || item.spec_type === "alternative_spec")
+    const successful = finalizedSpecs.filter((item) => item.status === "success").length
+    const failedOrSkipped = finalizedSpecs.length - successful
+    const allSpecsSucceeded = finalizedSpecs.length > 0 && failedOrSkipped === 0
+    const completionLabel = allSpecsSucceeded
+      ? "异质性分析完成"
+      : successful > 0
+        ? "异质性分析部分完成"
+        : "异质性分析未完成"
+    const nonSuccessfulSpecs = finalizedSpecs.filter((item) => item.status !== "success")
+    const visibleFailureDetails = nonSuccessfulSpecs.slice(0, 3).map((item) => {
+      const state = item.status === "failed" ? "失败" : "跳过"
+      const detail = (item.error ?? item.warning ?? "未提供原因").replace(/\s+/g, " ").slice(0, 240)
+      return `${item.title ?? item.spec_id}（${state}）：${detail}`
+    })
+    const omittedFailureCount = nonSuccessfulSpecs.length - visibleFailureDetails.length
+    const failureSummary = visibleFailureDetails.length > 0
+      ? `\n\n未成功规格说明（展示前 ${visibleFailureDetails.length} 项）：\n${visibleFailureDetails.map((item) => `- ${item}`).join("\n")}${omittedFailureCount > 0 ? `\n- 另有 ${omittedFailureCount} 项，详见结构化扩展结果。` : ""}`
+      : ""
+    const surfacedWarnings = [
+      ...(result.warnings ?? []),
+      ...visibleFailureDetails,
+      ...(omittedFailureCount > 0 ? [`另有 ${omittedFailureCount} 项失败或跳过，详见结构化扩展结果。`] : []),
+    ]
+    const outputDirBeforePublish = await resolveToolPath({
+      filePath: outputDir,
+      mode: "write",
+      toolName: "heterogeneity_runner",
+      sessionID: ctx.sessionID,
+      messageID: ctx.messageID,
+      callID: ctx.callID,
+      ask: ctx.ask,
+    })
+    if (outputDirBeforePublish !== canonicalOutputDirBeforeRun) {
+      throw new Tool.InputValidationError("异质性输出目录在执行期间发生变化；拒绝写入汇总产物。")
     }
-    const mechanismSummary = {
-      baseline_result_dir: relativeWithinProject(baselineBundle.resultDir),
-      specs: mechanismSpecs.map(relativeSpec),
-    }
-    const robustnessSummary = {
-      baseline_result_dir: relativeWithinProject(baselineBundle.resultDir),
-      specs: robustnessSpecs.map(relativeSpec),
-    }
-
-    fs.writeFileSync(heterogeneitySummaryPath, JSON.stringify(heterogeneitySummary, null, 2), "utf-8")
-    fs.writeFileSync(mechanismSummaryPath, JSON.stringify(mechanismSummary, null, 2), "utf-8")
-    fs.writeFileSync(robustnessSummaryPath, JSON.stringify(robustnessSummary, null, 2), "utf-8")
-    fs.writeFileSync(
-      heterogeneityNarrativePath,
-      renderNarrative("Heterogeneity Narrative", [...heterogeneitySpecs, ...robustnessSpecs]),
-      "utf-8",
-    )
-    fs.writeFileSync(mechanismNarrativePath, renderNarrative("Mechanism Narrative", mechanismSpecs), "utf-8")
+    const heterogeneitySummaryPath = path.join(outputDirBeforePublish, "heterogeneity_summary.json")
+    const mechanismSummaryPath = path.join(outputDirBeforePublish, "mechanism_summary.json")
+    const robustnessSummaryPath = path.join(outputDirBeforePublish, "robustness_extension_summary.json")
+    const heterogeneityNarrativePath = path.join(outputDirBeforePublish, "heterogeneity_narrative.md")
+    const mechanismNarrativePath = path.join(outputDirBeforePublish, "mechanism_narrative.md")
+    const combinedBundlePath = path.join(outputDirBeforePublish, "combined_publication_bundle.json")
+    writeHeterogeneityOutputFile(outputDirBeforePublish, heterogeneitySummaryPath, JSON.stringify({ baseline_result_dir: relativeWithinProject(baselineBundle.resultDir), baseline_result_path: relativeWithinProject(baselineBundle.resultPath), specs: heterogeneitySpecs.map(relativeSpec) }, null, 2))
+    writeHeterogeneityOutputFile(outputDirBeforePublish, mechanismSummaryPath, JSON.stringify({ baseline_result_dir: relativeWithinProject(baselineBundle.resultDir), specs: mechanismSpecs.map(relativeSpec) }, null, 2))
+    writeHeterogeneityOutputFile(outputDirBeforePublish, robustnessSummaryPath, JSON.stringify({ baseline_result_dir: relativeWithinProject(baselineBundle.resultDir), specs: robustnessSpecs.map(relativeSpec) }, null, 2))
+    writeHeterogeneityOutputFile(outputDirBeforePublish, heterogeneityNarrativePath, renderNarrative("异质性与稳健性扩展", [...heterogeneitySpecs, ...robustnessSpecs]))
+    writeHeterogeneityOutputFile(outputDirBeforePublish, mechanismNarrativePath, renderNarrative("机制分析", mechanismSpecs))
 
     const combinedBundle = {
       datasetId: manifest?.datasetId ?? baselineBundle.datasetId ?? params.datasetId,
       stageId: params.stageId ?? baselineBundle.stageId,
       runId,
-      branch: params.branch,
-      baseline: {
-        resultDir: relativeWithinProject(baselineBundle.resultDir),
-        resultPath: relativeWithinProject(baselineBundle.resultPath),
-        numericSnapshotPath: baselineBundle.numericSnapshot?.snapshotPath
-          ? relativeWithinProject(baselineBundle.numericSnapshot.snapshotPath)
-          : undefined,
-      },
+      branch,
+      baseline: { resultDir: relativeWithinProject(baselineBundle.resultDir), resultPath: relativeWithinProject(baselineBundle.resultPath), numericSnapshotPath: baselineBundle.numericSnapshot?.snapshotPath ? relativeWithinProject(baselineBundle.numericSnapshot.snapshotPath) : undefined },
       heterogeneity_summary_path: relativeWithinProject(heterogeneitySummaryPath),
       mechanism_summary_path: relativeWithinProject(mechanismSummaryPath),
       robustness_extension_summary_path: relativeWithinProject(robustnessSummaryPath),
       heterogeneity_narrative_path: relativeWithinProject(heterogeneityNarrativePath),
       mechanism_narrative_path: relativeWithinProject(mechanismNarrativePath),
-      heterogeneity_table: {
-        markdown: heterogeneityTablePaths.markdown ? relativeWithinProject(heterogeneityTablePaths.markdown) : undefined,
-        latex: heterogeneityTablePaths.latex ? relativeWithinProject(heterogeneityTablePaths.latex) : undefined,
-        xlsx: heterogeneityTablePaths.xlsx ? relativeWithinProject(heterogeneityTablePaths.xlsx) : undefined,
-      },
       specs: finalizedSpecs.map(relativeSpec),
-      warnings: result.warnings ?? [],
+      warnings: surfacedWarnings,
     }
-    fs.writeFileSync(combinedBundlePath, JSON.stringify(combinedBundle, null, 2), "utf-8")
+    writeHeterogeneityOutputFile(outputDirBeforePublish, combinedBundlePath, JSON.stringify(combinedBundle, null, 2))
 
     const visibleOutputs: Array<{ label: string; relativePath: string }> = []
     if (manifest) {
-      const publish = (key: string, label: string, sourcePath?: string) => {
-        if (!sourcePath || !fs.existsSync(sourcePath)) return
-        const visiblePath = publishVisibleOutput({
-          manifest,
-          key,
-          label,
-          sourcePath,
-          runId,
-          branch: path.join("heterogeneity_runner", params.branch),
-          stageId: params.stageId ?? baselineBundle.stageId,
-          metadata: { module: "heterogeneity_runner", methodFamily: params.methodFamily },
-        })
+      for (const [key, label, sourcePath] of [
+        ["heterogeneity_summary_json", "heterogeneity_summary_json", heterogeneitySummaryPath],
+        ["heterogeneity_narrative_md", "heterogeneity_narrative_md", heterogeneityNarrativePath],
+        ["mechanism_summary_json", "mechanism_summary_json", mechanismSummaryPath],
+        ["mechanism_narrative_md", "mechanism_narrative_md", mechanismNarrativePath],
+        ["robustness_extension_summary_json", "robustness_extension_summary_json", robustnessSummaryPath],
+        ["combined_publication_bundle_json", "combined_publication_bundle_json", combinedBundlePath],
+      ] as const) {
+        const visiblePath = publishVisibleOutput({ manifest, key, label, sourcePath, runId, branch: path.join("heterogeneity_runner", branch), stageId: params.stageId ?? baselineBundle.stageId, metadata: { module: "heterogeneity_runner", methodFamily: params.methodFamily } })
         visibleOutputs.push({ label, relativePath: relativeWithinProject(visiblePath) })
       }
-      publish("heterogeneity_summary_json", "heterogeneity_summary_json", heterogeneitySummaryPath)
-      publish("heterogeneity_narrative_md", "heterogeneity_narrative_md", heterogeneityNarrativePath)
-      publish("mechanism_summary_json", "mechanism_summary_json", mechanismSummaryPath)
-      publish("mechanism_narrative_md", "mechanism_narrative_md", mechanismNarrativePath)
-      publish("robustness_extension_summary_json", "robustness_extension_summary_json", robustnessSummaryPath)
-      publish("combined_publication_bundle_json", "combined_publication_bundle_json", combinedBundlePath)
-      publish("heterogeneity_table_markdown", "heterogeneity_table_markdown", heterogeneityTablePaths.markdown)
-      publish("heterogeneity_table_latex", "heterogeneity_table_latex", heterogeneityTablePaths.latex)
-      publish("heterogeneity_table_xlsx", "heterogeneity_table_xlsx", heterogeneityTablePaths.xlsx)
     }
-
-    const manifestPath = manifest ? finalOutputsPath(manifest.sourcePath, runId) : undefined
-    const output = [
-      "## Heterogeneity Runner Completed",
-      "",
-      `Run ID: ${runId}`,
-      `Baseline result: ${relativeWithinProject(baselineBundle.resultPath)}`,
-      `Output directory: ${relativeWithinProject(outputDir)}`,
-      `Successful specs: ${finalizedSpecs.filter((item) => item.status === "success").length}`,
-      `Failed or skipped specs: ${finalizedSpecs.filter((item) => item.status !== "success").length}`,
-      `Combined bundle: ${relativeWithinProject(combinedBundlePath)}`,
-      manifestPath ? `Final outputs manifest: ${relativeWithinProject(manifestPath)}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n")
-
+    if (analysisOperationIdentity) {
+      const complete = extra?.completeAnalysisToolRun
+      if (typeof complete !== "function") {
+        throw new Tool.InputValidationError("Harness 没有完成异质性运行状态登记；结果将保持未确认。")
+      }
+      ;(complete as (operation: AnalysisToolRunRecord) => void)({
+        ...analysisOperationIdentity,
+        status: allSpecsSucceeded ? "completed" : "partial",
+        resultId: `heterogeneity:${runId}:${operationId}`,
+        artifactRefs: [...new Set([
+          relativeWithinProject(combinedBundlePath),
+          ...visibleOutputs.map((item) => item.relativePath),
+        ])],
+        resultContractStatus: "pass",
+        subResults: finalizedSpecs.map((spec) => ({
+          specId: spec.spec_id,
+          specType: spec.spec_type,
+          status: spec.status,
+        })),
+        updatedAt: new Date().toISOString(),
+      })
+    }
+    const finalOutputPath = manifest ? finalOutputsPath(manifest.sourcePath, runId) : undefined
     return {
-      title: "Heterogeneity Runner",
-      output,
+      title: completionLabel,
+      output: `## ${completionLabel}\n\n成功规格：${successful}\n失败或跳过规格：${failedOrSkipped}\n基准结果与组合产物已保存。${failureSummary}`,
       metadata: {
         datasetId: manifest?.datasetId ?? baselineBundle.datasetId ?? params.datasetId,
         stageId: params.stageId ?? baselineBundle.stageId,
         runId,
         outputDir: relativeWithinProject(outputDir),
         combinedBundlePath: relativeWithinProject(combinedBundlePath),
-        summaryPaths: {
-          heterogeneity: relativeWithinProject(heterogeneitySummaryPath),
-          mechanism: relativeWithinProject(mechanismSummaryPath),
-          robustness: relativeWithinProject(robustnessSummaryPath),
-        },
-        narrativePaths: {
-          heterogeneity: relativeWithinProject(heterogeneityNarrativePath),
-          mechanism: relativeWithinProject(mechanismNarrativePath),
-        },
-        tablePaths: {
-          markdown: heterogeneityTablePaths.markdown ? relativeWithinProject(heterogeneityTablePaths.markdown) : undefined,
-          latex: heterogeneityTablePaths.latex ? relativeWithinProject(heterogeneityTablePaths.latex) : undefined,
-          xlsx: heterogeneityTablePaths.xlsx ? relativeWithinProject(heterogeneityTablePaths.xlsx) : undefined,
-        },
+        summaryPaths: { heterogeneity: relativeWithinProject(heterogeneitySummaryPath), mechanism: relativeWithinProject(mechanismSummaryPath), robustness: relativeWithinProject(robustnessSummaryPath) },
+        narrativePaths: { heterogeneity: relativeWithinProject(heterogeneityNarrativePath), mechanism: relativeWithinProject(mechanismNarrativePath) },
         visibleOutputs,
-        finalOutputsPath: manifestPath ? relativeWithinProject(manifestPath) : undefined,
+        finalOutputsPath: finalOutputPath ? relativeWithinProject(finalOutputPath) : undefined,
         analysisView: createToolAnalysisView({
           kind: "heterogeneity_runner",
           step: "heterogeneity_runner",
           datasetId: manifest?.datasetId ?? baselineBundle.datasetId ?? params.datasetId,
           stageId: params.stageId ?? baselineBundle.stageId,
-          results: [
-            analysisMetric("successful specs", finalizedSpecs.filter((item) => item.status === "success").length),
-            analysisMetric("failed or skipped specs", finalizedSpecs.filter((item) => item.status !== "success").length),
-            analysisMetric("heterogeneity specs", heterogeneitySpecs.length),
-            analysisMetric("mechanism specs", mechanismSpecs.length),
-          ],
-          artifacts: [
-            analysisArtifact(relativeWithinProject(combinedBundlePath), {
-              label: "combined_publication_bundle.json",
-              visibility: "user_default",
-            }),
-            analysisArtifact(relativeWithinProject(heterogeneityNarrativePath), {
-              label: "heterogeneity_narrative.md",
-              visibility: "user_collapsed",
-            }),
-            analysisArtifact(
-              heterogeneityTablePaths.markdown ? relativeWithinProject(heterogeneityTablePaths.markdown) : undefined,
-              {
-                label: "heterogeneity_table.md",
-                visibility: "user_collapsed",
-              },
-            ),
-            ...visibleOutputs.map((item) =>
-              analysisArtifact(item.relativePath, {
-                label: item.label,
-                visibility: "user_collapsed",
-              }),
-            ),
-          ],
-          warnings: result.warnings ?? [],
-          conclusion: "异质性、机制和稳健性扩展结果已生成，建议先查看 combined_publication_bundle.json 和叙述性摘要。",
+          results: [analysisMetric("成功规格", successful), analysisMetric("失败或跳过规格", failedOrSkipped), analysisMetric("异质性规格", heterogeneitySpecs.length), analysisMetric("机制规格", mechanismSpecs.length)],
+          artifacts: [analysisArtifact(relativeWithinProject(combinedBundlePath), { label: "综合扩展结果", visibility: "user_default" }), analysisArtifact(relativeWithinProject(heterogeneityNarrativePath), { label: "异质性摘要", visibility: "user_collapsed" }), ...visibleOutputs.map((item) => analysisArtifact(item.relativePath, { label: item.label, visibility: "user_collapsed" }))],
+          warnings: surfacedWarnings,
+          conclusion: allSpecsSucceeded
+            ? "所有请求的异质性、机制和稳健性扩展规格均已生成；具体解释服从各自研究设计和诊断。"
+            : `扩展批次已保存，但${successful === 0 ? "没有规格成功" : `仅 ${successful} 个规格成功`}；其余规格失败或跳过，不能将本批次视为全部完成。`,
         }),
-        display: createToolDisplay({
-          summary: `heterogeneity_runner completed with ${finalizedSpecs.filter((item) => item.status === "success").length} successful specs`,
-          details: [
-            `Method family: ${params.methodFamily}`,
-            `Baseline result: ${relativeWithinProject(baselineBundle.resultPath)}`,
-            `Successful specs: ${finalizedSpecs.filter((item) => item.status === "success").length}`,
-            `Failed or skipped specs: ${finalizedSpecs.filter((item) => item.status !== "success").length}`,
-          ],
-          artifacts: visibleOutputs.map((item) => ({
-            label: item.label,
-            path: item.relativePath,
-            visibility: "user_collapsed" as const,
-          })),
-        }),
+        display: createToolDisplay({ summary: `${completionLabel}，成功 ${successful} 个规格`, details: [`方法族：${params.methodFamily}`, `成功规格：${successful}`, `失败或跳过规格：${failedOrSkipped}`, ...visibleFailureDetails], artifacts: visibleOutputs.map((item) => ({ label: item.label, path: item.relativePath, visibility: "user_collapsed" as const })) }),
       },
     }
   },

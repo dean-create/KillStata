@@ -1,0 +1,12 @@
+{
+  "description": "核心解释变量又出现在控制变量列表里",
+  "modelArgs": {
+    "datasetId": "health_21",
+    "stageId": "stage_000",
+    "dependentVar": "visits",
+    "treatmentVar": "insured",
+    "covariates": ["age", "insured"]
+  },
+  "expect": "reject",
+  "rejectHint": ["covariates", "核心解释变量不能在控制变量中重复"]
+}

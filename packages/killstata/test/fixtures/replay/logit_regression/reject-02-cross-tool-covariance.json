@@ -1,0 +1,12 @@
+{
+  "description": "模型把 OLS 的 HC1 协方差搬到 Logit;GLM 只接受 nonrobust/robust",
+  "modelArgs": {
+    "datasetId": "nsw_98",
+    "stageId": "stage_000",
+    "dependentVar": "employed",
+    "treatmentVar": "train",
+    "covariance": "HC1"
+  },
+  "expect": "reject",
+  "rejectHint": ["covariance", "nonrobust"]
+}

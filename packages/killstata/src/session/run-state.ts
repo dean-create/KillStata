@@ -6,7 +6,9 @@ import { RuntimeTaskLedger } from "@/runtime/task-ledger"
 import { RuntimeProtocol } from "@/runtime/protocol"
 import { Instance } from "@/project/instance"
 import { SessionStatus } from "./status"
+import { Session } from "."
 import { MessageV2 } from "./message-v2"
+import { sortQueuedSessionActions } from "./prompt/queue-policy"
 
 type Callback = {
   actionID?: string
@@ -22,7 +24,17 @@ type Runtime = {
 }
 
 function publishQueue(sessionID: string, runtime: Runtime) {
-  const payload = {
+  const payload: {
+    sessionID: string
+    pending: number
+    actions: Array<{
+      id: string
+      type: string
+      priority: number
+      createdAt: number
+      delivery: "queued" | "steer"
+    }>
+  } = {
     sessionID,
     pending: runtime.queue.length,
     actions: runtime.queue.map((action) => ({
@@ -30,6 +42,7 @@ function publishQueue(sessionID: string, runtime: Runtime) {
       type: action.type,
       priority: action.priority,
       createdAt: action.createdAt,
+      delivery: action.metadata?.delivery === "steer" ? "steer" : "queued",
     })),
   }
   Bus.publish(RuntimeEvents.QueueUpdated, payload)
@@ -66,11 +79,16 @@ export namespace SessionRunCoordinator {
       return data
     },
     async (current) => {
-      for (const item of Object.values(current)) {
+      // 进程关闭 / HMR / /config 重配 / CLI finally 时的 cleanup。abort 在飞请求，并
+      // 用 CancelledError reject 所有待回调——这样 await 它的路由/调度 handler 能拿到
+      // 明确的"会话被取消"而优雅收尾，而不是永久挂起。没人 await 的 promise 由
+      // waitForAction 里的默认 catch 吞掉，不会冒 unhandledRejection 噪声。
+      for (const [sessionID, item] of Object.entries(current)) {
         item.abort?.abort()
         for (const callback of item.callbacks) {
-          callback.reject(new Error("Session prompt runtime disposed"))
+          callback.reject(new Session.CancelledError(sessionID))
         }
+        item.callbacks.length = 0
       }
     },
   )
@@ -97,6 +115,11 @@ export namespace SessionRunCoordinator {
     return ensure(sessionID).guard.active
   }
 
+  /** retention 等清理路径只查询已知运行态，不能为历史 session 顺手创建 runtime。 */
+  export function activeIfKnown(sessionID: string) {
+    return state()[sessionID]?.guard.active ?? false
+  }
+
   export function assertNotBusy(sessionID: string) {
     if (active(sessionID)) throw new Error(`Session is busy: ${sessionID}`)
   }
@@ -104,7 +127,7 @@ export namespace SessionRunCoordinator {
   export function enqueue(action: QueuedSessionAction) {
     const runtime = ensure(action.sessionID)
     runtime.queue.push(action)
-    runtime.queue.sort((a, b) => b.priority - a.priority || a.createdAt - b.createdAt)
+    runtime.queue = sortQueuedSessionActions(runtime.queue)
     RuntimeTaskLedger.recordQueued(action)
     publishQueue(action.sessionID, runtime)
     publishQueryState(action.sessionID, runtime, action.type)
@@ -113,9 +136,14 @@ export namespace SessionRunCoordinator {
 
   export function waitForAction(sessionID: string, actionID?: string) {
     const runtime = ensure(sessionID)
-    return new Promise<MessageV2.WithParts>((resolve, reject) => {
+    const promise = new Promise<MessageV2.WithParts>((resolve, reject) => {
       runtime.callbacks.push({ actionID, resolve, reject })
     })
+    // 挂一个默认 catch，把"进程关闭 / HMR 时 reject 但没人 await"的 promise 吞掉，
+    // 避免 bun dev 启动时的 unhandledRejection 噪声。真正在 await 的路由/调度
+    // handler 的 catch 仍会正常收到错误（同一个 promise，catch 会各自触发）。
+    void promise.catch(() => {})
+    return promise
   }
 
   export function resolveAction(sessionID: string, message: MessageV2.WithParts, actionID?: string) {
@@ -215,7 +243,7 @@ export namespace SessionRunCoordinator {
 
   export function cancel(sessionID: string, error?: unknown) {
     const runtime = ensure(sessionID)
-    runtime.abort?.abort()
+    runtime.abort?.abort(error)
     runtime.abort = undefined
     runtime.queue = []
     runtime.guard = new QueryGuard()

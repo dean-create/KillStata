@@ -7,7 +7,7 @@ import { GlobalBus } from "@/bus/global"
 import { Instance } from "../../project/instance"
 import { Installation } from "@/installation"
 import { Log } from "../../util/log"
-import { lazy } from "../../util/lazy"
+import { lazy } from "@killstata/util/lazy"
 
 const log = Log.create({ service: "server" })
 

@@ -1,0 +1,12 @@
+{
+  "description": "分位点 1.5 越界,必须在 (0,1)",
+  "modelArgs": {
+    "datasetId": "wage_88",
+    "stageId": "stage_000",
+    "dependentVar": "wage",
+    "treatmentVar": "union",
+    "quantiles": [0.5, 1.5]
+  },
+  "expect": "reject",
+  "rejectHint": ["quantiles", "小于 1"]
+}

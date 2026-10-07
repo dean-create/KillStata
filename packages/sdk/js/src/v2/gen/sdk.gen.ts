@@ -17,6 +17,7 @@ import type {
   ConfigProvidersResponses,
   ConfigUpdateErrors,
   ConfigUpdateResponses,
+  DataFilesResponses,
   EventSubscribeResponses,
   EventTuiCommandExecute,
   EventTuiPromptAppend,
@@ -27,7 +28,6 @@ import type {
   FilePartInput,
   FilePartSource,
   FileReadResponses,
-  FileStatusResponses,
   FindFilesResponses,
   FindTextResponses,
   GlobalDisposeResponses,
@@ -140,7 +140,6 @@ import type {
   TuiSelectSessionResponses,
   TuiShowToastResponses,
   TuiSubmitPromptResponses,
-  VcsGetResponses,
 } from "./types.gen.js"
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<
@@ -858,6 +857,7 @@ export class Session extends HeyApiClient {
       providerID?: string
       modelID?: string
       auto?: boolean
+      instructions?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -871,6 +871,7 @@ export class Session extends HeyApiClient {
             { in: "body", key: "providerID" },
             { in: "body", key: "modelID" },
             { in: "body", key: "auto" },
+            { in: "body", key: "instructions" },
           ],
         },
       ],
@@ -1098,6 +1099,10 @@ export class Session extends HeyApiClient {
       arguments?: string
       command?: string
       variant?: string
+      queuePriority?: number
+      queueMetadata?: {
+        [key: string]: unknown
+      }
       parts?: Array<{
         id?: string
         type: "file"
@@ -1122,6 +1127,8 @@ export class Session extends HeyApiClient {
             { in: "body", key: "arguments" },
             { in: "body", key: "command" },
             { in: "body", key: "variant" },
+            { in: "body", key: "queuePriority" },
+            { in: "body", key: "queueMetadata" },
             { in: "body", key: "parts" },
           ],
         },
@@ -1774,21 +1781,36 @@ export class File extends HeyApiClient {
       ...params,
     })
   }
+}
 
+export class Data extends HeyApiClient {
   /**
-   * Get file status
+   * Find importable data files
    *
-   * Get the git status of all files in the project.
+   * List CSV, Excel, and Stata files that KillStata can import from the current project.
    */
-  public status<ThrowOnError extends boolean = false>(
+  public files<ThrowOnError extends boolean = false>(
     parameters?: {
       directory?: string
+      query?: string
+      limit?: number
     },
     options?: Options<never, ThrowOnError>,
   ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "directory" }] }])
-    return (options?.client ?? this.client).get<FileStatusResponses, unknown, ThrowOnError>({
-      url: "/file/status",
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "query" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<DataFilesResponses, unknown, ThrowOnError>({
+      url: "/data/files",
       ...options,
       ...params,
     })
@@ -2425,27 +2447,6 @@ export class Path extends HeyApiClient {
   }
 }
 
-export class Vcs extends HeyApiClient {
-  /**
-   * Get VCS info
-   *
-   * Retrieve version control system (VCS) information for the current project, such as git branch.
-   */
-  public get<ThrowOnError extends boolean = false>(
-    parameters?: {
-      directory?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "directory" }] }])
-    return (options?.client ?? this.client).get<VcsGetResponses, unknown, ThrowOnError>({
-      url: "/vcs",
-      ...options,
-      ...params,
-    })
-  }
-}
-
 export class Command extends HeyApiClient {
   /**
    * List commands
@@ -2678,6 +2679,11 @@ export class KillstataClient extends HeyApiClient {
     return (this._file ??= new File({ client: this.client }))
   }
 
+  private _data?: Data
+  get data(): Data {
+    return (this._data ??= new Data({ client: this.client }))
+  }
+
   private _mcp?: Mcp
   get mcp(): Mcp {
     return (this._mcp ??= new Mcp({ client: this.client }))
@@ -2696,11 +2702,6 @@ export class KillstataClient extends HeyApiClient {
   private _path?: Path
   get path(): Path {
     return (this._path ??= new Path({ client: this.client }))
-  }
-
-  private _vcs?: Vcs
-  get vcs(): Vcs {
-    return (this._vcs ??= new Vcs({ client: this.client }))
   }
 
   private _command?: Command

@@ -1,145 +1,33 @@
-The DataImport tool handles tabular data ingestion, stage-based cleaning, QA, and descriptive analysis for killstata.
+导入表格、画像和数据质量检查，管理可追溯数据集；会话隔离。
 
-Use it to build a reproducible Excel/CSV/Stata preprocessing pipeline before any econometric model.
+## 何时使用
+- healthcheck：确认托管 Python 与依赖可用；环境不确定或首次导入失败时先检查。
+- import：导入 xlsx/xls/csv/dta/sav，生成规范化数据和就绪报告（类型、缺失、面板键、共线、适配方法）；估计前必需。
+- profile：读取 stage 的字段、类型、缺失、唯一性和样本概况，并刷新其就绪报告。
+- frequency：对 variables 和最多两列 groupBy 返回有界频数/比例/交叉频数；只给高频值，不生成行级 CSV，适合诊断 did×post。
+- correlation：对指定 variables 返回 Pearson 相关及显著性摘要；仅报告相关性，不代替回归。
+- export：仅在用户需要交付文件时，将规范化 stage 导出为 csv/xlsx/dta/parquet。
+- rollback：从 manifest 血缘恢复到目标 stage，生成新的规范化 Parquet，不覆盖历史阶段。
 
-Execution policy:
-- For non-trivial data cleaning, plan internally before calling tools.
-- Keep user-facing text concise and report-like; do not narrate every intermediate read, retry, or background check unless the user explicitly asks for details.
-- Prefer the canonical artifact workflow: import -> preprocess/filter -> qa -> describe/correlation when needed.
-- After a failure, repair and rerun only the failed stage. Do not restart the whole workflow unless the source file changed.
-- If a QA gate produces blocking_errors, stop and repair the clean/qa stage before estimation.
-- Warnings may continue, but they must be surfaced in later narrative/reporting.
-- For Excel workbooks, never invent sheet names. If a sheet has already been discovered, use one exact available sheet name in `sheetPolicy.sheetName`; otherwise omit `sheetPolicy` and import the first sheet.
-- For full multi-sheet manufacturing demo analysis, prefer `manufacturing_analysis` instead of looping `data_import` unless the user explicitly asks for canonical stage import of a specific sheet.
+## 数据质量检查 / 数据质量
+- import validate，生成 blocking_errors/warning；不能跳过。
+- 质量体检只交付 import/profile/validate/frequency 事实；zscore_detect/iqr_detect 和新 stage 仅按用户要求。
+- 质量摘要足够时直接回答；除非用户明确要求补充诊断，不再调用 profile/validate/frequency 或读取内部产物。
 
-Internal format policy:
-- Input layer: Excel / CSV / DTA
-- Internal working layer: Parquet + metadata sidecar
-- User inspection/export layer: CSV / XLSX
-- Compatibility export layer: DTA
-- `.killstata/` stores canonical internal stages, inspection files, runtime state, and audit metadata
-- Cleaning-stage inspection files stay in `.killstata`; the final user-facing econometric delivery bundle is produced by the econometrics tool after a complete estimation run
+## 参数与返回
+- inputPath 必须来自用户提供的路径或已发现的真实文件，不得猜测。
+- Excel 工作表名称必须来自已发现的 sheetPolicy.sheetName；未知时省略该字段，由工具返回候选工作表后再决定。
+- 后续动作使用工具返回的 datasetId 与 stageId，不得自造或复用其他会话的内部 ID。
+- variables/groupBy/entityVar/timeVar 必须来自 profile 真实列；仅对齐唯一别名并说明。
+- preserveLabels 仅用于 import/export 的 DTA 标签处理；其他 action 省略该参数。
+- runId/branch 仅用于归组；outputPath/format 仅用于导出。
+- 依据 metadata.result、产物引用和状态判断成功；结构化结果与预期产物齐全才声称导入完成。
 
-## Supported Actions
-
-1. import
-- Convert Excel (.xlsx/.xls), Stata (.dta), or CSV into a canonical Parquet working dataset
-- Always create a Parquet stage plus inspection CSV/XLSX
-- Return datasetId/stageId and save schema, labels, audit files, and inspection tables
-
-2. export
-- Convert a working dataset back to CSV, Excel, Stata, or Parquet
-- Prefer CSV/XLSX/DTA for user-facing delivery; Parquet remains the internal canonical format
-
-3. preprocess
-- Apply explicit cleaning operations such as drop_missing, fill_constant, fill_mean, fill_median, forward_fill, backward_fill, linear_interpolate, group_linear_interpolate, regression_impute, log_transform, standardize, winsorize, create_dummies, and combine_columns
-- For `combine_columns`, pass at least two source columns in `variables` and set `params.output_column`; `params.separator` defaults to `_`. The operation rejects missing/empty components, existing output columns, and identifier collisions.
-- These operations are backed by the Python preprocessing library and return audit-ready summaries for each step
-- Save the processed dataset as a new Parquet stage plus audit files and inspection tables
-
-4. filter
-- Apply explicit row filtering rules such as in/not_in/eq/neq/gt/gte/lt/lte/contains/not_contains
-- Save the filtered dataset as a new Parquet stage plus filter audit files and inspection tables
-
-5. describe
-- Produce descriptive statistics tables for selected variables
-- Save CSV, workbook, summary JSON, and numeric_snapshot.json artifacts
-
-6. correlation
-- Produce a correlation matrix for selected numeric variables
-- Save CSV, workbook, summary JSON, and numeric_snapshot.json artifacts
-
-7. qa
-- Run a structured data-quality gate
-- Check missingness, duplicate panel keys, numeric availability, outlier flags, and panel-balance signals when panel identifiers are provided
-- Return status, warnings, blocking_errors, and suggested_repairs in JSON
-- QA gate behavior:
-  - blocking_errors -> block downstream estimation
-  - warnings only -> allow continuation with explicit risk disclosure
-  - no warnings/errors -> pass
-
-8. healthcheck
-- Check Python module readiness for the data/econometrics pipeline
-- Report missing or broken modules and the exact install command
-- `pyarrow` is required because Parquet is the canonical working format
-
-## Key Parameters
-
-- action: import | export | preprocess | filter | describe | correlation | qa | healthcheck | rollback
-- inputPath: source file path, required for every action except healthcheck when datasetId/stageId is not provided
-- datasetId, stageId: canonical Parquet stage reference; prefer this after import
-- runId: optional run identifier; reuse the same runId across multi-step workflows to group visible outputs
-- branch: branch name for split preprocessing / estimation workflows
-- outputPath: optional target artifact path
-- format:
-  - export: csv | xlsx | dta | parquet
-  - import | filter | preprocess | rollback: canonical output is always parquet; non-parquet values are ignored with a note
-- operations: preprocess operation list
-- filters: filter rule list
-- variables: selected variables for describe/correlation
-- entityVar, timeVar: optional panel identifiers used by qa and interpolation
-- options: action-specific options such as correlation method
-- sheetPolicy: optional Excel sheet selector. Use `{ "mode": "named_sheet", "sheetName": "<exact sheet name>" }` only when the sheet name was discovered from the workbook.
-
-## Output Contract
-
-Every action returns a structured artifact trail when applicable:
-- datasetId / stageId / parentStageId for canonical artifact workflows
-- input path
-- output path
-- inspection CSV / workbook paths for stage-producing data steps
-- row/column counts before and after
-- summary JSON path
-- audit log path or workbook path when relevant
-- numeric_snapshot.json for describe/correlation so statistical values can be grounded
-- metadata suitable for grounding:
-  - numericSnapshotPath
-  - numericSnapshotPreview
-  - groundingScope
-  - datasetId / stageId / runId
-- QA warnings and blocking errors when relevant
-- QA gate metadata when relevant:
-  - qaGateStatus
-  - qaGateReason
-  - qaSource
-
-Front-end delivery rule:
-- Do not add cleaning-stage artifacts directly to `killstata_output_YYYYMMDD_HHMM`; that folder is reserved for the five-file econometric delivery bundle after a complete estimation run
-
-## Planning Guidance
-
-- Use explicit column names and operation parameters.
-- Preserve the canonical Parquet stage as the working source of truth after import.
-
-## Example Usage
-
-Import a DTA file into the canonical artifact workflow:
-{
-  "action": "import",
-  "inputPath": "../test/did高质量发展.dta",
-  "format": "parquet"
-}
-
-Filter out Heilongjiang on a dataset stage:
-{
-  "action": "filter",
-  "datasetId": "did_dataset_xxxxxx",
-  "stageId": "stage_000",
-  "branch": "cleaning",
-  "filters": [
-    {
-      "column": "省份",
-      "operator": "neq",
-      "value": "黑龙江省"
-    }
-  ]
-}
-
-Run QA before panel estimation:
-{
-  "action": "qa",
-  "datasetId": "did_dataset_xxxxxx",
-  "stageId": "stage_000",
-  "entityVar": "地区",
-  "timeVar": "year"
-}
+## 边界与失败
+- 此工具没有 filter 或 preprocess 动作；缩尾、填补、标准化、虚拟变量、列组合和筛选必须使用 data_preprocess。
+- validate 的 blocking_errors 会阻断下游估计；warning 可以继续，但必须向用户说明影响。
+- import 自动 validate block 会保留数据并提示“暂不能估计”；当前 stage 重新 validate 后再继续。
+- 工具失败时先检查结构化错误与失败阶段，只修复失败部分；不得原样盲目重试。用户取消时立即停止，不安排自动重跑。
+- 列名不存在时先读 profile/data-readiness；有唯一别名就只用对齐名重试失败动作；有多个候选或会改变研究设计时停下询问。
+- 不覆盖/删除源文件，不上传内容，不向普通用户暴露内部 manifest 路径。
+- 返回并复用 dataset/stage、就绪报告、结果和 numeric snapshot；不生成行级副本。

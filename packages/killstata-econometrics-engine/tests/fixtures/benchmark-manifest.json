@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "benchmarks": [
+    {
+      "method_id": "iv_test",
+      "fixture": "card1995.csv",
+      "sha256": "2abe668bd418c17f3e29eb95a155a72666bd0420ac1ac8a40841c89f03d246b8",
+      "oracle": "iv_test_oracle.py"
+    },
+    {
+      "method_id": "rdd_sharp",
+      "fixture": "rdrobust_senate.csv",
+      "sha256": "2ce48a5b13499a6ed9c949f5ea64657ff6c131ded582fc7f7f58c92e924f90cd",
+      "oracle": "rdd_sharp_oracle.py"
+    },
+    {
+      "method_id": "did2s",
+      "fixture": "mpdta_did.csv",
+      "sha256": "f570beb5ca6d60589a133541bd264144982e7b59e7a1e59c9b93ad7ac77b710c",
+      "oracle": "did2s_oracle.py"
+    },
+    {
+      "method_id": "psm_matching",
+      "fixture": "nsw_dw_analysis.csv",
+      "sha256": "2669e93c83231085b87412502e383b1f2656fc07d80b21995b999aad8773b309",
+      "oracle": "psm_matching_oracle.py"
+    },
+    {
+      "method_id": "psm_ipw",
+      "fixture": "nsw_dw_analysis.csv",
+      "sha256": "2669e93c83231085b87412502e383b1f2656fc07d80b21995b999aad8773b309",
+      "oracle": "psm_ipw_oracle.py"
+    },
+    {
+      "method_id": "psm_regression",
+      "fixture": "nsw_dw_analysis.csv",
+      "sha256": "2669e93c83231085b87412502e383b1f2656fc07d80b21995b999aad8773b309",
+      "oracle": "psm_adjustment_oracle.py"
+    },
+    {
+      "method_id": "psm_double_robust",
+      "fixture": "nsw_dw_analysis.csv",
+      "sha256": "2669e93c83231085b87412502e383b1f2656fc07d80b21995b999aad8773b309",
+      "oracle": "psm_adjustment_oracle.py"
+    }
+  ]
+}

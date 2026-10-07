@@ -14,7 +14,6 @@ import type {
   SessionStatus,
   ProviderListResponse,
   ProviderAuthMethod,
-  VcsInfo,
 } from "@killstata/sdk/v2"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useSDK } from "@tui/context/sdk"
@@ -24,7 +23,7 @@ import { useExit } from "./exit"
 import { useArgs } from "./args"
 import { batch, onMount } from "solid-js"
 import { Log } from "@/util/log"
-import type { Path } from "@killstata/sdk"
+import type { Path } from "@killstata/sdk/v2"
 import {
   appendPartDelta,
   type RuntimeQueryState,
@@ -84,7 +83,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       mcp_resource: {
         [key: string]: McpResource
       }
-      vcs: VcsInfo | undefined
       path: Path
     }>({
       provider_next: {
@@ -117,8 +115,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       part: {},
       mcp: {},
       mcp_resource: {},
-      vcs: undefined,
-      path: { state: "", config: "", worktree: "", directory: "" },
+      path: { state: "", config: "", worktree: "", directory: "", home: "" },
     })
 
     const sdk = useSDK()
@@ -329,11 +326,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             )
           break
         }
-
-        case "vcs.branch.updated": {
-          setStore("vcs", { branch: event.properties.branch })
-          break
-        }
       }
     })
 
@@ -380,7 +372,10 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     sdk.event.on("runtime.queue.updated" as any, (event: any) => {
       setStore("runtimeQueue", event.properties.sessionID, {
         pending: event.properties.pending,
-        actions: event.properties.actions ?? [],
+        actions: (event.properties.actions ?? []).map((action: RuntimeQueueState["actions"][number]) => ({
+          ...action,
+          delivery: action.delivery === "steer" ? "steer" : "queued",
+        })),
       })
     })
 
@@ -403,18 +398,22 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     sdk.event.on("runtime.timeline.event" as any, (event: any) => {
       const item = event.properties.event
       const existing = store.runtimeTimeline[event.properties.sessionID] ?? []
-      setStore("runtimeTimeline", event.properties.sessionID, [
-        ...existing.filter((entry) => entry.id !== item.id),
-        {
-          id: item.id,
-          taskId: item.taskId,
-          kind: item.kind,
-          stageId: item.stageId,
-          workflowRunId: item.workflowRunId,
-          message: item.message,
-          createdAt: item.createdAt,
-        },
-      ].slice(-80))
+      setStore(
+        "runtimeTimeline",
+        event.properties.sessionID,
+        [
+          ...existing.filter((entry) => entry.id !== item.id),
+          {
+            id: item.id,
+            taskId: item.taskId,
+            kind: item.kind,
+            stageId: item.stageId,
+            workflowRunId: item.workflowRunId,
+            message: item.message,
+            createdAt: item.createdAt,
+          },
+        ].slice(-80),
+      )
     })
 
     sdk.event.on("runtime.protocol.event" as any, (event: any) => {
@@ -445,6 +444,23 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         activeStageId: snapshot.referenceContext?.activeStageId,
         latestVerifierStatus: snapshot.referenceContext?.latestVerifierStatus,
         createdAt: snapshot.createdAt,
+        capsule: snapshot.capsule
+          ? {
+              capsuleHash: snapshot.capsule.capsuleHash,
+              datasetId: snapshot.capsule.dataIdentity?.datasetId,
+              stageId: snapshot.capsule.population?.stageId,
+              scope: snapshot.capsule.population?.scope ?? "unknown",
+              rowCount: snapshot.capsule.population?.rowCount,
+              rowsUsed: snapshot.capsule.population?.rowsUsed,
+              qualityGate: snapshot.capsule.qualityGate?.status ?? "unknown",
+              panelStatus: snapshot.capsule.panel?.status ?? "unknown",
+              observedSpecifications: snapshot.capsule.identification?.observedSpecifications?.length ?? 0,
+              conflicts: snapshot.capsule.conflicts ?? [],
+              tokenEstimate: snapshot.capsule.tokenEstimate ?? 0,
+            }
+          : undefined,
+        usage: snapshot.usage,
+        lastAction: snapshot.lastAction,
       })
     })
 

@@ -1,6 +1,6 @@
 import fs from "fs"
 import path from "path"
-import { Instance } from "../project/instance"
+import { resolveWorkspacePath } from "./analysis-path"
 
 export type NumericMetric =
   | "coefficient"
@@ -157,9 +157,23 @@ function csvRecords(filePath: string) {
   const rows = csvRows(filePath)
   if (rows.length === 0) return []
   const headers = rows[0]!.map((item) => item.trim())
-  return rows.slice(1).map((row) =>
-    Object.fromEntries(headers.map((header, idx) => [header || `column_${idx}`, (row[idx] ?? "").trim()])),
-  )
+  return rows
+    .slice(1)
+    .map((row) =>
+      Object.fromEntries(headers.map((header, idx) => [header || `column_${idx}`, (row[idx] ?? "").trim()])),
+    )
+}
+
+const COEFFICIENT_COLUMN_ALIASES: Record<"coefficient" | "std_error" | "p_value" | "ci_lower" | "ci_upper", readonly string[]> = {
+  coefficient: ["coefficient", "estimate"],
+  std_error: ["std_error", "stdError"],
+  p_value: ["p_value", "pValue"],
+  ci_lower: ["ci_lower", "confLow"],
+  ci_upper: ["ci_upper", "confHigh"],
+}
+
+function coefficientMetricValue(row: Record<string, string>, metric: keyof typeof COEFFICIENT_COLUMN_ALIASES) {
+  return parseNumeric(COEFFICIENT_COLUMN_ALIASES[metric].map((key) => row[key]).find((value) => value !== undefined))
 }
 
 function createEntry(
@@ -190,7 +204,20 @@ function createEntry(
 
 function writeSnapshot(doc: NumericSnapshotDocument) {
   fs.mkdirSync(path.dirname(doc.snapshotPath), { recursive: true })
-  fs.writeFileSync(doc.snapshotPath, JSON.stringify(doc, null, 2), "utf-8")
+  try {
+    if (fs.lstatSync(doc.snapshotPath).isSymbolicLink()) {
+      throw new Error("数值快照路径不能是符号链接。")
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  }
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | (fs.constants.O_NOFOLLOW ?? 0)
+  const descriptor = fs.openSync(doc.snapshotPath, flags, 0o666)
+  try {
+    fs.writeFileSync(descriptor, JSON.stringify(doc, null, 2), "utf-8")
+  } finally {
+    fs.closeSync(descriptor)
+  }
   return doc
 }
 
@@ -217,18 +244,18 @@ function snapshotStamp() {
   ].join("")
 }
 
-function stageScopedSnapshotPath(input: {
-  csvPath: string
-  stageId?: string
-  action: "describe" | "correlation"
-}) {
+function stageScopedSnapshotPath(input: { csvPath: string; stageId?: string; action: "profile" | "correlation" }) {
   const stageId = input.stageId ?? "stage_unknown"
   return path.join(path.dirname(input.csvPath), `${stageId}_${input.action}_${snapshotStamp()}_numeric_snapshot.json`)
 }
 
 function resolveSnapshotMetadataPath(snapshotPath: string) {
-  if (path.isAbsolute(snapshotPath)) return snapshotPath
-  return path.resolve(Instance.directory, snapshotPath)
+  // 此前只按 Instance.directory 拼接，没有 `.killstata/` 前缀走 worktree 的特判——
+  // TUI dev 下 directory 是 packages/killstata，而快照挂在 worktree（项目根）下，
+  // 快照引用解析到不存在的路径，fs.existsSync 静默返回 undefined（比 ENOENT 更隐蔽：
+  // 可信数值快照悄悄丢失，"数字只读不背"的校验源少了一份输入却不报错）。
+  // 复用 resolveWorkspacePath（同一基准判定，已被 workspace-path-roundtrip 测试锁定）。
+  return resolveWorkspacePath(snapshotPath)
 }
 
 function isNumericSnapshotDocument(value: unknown): value is NumericSnapshotDocument {
@@ -249,14 +276,7 @@ function loadSnapshotFromPath(snapshotPath: string) {
 function uniqueEntries(entries: NumericSnapshotEntry[]) {
   const seen = new Set<string>()
   return entries.filter((entry) => {
-    const key = [
-      entry.metric,
-      entry.scope,
-      entry.term,
-      entry.model ?? "",
-      entry.value,
-      entry.sourcePath,
-    ].join("|")
+    const key = [entry.metric, entry.scope, entry.term, entry.model ?? "", entry.value, entry.sourcePath].join("|")
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -339,15 +359,15 @@ function snapshotFromCoefficientCsv(filePath: string) {
   const rows = csvRecords(filePath)
   if (!rows.length) return undefined
   const first = rows[0]!
-  if (!("coefficient" in first || "std_error" in first || "p_value" in first)) return undefined
+  if (!Object.keys(first).some((key) => Object.values(COEFFICIENT_COLUMN_ALIASES).flat().includes(key))) return undefined
   const entries: NumericSnapshotEntry[] = []
   for (const row of rows) {
     const term = row.term || row.variable || row.column_0
     if (!term) continue
-    const pValue = parseNumeric(row.p_value)
+    const pValue = coefficientMetricValue(row, "p_value")
     const stars = significanceStars(pValue)
     for (const metric of ["coefficient", "std_error", "p_value", "ci_lower", "ci_upper"] as const) {
-      const value = parseNumeric(row[metric])
+      const value = coefficientMetricValue(row, metric)
       if (value === undefined) continue
       entries.push(
         createEntry({
@@ -448,7 +468,12 @@ function snapshotFromCorrelationCsv(filePath: string) {
   })
 }
 
-function appendJsonMetricEntries(entries: NumericSnapshotEntry[], sourcePath: string, value: unknown, pathStack: string[] = []) {
+function appendJsonMetricEntries(
+  entries: NumericSnapshotEntry[],
+  sourcePath: string,
+  value: unknown,
+  pathStack: string[] = [],
+) {
   if (!value || typeof value !== "object") return
   if (Array.isArray(value)) {
     value.forEach((item, index) => appendJsonMetricEntries(entries, sourcePath, item, [...pathStack, `${index}`]))
@@ -478,7 +503,7 @@ function appendJsonMetricEntries(entries: NumericSnapshotEntry[], sourcePath: st
     if (metric) {
       const numeric = parseNumeric(raw)
       if (numeric !== undefined) {
-        const term = metric === "r_squared" ? "model" : pathStack[pathStack.length - 1] ?? key
+        const term = metric === "r_squared" ? "model" : (pathStack[pathStack.length - 1] ?? key)
         entries.push(
           createEntry({
             metric,
@@ -543,7 +568,12 @@ function snapshotFromTrustedArtifactPath(filePath: string) {
   if (!fs.existsSync(absolutePath)) return undefined
   const ext = path.extname(absolutePath).toLowerCase()
   if (ext === ".json") return snapshotFromStructuredJson(absolutePath)
-  if (ext === ".csv") return snapshotFromCoefficientCsv(absolutePath) ?? snapshotFromDescribeCsv(absolutePath) ?? snapshotFromCorrelationCsv(absolutePath)
+  if (ext === ".csv")
+    return (
+      snapshotFromCoefficientCsv(absolutePath) ??
+      snapshotFromDescribeCsv(absolutePath) ??
+      snapshotFromCorrelationCsv(absolutePath)
+    )
   return undefined
 }
 
@@ -571,17 +601,15 @@ export async function collectTrustedArtifactPathsFromToolMetadata(metadata: unkn
         const basename = path.basename(normalized).toLowerCase()
         const looksLikeTrustedArtifact =
           [".json", ".csv"].includes(ext) &&
-          (
-            /path$/i.test(keyHint ?? "") ||
+          (/path$/i.test(keyHint ?? "") ||
             keyHint === "relativePath" ||
             basename.includes("numeric_snapshot") ||
             basename.includes("diagnostics") ||
             basename.includes("coefficient") ||
             basename.includes("summary") ||
             basename.includes("metadata") ||
-            basename.includes("describe") ||
-            basename.includes("correlation")
-          )
+            basename.includes("profile") ||
+            basename.includes("correlation"))
         if (looksLikeTrustedArtifact) found.add(normalized)
       }
       return
@@ -600,10 +628,7 @@ export async function recoverNumericSnapshots(input: {
   explicitReadPaths?: string[]
 }) {
   const base = dedupeSnapshots(input.snapshots)
-  const recovered = [
-    ...input.trustedArtifactPaths,
-    ...(input.explicitReadPaths ?? []),
-  ]
+  const recovered = [...input.trustedArtifactPaths, ...(input.explicitReadPaths ?? [])]
     .map(snapshotFromTrustedArtifactPath)
     .filter((item): item is NumericSnapshotDocument => Boolean(item))
 
@@ -615,14 +640,16 @@ export async function recoverNumericSnapshots(input: {
   }
 }
 
-export function createEconometricsNumericSnapshot(input: SnapshotMeta & {
-  outputDir: string
-  methodName: string
-  result: Record<string, unknown>
-  coefficientsPath?: string
-  diagnosticsPath?: string
-  metadataPath?: string
-}) {
+export function createEconometricsNumericSnapshot(
+  input: SnapshotMeta & {
+    outputDir: string
+    methodName: string
+    result: Record<string, unknown>
+    coefficientsPath?: string
+    diagnosticsPath?: string
+    metadataPath?: string
+  },
+) {
   const snapshotPath = path.join(input.outputDir, "numeric_snapshot.json")
   const entries: NumericSnapshotEntry[] = []
 
@@ -630,10 +657,10 @@ export function createEconometricsNumericSnapshot(input: SnapshotMeta & {
     for (const row of csvRecords(input.coefficientsPath)) {
       const term = row.term || row.variable || row.column_0
       if (!term) continue
-      const pValue = parseNumeric(row.p_value)
+      const pValue = coefficientMetricValue(row, "p_value")
       const stars = significanceStars(pValue)
       for (const metric of ["coefficient", "std_error", "p_value", "ci_lower", "ci_upper"] as const) {
-        const value = parseNumeric(row[metric])
+        const value = coefficientMetricValue(row, metric)
         if (value === undefined) continue
         entries.push(
           createEntry({
@@ -687,6 +714,38 @@ export function createEconometricsNumericSnapshot(input: SnapshotMeta & {
     }
   }
 
+  const outcomeMean = parseNumeric(input.result.outcomeMean)
+  if (outcomeMean !== undefined) {
+    entries.push(
+      createEntry({
+        metric: "mean",
+        scope: "regression",
+        term: "结果变量",
+        value: outcomeMean,
+        sourcePath: input.metadataPath ?? input.coefficientsPath ?? snapshotPath,
+        datasetId: input.datasetId,
+        stageId: input.stageId,
+        runId: input.runId,
+      }),
+    )
+  }
+
+  const fPValue = parseNumeric(input.result.fPValue)
+  if (fPValue !== undefined) {
+    entries.push(
+      createEntry({
+        metric: "p_value",
+        scope: "diagnostics",
+        term: "F",
+        value: fPValue,
+        sourcePath: input.metadataPath ?? input.coefficientsPath ?? snapshotPath,
+        datasetId: input.datasetId,
+        stageId: input.stageId,
+        runId: input.runId,
+      }),
+    )
+  }
+
   if (input.diagnosticsPath && fs.existsSync(input.diagnosticsPath)) {
     const diagnostics = JSON.parse(fs.readFileSync(input.diagnosticsPath, "utf-8")) as Record<string, any>
     const residuals = diagnostics.residuals as Record<string, unknown> | undefined
@@ -730,7 +789,8 @@ export function createEconometricsNumericSnapshot(input: SnapshotMeta & {
   for (const metric of ["coefficient", "std_error", "p_value", "r_squared"] as const) {
     const value = parseNumeric(input.result[metric])
     if (value === undefined) continue
-    const term = metric === "r_squared" ? "model" : String(input.result.treatment_var ?? input.result.treatmentVar ?? "treatment")
+    const term =
+      metric === "r_squared" ? "model" : String(input.result.treatment_var ?? input.result.treatmentVar ?? "treatment")
     const alreadyExists = entries.some((entry) => entry.metric === metric && entry.term === term)
     if (alreadyExists) continue
     entries.push(
@@ -766,9 +826,87 @@ export function createEconometricsNumericSnapshot(input: SnapshotMeta & {
   return writeSnapshot(snapshot)
 }
 
-export function createDescribeNumericSnapshot(input: SnapshotMeta & {
-  csvPath: string
+/**
+ * 工具的 analysisView 与 numeric_snapshot 由同一个后端结果生成；当快照文件暂时未能
+ * 在当前消息中恢复时，用这个有界视图补齐核验输入。这里不读取模型文本，也不把
+ * “<0.001”伪装成精确 p 值，避免补充通道反而降低数字可信度。
+ */
+export function numericSnapshotFromAnalysisView(input: {
+  tool: string
+  view: {
+    kind?: unknown
+    step?: unknown
+    datasetId?: unknown
+    stageId?: unknown
+    results?: readonly { label?: unknown; value?: unknown }[]
+  }
 }) {
+  const entries: NumericSnapshotEntry[] = []
+  for (const result of input.view.results ?? []) {
+    if (typeof result.label !== "string" || typeof result.value !== "string") continue
+    const label = result.label.trim()
+    const value = parseNumeric(result.value)
+    if (!label || value === undefined) continue
+
+    const normalized = label.toLowerCase()
+    const metric: NumericMetric | undefined =
+      isCoefficientAnalysisLabel(normalized)
+        ? "coefficient"
+        : /标准误|std\.?\s*error|stderr/.test(normalized)
+          ? "std_error"
+          : /p\s*值|p[- ]?value|pvalue/.test(normalized)
+            ? "p_value"
+            : /r²|r\^2|r2|拟合/.test(normalized)
+              ? "r_squared"
+              : /^n$|样本|观测/.test(normalized)
+                ? "n_obs"
+                : /均值|mean/.test(normalized)
+                  ? "mean"
+                  : undefined
+    if (!metric) continue
+
+    const term = metric === "coefficient"
+      ? label.replace(/\s*(?:系数|coefficient)\s*$/i, "").trim() || "primary"
+      : metric === "r_squared"
+        ? "model"
+        : metric === "mean"
+          ? "结果变量"
+          : "primary"
+    entries.push(
+      createEntry({
+        metric,
+        scope: metric === "p_value" ? "diagnostics" : "regression",
+        term,
+        value,
+        sourcePath: `analysis-view:${input.tool}`,
+        datasetId: typeof input.view.datasetId === "string" ? input.view.datasetId : undefined,
+        stageId: typeof input.view.stageId === "string" ? input.view.stageId : undefined,
+      }),
+    )
+  }
+
+  return {
+    version: 1 as const,
+    sourceTool: "grounding" as const,
+    scope: "regression" as const,
+    generatedAt: nowIso(),
+    snapshotPath: `analysis-view:${input.tool}`,
+    datasetId: typeof input.view.datasetId === "string" ? input.view.datasetId : undefined,
+    stageId: typeof input.view.stageId === "string" ? input.view.stageId : undefined,
+    entries: uniqueEntries(entries),
+    context: { step: input.view.step },
+  } satisfies NumericSnapshotDocument
+}
+
+function isCoefficientAnalysisLabel(label: string) {
+  return /系数|coefficient/.test(label) && !/^系数项$|系数(?:项数|数量|个数)|number\s+of\s+coefficients/.test(label)
+}
+
+export function createDescribeNumericSnapshot(
+  input: SnapshotMeta & {
+    csvPath: string
+  },
+) {
   const entries: NumericSnapshotEntry[] = []
   for (const row of csvRecords(input.csvPath)) {
     const term = row.variable
@@ -806,7 +944,7 @@ export function createDescribeNumericSnapshot(input: SnapshotMeta & {
   const snapshotPath = stageScopedSnapshotPath({
     csvPath: input.csvPath,
     stageId: input.stageId,
-    action: "describe",
+    action: "profile",
   })
   return writeSnapshot({
     version: 1,
@@ -821,9 +959,11 @@ export function createDescribeNumericSnapshot(input: SnapshotMeta & {
   })
 }
 
-export function createCorrelationNumericSnapshot(input: SnapshotMeta & {
-  csvPath: string
-}) {
+export function createCorrelationNumericSnapshot(
+  input: SnapshotMeta & {
+    csvPath: string
+  },
+) {
   const rows = csvRows(input.csvPath)
   const entries: NumericSnapshotEntry[] = []
   if (rows.length >= 2) {
@@ -937,9 +1077,12 @@ function hasStatisticalLanguage(line: string) {
 function metricsFromLine(line: string): NumericMetric[] {
   const metrics = new Set<NumericMetric>()
   const normalized = line.toLowerCase()
-  if (/p[- ]?value|p 值|p值/.test(normalized)) metrics.add("p_value")
+  if (/p[- ]?value|p 值|p值|(?<![a-z])p\s*(?:<=|<|≤)\s*\d/.test(normalized)) metrics.add("p_value")
   if (/std\.? error|standard error|标准误/.test(normalized)) metrics.add("std_error")
-  if (/r-squared|r squared|adj\.? r2|adj\.? r\^2|r2\b|r\^2|within r2|within r\^2|within r²|组内r2|组内r²/.test(normalized)) metrics.add("r_squared")
+  if (
+    /r-squared|r squared|adj\.? r2|adj\.? r\^2|r2\b|r\^2|within r2|within r\^2|within r²|组内r2|组内r²/.test(normalized)
+  )
+    metrics.add("r_squared")
   if (/组数|cluster count|group count|groups\b/.test(normalized)) metrics.add("group_count")
   if (/\bcoefficient\b|系数/.test(normalized)) metrics.add("coefficient")
   if (/\bmean\b|均值/.test(normalized)) metrics.add("mean")
@@ -947,10 +1090,18 @@ function metricsFromLine(line: string): NumericMetric[] {
   if (/\bmin\b|最小值/.test(normalized)) metrics.add("min")
   if (/\bmax\b|最大值/.test(normalized)) metrics.add("max")
   if (/correlation|相关系数/.test(normalized)) metrics.add("correlation")
-  if (/\bobservations\b|\bsample size\b|样本量|\bn\s*=|\bn\b/.test(normalized)) metrics.add("n_obs")
+  if (/\bobservations\b|\bsample size\b|有效样本|样本量|样本数|有效观测|观测数|\bn\s*=|\bn\b/.test(normalized)) metrics.add("n_obs")
   const primary = metricFromLine(line)
   if (primary) metrics.add(primary)
   return [...metrics]
+}
+
+function pValueThreshold(line: string) {
+  // 允许裸 “p < 0.001”：要求 p 后紧跟比较号与数字，不会误吃 pop/pct 等词。
+  const match = line.match(/(?:p\s*[- ]?value|p\s*值|p值|(?<![A-Za-z])p)\s*(?:<=|<|≤)\s*(-?(?:\d+(?:\.\d+)?))/i)
+  if (!match) return undefined
+  const value = Number(match[1])
+  return Number.isFinite(value) ? value : undefined
 }
 
 function nearlyEqual(a: number, b: number) {
@@ -1039,7 +1190,8 @@ export function validateNumericGrounding(input: {
       trustedSourcePaths: input.snapshots.map((item) => item.snapshotPath),
       redactions: issues.map((issue) => ({
         line: issue.line,
-        replacement: "Exact statistical values are omitted here because no grounded numeric artifact was available in this turn.",
+        replacement:
+          "本轮没有可核验的数值产物，精确统计量已省略。",
         issueTypes: [issue.type],
       })),
       unverifiedMetrics: [],
@@ -1054,8 +1206,13 @@ export function validateNumericGrounding(input: {
     if (metrics.length > 0 && values.length > 0) {
       const metricEntries = uniqueMetricEntries(entries, metrics)
       const broadMatches = findMatchingEntries(entries, line)
-      const matches = uniqueEntries([...broadMatches, ...metrics.flatMap((metric) => findMatchingEntries(entries, line, metric))])
-      const hasMetricValueMatches = values.every((value) => metricEntries.some((entry) => groundedValueMatches(entry.value, value)))
+      const matches = uniqueEntries([
+        ...broadMatches,
+        ...metrics.flatMap((metric) => findMatchingEntries(entries, line, metric)),
+      ])
+      const hasMetricValueMatches = values.every((value) =>
+        metricEntries.some((entry) => groundedValueMatches(entry.value, value)),
+      )
       if (matches.length === 0 && !hasMetricValueMatches) {
         issues.push({
           type: "ungrounded_value",
@@ -1064,7 +1221,27 @@ export function validateNumericGrounding(input: {
           metric: metrics[0],
         })
       }
+      // “p<0.001”是阈值声明，不是声称 p 值恰好等于 0.001；后端快照中的
+      // 实际 p 值通常更小，按等式比较会把合法的显著性报告误删。阈值是整行不变量，
+      // 在循环外算一次即可。
+      const threshold = metrics.includes("p_value") ? pValueThreshold(line) : undefined
       for (const value of values) {
+        // 豁免只能给阈值数字本身。此前的判据是“这一行含阈值”（line.includes(value.raw)
+        // 对本行提取出的 value 恒真），导致同一行里任何数字都跳过等值核验——
+        // “treat 系数=9.9999，p值<0.001”中编造的 9.9999 会被判为已核验。
+        const isPValueThreshold = threshold !== undefined && value.value === threshold
+        if (isPValueThreshold) {
+          const pMatches = findMatchingEntries(entries, line, "p_value")
+          if (pMatches.length === 0 || !pMatches.some((entry) => entry.value < threshold)) {
+            issues.push({
+              type: "ungrounded_value",
+              line,
+              detail: `No grounded p-value below the reported threshold ${value.raw} was found.`,
+              metric: "p_value",
+            })
+          }
+          continue
+        }
         const matchedByLineScopedEntries = matches.some((entry) => groundedValueMatches(entry.value, value))
         const matchedByMetricScopedEntries = metricEntries.some((entry) => groundedValueMatches(entry.value, value))
         if (!matchedByLineScopedEntries && !matchedByMetricScopedEntries) {
@@ -1118,9 +1295,7 @@ export function validateNumericGrounding(input: {
     if (hasNotSignificantKeyword) {
       const lineHasNumericValues = numericCandidates(line).length > 0
       const lineHasStatisticalContext =
-        /p\s*[<<=]\s*0\.\d|p\s*值|p[- ]?value|系数|coefficient|标准误|std\.?\s*error|\d+%\s*(?:水平|level)/i.test(
-          line,
-        )
+        /p\s*[<<=]\s*0\.\d|p\s*值|p[- ]?value|系数|coefficient|标准误|std\.?\s*error|\d+%\s*(?:水平|level)/i.test(line)
       if (lineHasNumericValues || lineHasStatisticalContext) {
         const matches = findMatchingEntries(entries, line, "p_value")
         if (matches.length === 0) {
@@ -1148,9 +1323,7 @@ export function validateNumericGrounding(input: {
     if (/\bpositive\b|正向|为正|正效应|正向效应/.test(line.toLowerCase())) {
       const lineHasNumericValues = numericCandidates(line).length > 0
       const lineHasDirectionContext =
-        /系数|coefficient|效应|effect|估计值|estimate|回归|regression|coef|beta|处理效应|treatment\s*effect/i.test(
-          line,
-        )
+        /系数|coefficient|效应|effect|估计值|estimate|回归|regression|coef|beta|处理效应|treatment\s*effect/i.test(line)
       if (lineHasNumericValues || lineHasDirectionContext) {
         const matches = findMatchingEntries(entries, line, "coefficient")
         if (matches.length === 0) {
@@ -1177,9 +1350,7 @@ export function validateNumericGrounding(input: {
     if (/\bnegative\b|负向|为负|负效应|负向效应/.test(line.toLowerCase())) {
       const lineHasNumericValues = numericCandidates(line).length > 0
       const lineHasDirectionContext =
-        /系数|coefficient|效应|effect|估计值|estimate|回归|regression|coef|beta|处理效应|treatment\s*effect/i.test(
-          line,
-        )
+        /系数|coefficient|效应|effect|估计值|estimate|回归|regression|coef|beta|处理效应|treatment\s*effect/i.test(line)
       if (lineHasNumericValues || lineHasDirectionContext) {
         const matches = findMatchingEntries(entries, line, "coefficient")
         if (matches.length === 0) {
@@ -1213,9 +1384,10 @@ export function validateNumericGrounding(input: {
     const issueTypes = [...new Set(lineIssues.map((issue) => issue.type))]
     const mentionsSign = issueTypes.includes("sign_mismatch")
     const mentionsSignificance = issueTypes.includes("significance_mismatch")
-    const replacement = mentionsSign || mentionsSignificance
-      ? "This directional or significance claim is omitted because the draft statement was inconsistent with grounded outputs."
-      : "Exact statistical values are omitted here because they were not verified against grounded outputs."
+    const replacement =
+      mentionsSign || mentionsSignificance
+        ? "该方向或显著性表述与已核验结果不一致，已省略。"
+        : "未核验的精确统计数值已省略。"
     return {
       line,
       replacement,
@@ -1225,7 +1397,9 @@ export function validateNumericGrounding(input: {
 
   const affectedLineCount = issueMap.size
   const status = issues.length === 0 ? "pass" : affectedLineCount < candidateLines.length ? "partial" : "fail"
-  const unverifiedMetrics = [...new Set(issues.map((issue) => issue.metric).filter((item): item is NumericMetric => Boolean(item)))]
+  const unverifiedMetrics = [
+    ...new Set(issues.map((issue) => issue.metric).filter((item): item is NumericMetric => Boolean(item))),
+  ]
 
   return {
     status,
@@ -1243,10 +1417,7 @@ function linePrefix(line: string) {
   return match?.[1] ?? ""
 }
 
-export function rewriteGroundedText(input: {
-  text: string
-  grounding: GroundingResult
-}) {
+export function rewriteGroundedText(input: { text: string; grounding: GroundingResult }) {
   if (input.grounding.status === "pass" || input.grounding.status === "not_applicable") {
     return input.text.trimEnd()
   }
@@ -1264,9 +1435,7 @@ export function rewriteGroundedText(input: {
     .join("\n")
     .trimEnd()
 
-  const note = input.grounding.unverifiedMetrics.length
-    ? `Unverified statistics omitted: ${input.grounding.unverifiedMetrics.join(", ")}.`
-    : "Some statistical values were omitted because they could not be verified against grounded outputs."
+  const note = "部分统计表述无法与结果产物直接对应，已不纳入本次结论。"
 
   return [rewritten, note].filter(Boolean).join("\n\n")
 }
@@ -1276,9 +1445,8 @@ export function buildGroundingFailureText(result: GroundingResult) {
     ? `Available numeric snapshots:\n- ${result.snapshotPaths.join("\n- ")}`
     : "No numeric snapshot is currently available."
   return [
-    "Exact statistical values were omitted because the draft response contained ungrounded or inconsistent numerical claims.",
-    "Read numeric_snapshot.json or another explicitly read structured artifact before summarizing coefficients, p-values, R-squared, N, descriptive statistics, or correlations.",
-    snapshotLine,
+    "草稿中包含无法由核验产物支持或与产物不一致的数值，因此精确统计量已省略。",
+    "在总结系数、p 值、R²、样本量、描述统计或相关系数前，请先读取 numeric_snapshot.json 或其他明确的结构化结果产物。",
+    snapshotLine.replace("Available numeric snapshots:", "可用的数值快照：").replace("No numeric snapshot is currently available.", "当前没有可用的数值快照。"),
   ].join("\n\n")
 }
-

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { beforeAll, describe, expect, test } from "bun:test"
 import { Instance } from "@/project/instance"
 import { Provider } from "@/provider/provider"
 import { ProviderAuth } from "@/provider/auth"
@@ -12,7 +12,11 @@ import {
   normalizeDeepSeekModelID,
 } from "@/provider/deepseek-policy"
 
-describe("DeepSeek-only provider policy", () => {
+describe("provider policy with built-in DeepSeek default", () => {
+  beforeAll(async () => {
+    await Instance.disposeAll()
+  })
+
   test("provider list exposes only DeepSeek models", async () => {
     await Instance.provide({
       directory: process.cwd(),
@@ -26,6 +30,7 @@ describe("DeepSeek-only provider policy", () => {
           expect(model.limit.context).toBe(DEEPSEEK_V4_CONTEXT_WINDOW_TOKENS)
           expect(model.limit.output).toBe(DEEPSEEK_V4_MAX_OUTPUT_TOKENS)
           expect(model.capabilities.reasoning).toBe(true)
+          expect(Object.keys(model.variants ?? {})).toEqual(["low", "medium", "high", "max"])
         }
       },
     })
@@ -50,12 +55,10 @@ describe("DeepSeek-only provider policy", () => {
     await Instance.provide({
       directory: process.cwd(),
       fn: async () => {
-        // "openai" is not one of the two supported providers (deepseek | custom).
-        await expect(Provider.getModel("openai", "gpt-5")).rejects.toThrow(/two providers/)
-        await expect(ProviderAuth.authorize({ providerID: "openai", method: 0 })).rejects.toThrow(
-          DEEPSEEK_API_KEY_ENV,
-        )
-        await expect(ProviderAuth.api({ providerID: "openai", key: "test-key" })).rejects.toThrow(/two providers/)
+        // OpenAI-native is not enabled as a separate provider; use generic custom or supported native protocols.
+        await expect(Provider.getModel("openai", "gpt-5")).rejects.toThrow(/deepseek.*custom.*anthropic.*google/)
+        await expect(ProviderAuth.authorize({ providerID: "openai", method: 0 })).rejects.toThrow(DEEPSEEK_API_KEY_ENV)
+        await expect(ProviderAuth.api({ providerID: "openai", key: "test-key" })).rejects.toThrow(/deepseek.*custom.*anthropic.*google/)
         await expect(ProviderAuth.api({ providerID: DEEPSEEK_PROVIDER_ID, key: "test-key" })).resolves.toBeUndefined()
       },
     })

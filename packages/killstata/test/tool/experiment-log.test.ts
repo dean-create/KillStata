@@ -155,32 +155,36 @@ describe("experiment log", () => {
         sourcePath: "/tmp/did.xlsx",
         createdAt: "2026-07-16T00:00:00.000Z",
         updatedAt: "2026-07-16T00:01:00.000Z",
-        stages: [{
-          stageId: "stage_000",
-          branch: "main",
-          action: "import",
-          workingPath: path.join(root, "stage.parquet"),
-          workingFormat: "parquet",
-          rowCount: 820,
-          columnCount: 8,
-          createdAt: "2026-07-16T00:00:00.000Z",
-        }],
-        artifacts: [{
-          artifactId: "did_static_1",
-          stageId: "stage_000",
-          branch: "main",
-          action: "did_static",
-          outputPath: resultPath,
-          createdAt: "2026-07-16T00:01:00.000Z",
-          metadata: {
-            spec: {
-              dependentVar: "fte",
-              groupVar: "treated",
-              postVar: "t",
-              covariates: ["bk", "kfc", "roys"],
+        stages: [
+          {
+            stageId: "stage_000",
+            branch: "main",
+            action: "import",
+            workingPath: path.join(root, "stage.parquet"),
+            workingFormat: "parquet",
+            rowCount: 820,
+            columnCount: 8,
+            createdAt: "2026-07-16T00:00:00.000Z",
+          },
+        ],
+        artifacts: [
+          {
+            artifactId: "did_static_1",
+            stageId: "stage_000",
+            branch: "main",
+            action: "did_static",
+            outputPath: resultPath,
+            createdAt: "2026-07-16T00:01:00.000Z",
+            metadata: {
+              spec: {
+                dependentVar: "fte",
+                groupVar: "treated",
+                postVar: "t",
+                covariates: ["bk", "kfc", "roys"],
+              },
             },
           },
-        }],
+        ],
         finalOutputs: [],
       } as unknown as DatasetManifest
 
@@ -256,10 +260,7 @@ describe("experiment log", () => {
     //
     // 断言的是**行为**（固定文件名 + 覆盖写），不是某个具体函数名 —— 实现从
     // publishDatasetLevelOutput 换成了直接 fs.writeFileSync，行为不变，测试不该因此变红。
-    const source = fs.readFileSync(
-      path.join(process.cwd(), "src", "tool", "analysis-experiment-log.ts"),
-      "utf-8",
-    )
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "tool", "analysis-experiment-log.ts"), "utf-8")
     // 落盘路径是数据集根目录下的固定文件名，不带 runId/stageId 后缀。
     expect(source).toContain('EXPERIMENT_LOG_FILENAME = "EXPERIMENT_LOG.md"')
     // 覆盖写（writeFileSync），而不是每次新建一份带版本号的文件。

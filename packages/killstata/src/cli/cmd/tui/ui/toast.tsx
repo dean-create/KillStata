@@ -72,7 +72,7 @@ function init() {
         })
       toast.show({
         variant: "error",
-        message: "An unknown error has occurred",
+        message: "这一步没能完成，请重试或换一种说法。",
       })
     },
     get currentToast(): ToastOptions | null {

@@ -1,10 +1,13 @@
 import z from "zod"
 import { Tool } from "./tool"
+import { ToolModel } from "./model-contracts"
 import * as path from "path"
 import DESCRIPTION from "./ls.txt"
 import { Instance } from "../project/instance"
 import { Ripgrep } from "../file/ripgrep"
 import { assertExternalDirectory } from "./external-directory"
+import { displayPath, isInternalWorkspacePath } from "./analysis-display"
+import { shieldFromLongTokenRedaction } from "@/runtime/tool-result-policy"
 
 export const IGNORE_PATTERNS = [
   "node_modules/",
@@ -35,11 +38,11 @@ export const IGNORE_PATTERNS = [
 
 const LIMIT = 100
 
-export const ListTool = Tool.define("list", {
+export const ListTool = Tool.define("list", Tool.Execution.readOnly, ToolModel.forTool("list"), {
   description: DESCRIPTION,
   parameters: z.object({
-    path: z.string().describe("The absolute path to the directory to list (must be absolute, not relative)").optional(),
-    ignore: z.array(z.string()).describe("List of glob patterns to ignore").optional(),
+    path: z.string().describe("要列出的目录绝对路径，不能使用相对路径").optional(),
+    ignore: z.array(z.string()).describe("需要忽略的 glob 模式列表").optional(),
   }),
   async execute(params, ctx) {
     const searchPath = path.resolve(Instance.directory, params.path || ".")
@@ -56,9 +59,19 @@ export const ListTool = Tool.define("list", {
 
     const ignoreGlobs = IGNORE_PATTERNS.map((p) => `!${p}*`).concat(params.ignore?.map((p) => `!${p}`) || [])
     const files = []
-    for await (const file of Ripgrep.files({ cwd: searchPath, glob: ignoreGlobs })) {
-      files.push(file)
-      if (files.length >= LIMIT) break
+    let timedOut = false
+    try {
+      for await (const file of Ripgrep.files({ cwd: searchPath, glob: ignoreGlobs, abort: ctx.abort })) {
+        files.push(file)
+        if (files.length >= LIMIT) break
+      }
+    } catch (error) {
+      // ripgrep 超时/中止：部分结果照常展示，明确告诉用户"没搜完"。
+      if (Ripgrep.isRipgrepTimeoutError(error)) {
+        timedOut = true
+      } else {
+        throw error
+      }
     }
 
     // Build directory structure
@@ -80,12 +93,22 @@ export const ListTool = Tool.define("list", {
       filesByDir.get(dir)!.push(path.basename(file))
     }
 
+    // 内部产物文件名（如 stage_000_describe_20260816-173358234_numeric_snapshot.json）
+    // 常年超过 Redact.LONG_TOKEN_PATTERN 的 40 字符阈值。下游 Tool.define 统一给每个
+    // 工具的 output 走 prepareToolOutput → redact()，那条管线只保护带 `.killstata/`
+    // 前缀的完整路径——list 渲染子目录内容时输出的是裸文件名（不带路径前缀），
+    // 被当成任意长 token 打码成 [已脱敏]，模型据此再去 read 必然 ENOENT
+    //（2026-08-16 drive harness 真实数据实测复现）。在源头（列出内部工作区目录时）
+    // 就给文件名打上零宽字符保护，不依赖下游脱敏管线猜哪些字符串该放行。
+    const searchIsInternal = isInternalWorkspacePath(searchPath)
+    const protectFileName = (name: string) => (searchIsInternal ? shieldFromLongTokenRedaction(name) : name)
+
     function renderDir(dirPath: string, depth: number): string {
       const indent = "  ".repeat(depth)
       let output = ""
 
       if (depth > 0) {
-        output += `${indent}${path.basename(dirPath)}/\n`
+        output += `${indent}${protectFileName(path.basename(dirPath))}/\n`
       }
 
       const childIndent = "  ".repeat(depth + 1)
@@ -101,21 +124,25 @@ export const ListTool = Tool.define("list", {
       // Render files
       const files = filesByDir.get(dirPath) || []
       for (const file of files.sort()) {
-        output += `${childIndent}${file}\n`
+        output += `${childIndent}${protectFileName(file)}\n`
       }
 
       return output
     }
 
-    const output = `${searchPath}/\n` + renderDir(".", 0)
+    // displayPath 对 .killstata 根返回空串（无文件名可暴露）；此时头部与标题回退到中性措辞，
+    // 避免退化成裸 "/" 或空标题。
+    const displayedRoot = displayPath(searchPath) || "工作目录"
+    const output = `${displayedRoot}/\n` + renderDir(".", 0)
 
     return {
-      title: path.relative(Instance.worktree, searchPath),
+      title: displayPath(path.relative(Instance.worktree, searchPath)) || "工作目录",
       metadata: {
         count: files.length,
         truncated: files.length >= LIMIT,
+        timedOut,
       },
-      output,
+      output: timedOut ? `${output}\n(Search timed out. Narrow the search path.)` : output,
     }
   },
 })

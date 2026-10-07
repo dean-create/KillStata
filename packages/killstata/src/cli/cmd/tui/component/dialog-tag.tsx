@@ -15,7 +15,7 @@ export function DialogTag(props: { onSelect?: (value: string) => void }) {
   const [files] = createResource(
     () => [store.filter],
     async () => {
-      const result = await sdk.client.find.files({
+      const result = await sdk.client.data.files({
         query: store.filter,
       })
       if (result.error) return []
@@ -33,7 +33,7 @@ export function DialogTag(props: { onSelect?: (value: string) => void }) {
 
   return (
     <DialogSelect
-      title="Autocomplete"
+      title="自动补全"
       options={options()}
       onSelect={(option) => {
         props.onSelect?.(option.value)

@@ -27,10 +27,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "healthy",
-                    "version"
-                  ]
+                  "required": ["healthy", "version"]
                 }
               }
             }
@@ -378,10 +375,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "providers",
-                    "default"
-                  ]
+                  "required": ["providers", "default"]
                 }
               }
             }
@@ -745,9 +739,7 @@
         ],
         "summary": "Get session",
         "description": "Retrieve detailed information about a specific Killstata session.",
-        "tags": [
-          "Session"
-        ],
+        "tags": ["Session"],
         "responses": {
           "200": {
             "description": "Get session",
@@ -953,9 +945,7 @@
           }
         ],
         "summary": "Get session children",
-        "tags": [
-          "Session"
-        ],
+        "tags": ["Session"],
         "description": "Retrieve all child sessions that were forked from the specified parent session.",
         "responses": {
           "200": {
@@ -1381,10 +1371,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "providerID",
-                  "modelID"
-                ]
+                "required": ["providerID", "modelID"]
               }
             }
           }
@@ -1447,10 +1434,7 @@
                         }
                       }
                     },
-                    "required": [
-                      "info",
-                      "parts"
-                    ]
+                    "required": ["info", "parts"]
                   }
                 }
               }
@@ -1524,10 +1508,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "info",
-                    "parts"
-                  ]
+                  "required": ["info", "parts"]
                 }
               }
             }
@@ -1573,10 +1554,7 @@
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "providerID",
-                      "modelID"
-                    ]
+                    "required": ["providerID", "modelID"]
                   },
                   "agent": {
                     "type": "string"
@@ -1607,15 +1585,7 @@
                   },
                   "queueActionType": {
                     "type": "string",
-                    "enum": [
-                      "prompt",
-                      "command",
-                      "shell",
-                      "continue",
-                      "retry",
-                      "repair",
-                      "compaction"
-                    ]
+                    "enum": ["prompt", "command", "shell", "continue", "retry", "repair", "compaction"]
                   },
                   "queueMetadata": {
                     "type": "object",
@@ -1626,15 +1596,7 @@
                   },
                   "intent": {
                     "type": "string",
-                    "enum": [
-                      "conversation",
-                      "status",
-                      "repair",
-                      "verify",
-                      "report",
-                      "analysis",
-                      "ingest"
-                    ]
+                    "enum": ["conversation", "status", "repair", "verify", "report", "analysis", "ingest"]
                   },
                   "parts": {
                     "type": "array",
@@ -1656,9 +1618,7 @@
                     }
                   }
                 },
-                "required": [
-                  "parts"
-                ]
+                "required": ["parts"]
               }
             }
           }
@@ -1721,10 +1681,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "info",
-                    "parts"
-                  ]
+                  "required": ["info", "parts"]
                 }
               }
             }
@@ -1993,10 +1950,7 @@
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "providerID",
-                      "modelID"
-                    ]
+                    "required": ["providerID", "modelID"]
                   },
                   "agent": {
                     "type": "string"
@@ -2027,15 +1981,7 @@
                   },
                   "queueActionType": {
                     "type": "string",
-                    "enum": [
-                      "prompt",
-                      "command",
-                      "shell",
-                      "continue",
-                      "retry",
-                      "repair",
-                      "compaction"
-                    ]
+                    "enum": ["prompt", "command", "shell", "continue", "retry", "repair", "compaction"]
                   },
                   "queueMetadata": {
                     "type": "object",
@@ -2046,15 +1992,7 @@
                   },
                   "intent": {
                     "type": "string",
-                    "enum": [
-                      "conversation",
-                      "status",
-                      "repair",
-                      "verify",
-                      "report",
-                      "analysis",
-                      "ingest"
-                    ]
+                    "enum": ["conversation", "status", "repair", "verify", "report", "analysis", "ingest"]
                   },
                   "parts": {
                     "type": "array",
@@ -2076,9 +2014,7 @@
                     }
                   }
                 },
-                "required": [
-                  "parts"
-                ]
+                "required": ["parts"]
               }
             }
           }
@@ -2132,10 +2068,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "info",
-                    "parts"
-                  ]
+                  "required": ["info", "parts"]
                 }
               }
             }
@@ -2213,20 +2146,13 @@
                               "$ref": "#/components/schemas/FilePartSource"
                             }
                           },
-                          "required": [
-                            "type",
-                            "mime",
-                            "url"
-                          ]
+                          "required": ["type", "mime", "url"]
                         }
                       ]
                     }
                   }
                 },
-                "required": [
-                  "arguments",
-                  "command"
-                ]
+                "required": ["arguments", "command"]
               }
             }
           }
@@ -2313,19 +2239,13 @@
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "providerID",
-                      "modelID"
-                    ]
+                    "required": ["providerID", "modelID"]
                   },
                   "command": {
                     "type": "string"
                   }
                 },
-                "required": [
-                  "agent",
-                  "command"
-                ]
+                "required": ["agent", "command"]
               }
             }
           }
@@ -2407,9 +2327,7 @@
                     "pattern": "^prt.*"
                   }
                 },
-                "required": [
-                  "messageID"
-                ]
+                "required": ["messageID"]
               }
             }
           }
@@ -2555,16 +2473,10 @@
                 "properties": {
                   "response": {
                     "type": "string",
-                    "enum": [
-                      "once",
-                      "always",
-                      "reject"
-                    ]
+                    "enum": ["once", "always", "reject"]
                   }
                 },
-                "required": [
-                  "response"
-                ]
+                "required": ["response"]
               }
             }
           }
@@ -2639,19 +2551,13 @@
                 "properties": {
                   "reply": {
                     "type": "string",
-                    "enum": [
-                      "once",
-                      "always",
-                      "reject"
-                    ]
+                    "enum": ["once", "always", "reject"]
                   },
                   "message": {
                     "type": "string"
                   }
                 },
-                "required": [
-                  "reply"
-                ]
+                "required": ["reply"]
               }
             }
           }
@@ -2806,9 +2712,7 @@
                     }
                   }
                 },
-                "required": [
-                  "answers"
-                ]
+                "required": ["answers"]
               }
             }
           }
@@ -2971,15 +2875,10 @@
                                       "properties": {
                                         "field": {
                                           "type": "string",
-                                          "enum": [
-                                            "reasoning_content",
-                                            "reasoning_details"
-                                          ]
+                                          "enum": ["reasoning_content", "reasoning_details"]
                                         }
                                       },
-                                      "required": [
-                                        "field"
-                                      ],
+                                      "required": ["field"],
                                       "additionalProperties": false
                                     }
                                   ]
@@ -3015,16 +2914,10 @@
                                           "type": "number"
                                         }
                                       },
-                                      "required": [
-                                        "input",
-                                        "output"
-                                      ]
+                                      "required": ["input", "output"]
                                     }
                                   },
-                                  "required": [
-                                    "input",
-                                    "output"
-                                  ]
+                                  "required": ["input", "output"]
                                 },
                                 "limit": {
                                   "type": "object",
@@ -3039,10 +2932,7 @@
                                       "type": "number"
                                     }
                                   },
-                                  "required": [
-                                    "context",
-                                    "output"
-                                  ]
+                                  "required": ["context", "output"]
                                 },
                                 "modalities": {
                                   "type": "object",
@@ -3051,44 +2941,25 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string",
-                                        "enum": [
-                                          "text",
-                                          "audio",
-                                          "image",
-                                          "video",
-                                          "pdf"
-                                        ]
+                                        "enum": ["text", "audio", "image", "video", "pdf"]
                                       }
                                     },
                                     "output": {
                                       "type": "array",
                                       "items": {
                                         "type": "string",
-                                        "enum": [
-                                          "text",
-                                          "audio",
-                                          "image",
-                                          "video",
-                                          "pdf"
-                                        ]
+                                        "enum": ["text", "audio", "image", "video", "pdf"]
                                       }
                                     }
                                   },
-                                  "required": [
-                                    "input",
-                                    "output"
-                                  ]
+                                  "required": ["input", "output"]
                                 },
                                 "experimental": {
                                   "type": "boolean"
                                 },
                                 "status": {
                                   "type": "string",
-                                  "enum": [
-                                    "alpha",
-                                    "beta",
-                                    "deprecated"
-                                  ]
+                                  "enum": ["alpha", "beta", "deprecated"]
                                 },
                                 "options": {
                                   "type": "object",
@@ -3113,9 +2984,7 @@
                                       "type": "string"
                                     }
                                   },
-                                  "required": [
-                                    "npm"
-                                  ]
+                                  "required": ["npm"]
                                 },
                                 "variants": {
                                   "type": "object",
@@ -3145,12 +3014,7 @@
                             }
                           }
                         },
-                        "required": [
-                          "name",
-                          "env",
-                          "id",
-                          "models"
-                        ]
+                        "required": ["name", "env", "id", "models"]
                       }
                     },
                     "default": {
@@ -3169,11 +3033,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "all",
-                    "default",
-                    "connected"
-                  ]
+                  "required": ["all", "default", "connected"]
                 }
               }
             }
@@ -3286,9 +3146,7 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "method"
-                ]
+                "required": ["method"]
               }
             }
           }
@@ -3361,9 +3219,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "method"
-                ]
+                "required": ["method"]
               }
             }
           }
@@ -3415,9 +3271,7 @@
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "text"
-                        ]
+                        "required": ["text"]
                       },
                       "lines": {
                         "type": "object",
@@ -3426,9 +3280,7 @@
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "text"
-                        ]
+                        "required": ["text"]
                       },
                       "line_number": {
                         "type": "number"
@@ -3448,9 +3300,7 @@
                                   "type": "string"
                                 }
                               },
-                              "required": [
-                                "text"
-                              ]
+                              "required": ["text"]
                             },
                             "start": {
                               "type": "number"
@@ -3459,21 +3309,11 @@
                               "type": "number"
                             }
                           },
-                          "required": [
-                            "match",
-                            "start",
-                            "end"
-                          ]
+                          "required": ["match", "start", "end"]
                         }
                       }
                     },
-                    "required": [
-                      "path",
-                      "lines",
-                      "line_number",
-                      "absolute_offset",
-                      "submatches"
-                    ]
+                    "required": ["path", "lines", "line_number", "absolute_offset", "submatches"]
                   }
                 }
               }
@@ -3512,10 +3352,7 @@
             "name": "dirs",
             "schema": {
               "type": "string",
-              "enum": [
-                "true",
-                "false"
-              ]
+              "enum": ["true", "false"]
             }
           },
           {
@@ -3523,10 +3360,7 @@
             "name": "type",
             "schema": {
               "type": "string",
-              "enum": [
-                "file",
-                "directory"
-              ]
+              "enum": ["file", "directory"]
             }
           },
           {
@@ -3651,9 +3485,9 @@
         ]
       }
     },
-    "/file/status": {
+    "/data/files": {
       "get": {
-        "operationId": "file.status",
+        "operationId": "data.files",
         "parameters": [
           {
             "in": "query",
@@ -3661,19 +3495,36 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "schema": {
+              "default": "",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
           }
         ],
-        "summary": "Get file status",
-        "description": "Get the git status of all files in the project.",
+        "summary": "Find importable data files",
+        "description": "List CSV, Excel, and Stata files that KillStata can import from the current project.",
         "responses": {
           "200": {
-            "description": "File status",
+            "description": "Relative data file paths",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/File"
+                    "type": "string"
                   }
                 }
               }
@@ -3683,7 +3534,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createKillstataClient } from \"@killstata/sdk\n\nconst client = createKillstataClient()\nawait client.file.status({\n  ...\n})"
+            "source": "import { createKillstataClient } from \"@killstata/sdk\n\nconst client = createKillstataClient()\nawait client.data.files({\n  ...\n})"
           }
         ]
       }
@@ -3788,10 +3639,7 @@
                     ]
                   }
                 },
-                "required": [
-                  "name",
-                  "config"
-                ]
+                "required": ["name", "config"]
               }
             }
           }
@@ -3839,9 +3687,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "authorizationUrl"
-                  ]
+                  "required": ["authorizationUrl"]
                 }
               }
             }
@@ -3908,9 +3754,7 @@
                       "const": true
                     }
                   },
-                  "required": [
-                    "success"
-                  ]
+                  "required": ["success"]
                 }
               }
             }
@@ -3999,9 +3843,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "code"
-                ]
+                "required": ["code"]
               }
             }
           }
@@ -4204,9 +4046,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "text"
-                ]
+                "required": ["text"]
               }
             }
           }
@@ -4469,9 +4309,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "command"
-                ]
+                "required": ["command"]
               }
             }
           }
@@ -4524,12 +4362,7 @@
                   },
                   "variant": {
                     "type": "string",
-                    "enum": [
-                      "info",
-                      "success",
-                      "warning",
-                      "error"
-                    ]
+                    "enum": ["info", "success", "warning", "error"]
                   },
                   "duration": {
                     "description": "Duration in milliseconds",
@@ -4537,10 +4370,7 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "message",
-                  "variant"
-                ]
+                "required": ["message", "variant"]
               }
             }
           }
@@ -4677,9 +4507,7 @@
                     "pattern": "^ses"
                   }
                 },
-                "required": [
-                  "sessionID"
-                ]
+                "required": ["sessionID"]
               }
             }
           }
@@ -4719,10 +4547,7 @@
                     },
                     "body": {}
                   },
-                  "required": [
-                    "path",
-                    "body"
-                  ]
+                  "required": ["path", "body"]
                 }
               }
             }
@@ -4845,40 +4670,6 @@
         ]
       }
     },
-    "/vcs": {
-      "get": {
-        "operationId": "vcs.get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "directory",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "summary": "Get VCS info",
-        "description": "Retrieve version control system (VCS) information for the current project, such as git branch.",
-        "responses": {
-          "200": {
-            "description": "VCS info",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VcsInfo"
-                }
-              }
-            }
-          }
-        },
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createKillstataClient } from \"@killstata/sdk\n\nconst client = createKillstataClient()\nawait client.vcs.get({\n  ...\n})"
-          }
-        ]
-      }
-    },
     "/command": {
       "get": {
         "operationId": "command.list",
@@ -4965,12 +4756,7 @@
                   "level": {
                     "description": "Log level",
                     "type": "string",
-                    "enum": [
-                      "debug",
-                      "info",
-                      "error",
-                      "warn"
-                    ]
+                    "enum": ["debug", "info", "error", "warn"]
                   },
                   "message": {
                     "description": "Log message",
@@ -4985,11 +4771,7 @@
                     "additionalProperties": {}
                   }
                 },
-                "required": [
-                  "service",
-                  "level",
-                  "message"
-                ]
+                "required": ["service", "level", "message"]
               }
             }
           }
@@ -5077,12 +4859,7 @@
                         "const": "user"
                       }
                     },
-                    "required": [
-                      "name",
-                      "description",
-                      "location",
-                      "source"
-                    ]
+                    "required": ["name", "description", "location", "source"]
                   }
                 }
               }
@@ -5204,10 +4981,6 @@
           "worktree": {
             "type": "string"
           },
-          "vcs": {
-            "type": "string",
-            "const": "git"
-          },
           "name": {
             "type": "string"
           },
@@ -5238,10 +5011,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "created",
-              "updated"
-            ]
+            "required": ["created", "updated"]
           },
           "sandboxes": {
             "type": "array",
@@ -5250,12 +5020,7 @@
             }
           }
         },
-        "required": [
-          "id",
-          "worktree",
-          "time",
-          "sandboxes"
-        ]
+        "required": ["id", "worktree", "time", "sandboxes"]
       },
       "Event.project.updated": {
         "type": "object",
@@ -5268,58 +5033,7 @@
             "$ref": "#/components/schemas/Project"
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
-      },
-      "Event.installation.updated": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "installation.updated"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "version": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "version"
-            ]
-          }
-        },
-        "required": [
-          "type",
-          "properties"
-        ]
-      },
-      "Event.installation.update-available": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "installation.update-available"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "version": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "version"
-            ]
-          }
-        },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.server.instance.disposed": {
         "type": "object",
@@ -5335,15 +5049,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "directory"
-            ]
+            "required": ["directory"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.server.connected": {
         "type": "object",
@@ -5357,10 +5066,7 @@
             "properties": {}
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.global.disposed": {
         "type": "object",
@@ -5374,10 +5080,45 @@
             "properties": {}
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
+      },
+      "Event.installation.updated": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "installation.updated"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": ["version"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.installation.update-available": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "installation.update-available"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": ["version"]
+          }
+        },
+        "required": ["type", "properties"]
       },
       "UserMessage": {
         "type": "object",
@@ -5399,9 +5140,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "created"
-            ]
+            "required": ["created"]
           },
           "summary": {
             "type": "object",
@@ -5427,10 +5166,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "providerID",
-              "modelID"
-            ]
+            "required": ["providerID", "modelID"]
           },
           "system": {
             "type": "string"
@@ -5448,14 +5184,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "role",
-          "time",
-          "agent",
-          "model"
-        ]
+        "required": ["id", "sessionID", "role", "time", "agent", "model"]
       },
       "ProviderAuthError": {
         "type": "object",
@@ -5474,16 +5203,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "providerID",
-              "message"
-            ]
+            "required": ["providerID", "message"]
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "UnknownError": {
         "type": "object",
@@ -5499,15 +5222,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "message"
-            ]
+            "required": ["message"]
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "MessageOutputLengthError": {
         "type": "object",
@@ -5521,10 +5239,7 @@
             "properties": {}
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "MessageAbortedError": {
         "type": "object",
@@ -5540,15 +5255,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "message"
-            ]
+            "required": ["message"]
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "APIError": {
         "type": "object",
@@ -5591,16 +5301,10 @@
                 }
               }
             },
-            "required": [
-              "message",
-              "isRetryable"
-            ]
+            "required": ["message", "isRetryable"]
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "AssistantMessage": {
         "type": "object",
@@ -5625,9 +5329,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "created"
-            ]
+            "required": ["created"]
           },
           "error": {
             "anyOf": [
@@ -5673,10 +5375,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "cwd",
-              "root"
-            ]
+            "required": ["cwd", "root"]
           },
           "summary": {
             "type": "boolean"
@@ -5706,18 +5405,10 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "read",
-                  "write"
-                ]
+                "required": ["read", "write"]
               }
             },
-            "required": [
-              "input",
-              "output",
-              "reasoning",
-              "cache"
-            ]
+            "required": ["input", "output", "reasoning", "cache"]
           },
           "finish": {
             "type": "string"
@@ -5762,15 +5453,10 @@
                 "$ref": "#/components/schemas/Message"
               }
             },
-            "required": [
-              "info"
-            ]
+            "required": ["info"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.message.removed": {
         "type": "object",
@@ -5789,16 +5475,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "sessionID",
-              "messageID"
-            ]
+            "required": ["sessionID", "messageID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "TextPart": {
         "type": "object",
@@ -5835,9 +5515,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "start"
-            ]
+            "required": ["start"]
           },
           "metadata": {
             "type": "object",
@@ -5847,13 +5525,7 @@
             "additionalProperties": {}
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "text"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "text"]
       },
       "ReasoningPart": {
         "type": "object",
@@ -5891,19 +5563,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "start"
-            ]
+            "required": ["start"]
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "text",
-          "time"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "text", "time"]
       },
       "FilePartSourceText": {
         "type": "object",
@@ -5922,11 +5585,7 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "value",
-          "start",
-          "end"
-        ]
+        "required": ["value", "start", "end"]
       },
       "FileSource": {
         "type": "object",
@@ -5942,11 +5601,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "text",
-          "type",
-          "path"
-        ]
+        "required": ["text", "type", "path"]
       },
       "SymbolSource": {
         "type": "object",
@@ -5974,10 +5629,7 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "line",
-                  "character"
-                ]
+                "required": ["line", "character"]
               },
               "end": {
                 "type": "object",
@@ -5989,16 +5641,10 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "line",
-                  "character"
-                ]
+                "required": ["line", "character"]
               }
             },
-            "required": [
-              "start",
-              "end"
-            ]
+            "required": ["start", "end"]
           },
           "name": {
             "type": "string"
@@ -6009,14 +5655,7 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "text",
-          "type",
-          "path",
-          "range",
-          "name",
-          "kind"
-        ]
+        "required": ["text", "type", "path", "range", "name", "kind"]
       },
       "ResourceSource": {
         "type": "object",
@@ -6035,12 +5674,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "text",
-          "type",
-          "clientName",
-          "uri"
-        ]
+        "required": ["text", "type", "clientName", "uri"]
       },
       "FilePartSource": {
         "anyOf": [
@@ -6084,14 +5718,7 @@
             "$ref": "#/components/schemas/FilePartSource"
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "mime",
-          "url"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "mime", "url"]
       },
       "ToolStatePending": {
         "type": "object",
@@ -6111,11 +5738,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "status",
-          "input",
-          "raw"
-        ]
+        "required": ["status", "input", "raw"]
       },
       "ToolStateRunning": {
         "type": "object",
@@ -6148,16 +5771,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "start"
-            ]
+            "required": ["start"]
           }
         },
-        "required": [
-          "status",
-          "input",
-          "time"
-        ]
+        "required": ["status", "input", "time"]
       },
       "ToolStateCompleted": {
         "type": "object",
@@ -6199,10 +5816,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "start",
-              "end"
-            ]
+            "required": ["start", "end"]
           },
           "attachments": {
             "type": "array",
@@ -6211,14 +5825,7 @@
             }
           }
         },
-        "required": [
-          "status",
-          "input",
-          "output",
-          "title",
-          "metadata",
-          "time"
-        ]
+        "required": ["status", "input", "output", "title", "metadata", "time"]
       },
       "ToolStateError": {
         "type": "object",
@@ -6254,18 +5861,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "start",
-              "end"
-            ]
+            "required": ["start", "end"]
           }
         },
-        "required": [
-          "status",
-          "input",
-          "error",
-          "time"
-        ]
+        "required": ["status", "input", "error", "time"]
       },
       "ToolState": {
         "anyOf": [
@@ -6316,15 +5915,7 @@
             "additionalProperties": {}
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "callID",
-          "tool",
-          "state"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "callID", "tool", "state"]
       },
       "StepStartPart": {
         "type": "object",
@@ -6346,12 +5937,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type"
-        ]
+        "required": ["id", "sessionID", "messageID", "type"]
       },
       "StepFinishPart": {
         "type": "object",
@@ -6400,29 +5986,13 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "read",
-                  "write"
-                ]
+                "required": ["read", "write"]
               }
             },
-            "required": [
-              "input",
-              "output",
-              "reasoning",
-              "cache"
-            ]
+            "required": ["input", "output", "reasoning", "cache"]
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "reason",
-          "cost",
-          "tokens"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "reason", "cost", "tokens"]
       },
       "SnapshotPart": {
         "type": "object",
@@ -6444,13 +6014,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "snapshot"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "snapshot"]
       },
       "PatchPart": {
         "type": "object",
@@ -6478,14 +6042,7 @@
             }
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "hash",
-          "files"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "hash", "files"]
       },
       "AgentPart": {
         "type": "object",
@@ -6523,20 +6080,10 @@
                 "maximum": 9007199254740991
               }
             },
-            "required": [
-              "value",
-              "start",
-              "end"
-            ]
+            "required": ["value", "start", "end"]
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "name"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "name"]
       },
       "RetryPart": {
         "type": "object",
@@ -6567,20 +6114,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "created"
-            ]
+            "required": ["created"]
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "attempt",
-          "error",
-          "time"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "attempt", "error", "time"]
       },
       "CompactionPart": {
         "type": "object",
@@ -6602,13 +6139,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "auto"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "auto"]
       },
       "Part": {
         "anyOf": [
@@ -6650,24 +6181,13 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "providerID",
-                  "modelID"
-                ]
+                "required": ["providerID", "modelID"]
               },
               "command": {
                 "type": "string"
               }
             },
-            "required": [
-              "id",
-              "sessionID",
-              "messageID",
-              "type",
-              "prompt",
-              "description",
-              "agent"
-            ]
+            "required": ["id", "sessionID", "messageID", "type", "prompt", "description", "agent"]
           },
           {
             "$ref": "#/components/schemas/ReasoningPart"
@@ -6718,15 +6238,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "part"
-            ]
+            "required": ["part"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.message.part.removed": {
         "type": "object",
@@ -6748,17 +6263,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "sessionID",
-              "messageID",
-              "partID"
-            ]
+            "required": ["sessionID", "messageID", "partID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "PermissionRequest": {
         "type": "object",
@@ -6803,20 +6311,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "messageID",
-              "callID"
-            ]
+            "required": ["messageID", "callID"]
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "permission",
-          "patterns",
-          "metadata",
-          "always"
-        ]
+        "required": ["id", "sessionID", "permission", "patterns", "metadata", "always"]
       },
       "Event.permission.asked": {
         "type": "object",
@@ -6829,10 +6327,7 @@
             "$ref": "#/components/schemas/PermissionRequest"
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.permission.replied": {
         "type": "object",
@@ -6852,32 +6347,17 @@
               },
               "reply": {
                 "type": "string",
-                "enum": [
-                  "once",
-                  "always",
-                  "reject"
-                ]
+                "enum": ["once", "always", "reject"]
               }
             },
-            "required": [
-              "sessionID",
-              "requestID",
-              "reply"
-            ]
+            "required": ["sessionID", "requestID", "reply"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "PermissionAction": {
         "type": "string",
-        "enum": [
-          "allow",
-          "deny",
-          "ask"
-        ]
+        "enum": ["allow", "deny", "ask"]
       },
       "PermissionRule": {
         "type": "object",
@@ -6892,11 +6372,7 @@
             "$ref": "#/components/schemas/PermissionAction"
           }
         },
-        "required": [
-          "permission",
-          "pattern",
-          "action"
-        ]
+        "required": ["permission", "pattern", "action"]
       },
       "PermissionRuleset": {
         "type": "array",
@@ -6931,9 +6407,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "url"
-            ]
+            "required": ["url"]
           },
           "title": {
             "type": "string"
@@ -6957,10 +6431,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "created",
-              "updated"
-            ]
+            "required": ["created", "updated"]
           },
           "permission": {
             "$ref": "#/components/schemas/PermissionRuleset"
@@ -6987,27 +6458,13 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "datasetId",
-                  "stageId",
-                  "undoneAction"
-                ]
+                "required": ["datasetId", "stageId", "undoneAction"]
               }
             },
-            "required": [
-              "messageID"
-            ]
+            "required": ["messageID"]
           }
         },
-        "required": [
-          "id",
-          "slug",
-          "projectID",
-          "directory",
-          "title",
-          "version",
-          "time"
-        ]
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"]
       },
       "Event.session.created": {
         "type": "object",
@@ -7023,15 +6480,10 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": [
-              "info"
-            ]
+            "required": ["info"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.session.updated": {
         "type": "object",
@@ -7047,15 +6499,10 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": [
-              "info"
-            ]
+            "required": ["info"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.session.deleted": {
         "type": "object",
@@ -7071,15 +6518,10 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": [
-              "info"
-            ]
+            "required": ["info"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.session.error": {
         "type": "object",
@@ -7116,10 +6558,26 @@
             }
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
+      },
+      "Event.file.edited": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "file.edited"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              }
+            },
+            "required": ["file"]
+          }
+        },
+        "required": ["type", "properties"]
       },
       "Event.tui.prompt.append": {
         "type": "object",
@@ -7135,15 +6593,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "text"
-            ]
+            "required": ["text"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.tui.command.execute": {
         "type": "object",
@@ -7184,15 +6637,10 @@
                 ]
               }
             },
-            "required": [
-              "command"
-            ]
+            "required": ["command"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.tui.toast.show": {
         "type": "object",
@@ -7212,12 +6660,7 @@
               },
               "variant": {
                 "type": "string",
-                "enum": [
-                  "info",
-                  "success",
-                  "warning",
-                  "error"
-                ]
+                "enum": ["info", "success", "warning", "error"]
               },
               "duration": {
                 "description": "Duration in milliseconds",
@@ -7225,16 +6668,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "message",
-              "variant"
-            ]
+            "required": ["message", "variant"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.tui.session.select": {
         "type": "object",
@@ -7252,77 +6689,10 @@
                 "pattern": "^ses"
               }
             },
-            "required": [
-              "sessionID"
-            ]
+            "required": ["sessionID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
-      },
-      "Event.file.watcher.updated": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "file.watcher.updated"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "file": {
-                "type": "string"
-              },
-              "event": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "const": "add"
-                  },
-                  {
-                    "type": "string",
-                    "const": "change"
-                  },
-                  {
-                    "type": "string",
-                    "const": "unlink"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "file",
-              "event"
-            ]
-          }
-        },
-        "required": [
-          "type",
-          "properties"
-        ]
-      },
-      "Event.vcs.branch.updated": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "vcs.branch.updated"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "branch": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.mcp.tools.changed": {
         "type": "object",
@@ -7338,15 +6708,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "server"
-            ]
+            "required": ["server"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.mcp.browser.open.failed": {
         "type": "object",
@@ -7365,16 +6730,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "mcpName",
-              "url"
-            ]
+            "required": ["mcpName", "url"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.command.executed": {
         "type": "object",
@@ -7401,195 +6760,10 @@
                 "pattern": "^msg.*"
               }
             },
-            "required": [
-              "name",
-              "sessionID",
-              "arguments",
-              "messageID"
-            ]
+            "required": ["name", "sessionID", "arguments", "messageID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
-      },
-      "QuestionOption": {
-        "type": "object",
-        "properties": {
-          "label": {
-            "description": "Display text (1-5 words, concise)",
-            "type": "string",
-            "maxLength": 30
-          },
-          "description": {
-            "description": "Explanation of choice",
-            "type": "string"
-          }
-        },
-        "required": [
-          "label",
-          "description"
-        ]
-      },
-      "QuestionInfo": {
-        "type": "object",
-        "properties": {
-          "question": {
-            "description": "Complete question",
-            "type": "string"
-          },
-          "header": {
-            "description": "Very short label (max 30 chars)",
-            "type": "string",
-            "maxLength": 30
-          },
-          "options": {
-            "description": "Available choices",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/QuestionOption"
-            }
-          },
-          "multiple": {
-            "description": "Allow selecting multiple choices",
-            "type": "boolean"
-          },
-          "custom": {
-            "description": "Allow typing a custom answer (default: true)",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "question",
-          "header",
-          "options"
-        ]
-      },
-      "QuestionRequest": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^que.*"
-          },
-          "sessionID": {
-            "type": "string",
-            "pattern": "^ses.*"
-          },
-          "questions": {
-            "description": "Questions to ask",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/QuestionInfo"
-            }
-          },
-          "tool": {
-            "type": "object",
-            "properties": {
-              "messageID": {
-                "type": "string"
-              },
-              "callID": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "messageID",
-              "callID"
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "sessionID",
-          "questions"
-        ]
-      },
-      "Event.question.asked": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "question.asked"
-          },
-          "properties": {
-            "$ref": "#/components/schemas/QuestionRequest"
-          }
-        },
-        "required": [
-          "type",
-          "properties"
-        ]
-      },
-      "QuestionAnswer": {
-        "type": "array",
-        "items": {
-          "type": "string"
-        }
-      },
-      "Event.question.replied": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "question.replied"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string"
-              },
-              "requestID": {
-                "type": "string"
-              },
-              "answers": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/QuestionAnswer"
-                }
-              }
-            },
-            "required": [
-              "sessionID",
-              "requestID",
-              "answers"
-            ]
-          }
-        },
-        "required": [
-          "type",
-          "properties"
-        ]
-      },
-      "Event.question.rejected": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "question.rejected"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string"
-              },
-              "requestID": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "sessionID",
-              "requestID"
-            ]
-          }
-        },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.query.state": {
         "type": "object",
@@ -7606,12 +6780,7 @@
               },
               "phase": {
                 "type": "string",
-                "enum": [
-                  "idle",
-                  "accepted",
-                  "dispatching",
-                  "running"
-                ]
+                "enum": ["idle", "accepted", "dispatching", "running"]
               },
               "generation": {
                 "type": "integer",
@@ -7627,18 +6796,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "sessionID",
-              "phase",
-              "generation",
-              "pending"
-            ]
+            "required": ["sessionID", "phase", "generation", "pending"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.queue.updated": {
         "type": "object",
@@ -7676,26 +6837,14 @@
                       "type": "number"
                     }
                   },
-                  "required": [
-                    "id",
-                    "type",
-                    "priority",
-                    "createdAt"
-                  ]
+                  "required": ["id", "type", "priority", "createdAt"]
                 }
               }
             },
-            "required": [
-              "sessionID",
-              "pending",
-              "actions"
-            ]
+            "required": ["sessionID", "pending", "actions"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.task.updated": {
         "type": "object",
@@ -7724,15 +6873,7 @@
                   },
                   "status": {
                     "type": "string",
-                    "enum": [
-                      "queued",
-                      "dispatching",
-                      "running",
-                      "completed",
-                      "failed",
-                      "cancelled",
-                      "restored"
-                    ]
+                    "enum": ["queued", "dispatching", "running", "completed", "failed", "cancelled", "restored"]
                   },
                   "priority": {
                     "type": "number"
@@ -7779,11 +6920,7 @@
                   },
                   "verifierStatus": {
                     "type": "string",
-                    "enum": [
-                      "pass",
-                      "warn",
-                      "block"
-                    ]
+                    "enum": ["pass", "warn", "block"]
                   },
                   "repairOnly": {
                     "type": "boolean"
@@ -7825,27 +6962,13 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "taskId",
-                  "sessionID",
-                  "actionType",
-                  "status",
-                  "priority",
-                  "createdAt",
-                  "updatedAt"
-                ]
+                "required": ["taskId", "sessionID", "actionType", "status", "priority", "createdAt", "updatedAt"]
               }
             },
-            "required": [
-              "sessionID",
-              "task"
-            ]
+            "required": ["sessionID", "task"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.timeline.event": {
         "type": "object",
@@ -7895,25 +7018,13 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "id",
-                  "taskId",
-                  "sessionID",
-                  "kind",
-                  "createdAt"
-                ]
+                "required": ["id", "taskId", "sessionID", "kind", "createdAt"]
               }
             },
-            "required": [
-              "sessionID",
-              "event"
-            ]
+            "required": ["sessionID", "event"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.checkpoint.created": {
         "type": "object",
@@ -7961,11 +7072,7 @@
                   },
                   "verifierStatus": {
                     "type": "string",
-                    "enum": [
-                      "pass",
-                      "warn",
-                      "block"
-                    ]
+                    "enum": ["pass", "warn", "block"]
                   },
                   "repairOnly": {
                     "type": "boolean"
@@ -7981,23 +7088,13 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "checkpointId",
-                  "sessionID",
-                  "createdAt"
-                ]
+                "required": ["checkpointId", "sessionID", "createdAt"]
               }
             },
-            "required": [
-              "sessionID",
-              "checkpoint"
-            ]
+            "required": ["sessionID", "checkpoint"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.restore.completed": {
         "type": "object",
@@ -8045,11 +7142,7 @@
                   },
                   "verifierStatus": {
                     "type": "string",
-                    "enum": [
-                      "pass",
-                      "warn",
-                      "block"
-                    ]
+                    "enum": ["pass", "warn", "block"]
                   },
                   "repairOnly": {
                     "type": "boolean"
@@ -8065,26 +7158,16 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "checkpointId",
-                  "sessionID",
-                  "createdAt"
-                ]
+                "required": ["checkpointId", "sessionID", "createdAt"]
               },
               "restoredTaskId": {
                 "type": "string"
               }
             },
-            "required": [
-              "sessionID",
-              "checkpoint"
-            ]
+            "required": ["sessionID", "checkpoint"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.protocol.event": {
         "type": "object",
@@ -8113,15 +7196,7 @@
                   },
                   "source": {
                     "type": "string",
-                    "enum": [
-                      "runtime",
-                      "workflow",
-                      "tool",
-                      "verifier",
-                      "task-ledger",
-                      "agent-control",
-                      "context"
-                    ]
+                    "enum": ["runtime", "workflow", "tool", "verifier", "task-ledger", "agent-control", "context"]
                   },
                   "event": {
                     "type": "object",
@@ -8140,11 +7215,7 @@
                         "additionalProperties": {}
                       }
                     },
-                    "required": [
-                      "type",
-                      "sessionID",
-                      "payload"
-                    ]
+                    "required": ["type", "sessionID", "payload"]
                   },
                   "createdAt": {
                     "type": "string"
@@ -8157,25 +7228,13 @@
                     "additionalProperties": {}
                   }
                 },
-                "required": [
-                  "version",
-                  "sequence",
-                  "sessionID",
-                  "source",
-                  "event",
-                  "createdAt"
-                ]
+                "required": ["version", "sequence", "sessionID", "source", "event", "createdAt"]
               }
             },
-            "required": [
-              "envelope"
-            ]
+            "required": ["envelope"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.exec_policy.decision": {
         "type": "object",
@@ -8207,11 +7266,7 @@
                   },
                   "action": {
                     "type": "string",
-                    "enum": [
-                      "allow",
-                      "ask",
-                      "deny"
-                    ]
+                    "enum": ["allow", "ask", "deny"]
                   },
                   "reason": {
                     "type": "string"
@@ -8224,38 +7279,19 @@
                   },
                   "filesystemRisk": {
                     "type": "string",
-                    "enum": [
-                      "none",
-                      "external_write",
-                      "destructive",
-                      "trusted_artifact_overwrite"
-                    ]
+                    "enum": ["none", "external_write", "destructive", "trusted_artifact_overwrite"]
                   },
                   "createdAt": {
                     "type": "string"
                   }
                 },
-                "required": [
-                  "decisionId",
-                  "sessionID",
-                  "toolName",
-                  "command",
-                  "action",
-                  "reason",
-                  "createdAt"
-                ]
+                "required": ["decisionId", "sessionID", "toolName", "command", "action", "reason", "createdAt"]
               }
             },
-            "required": [
-              "sessionID",
-              "decision"
-            ]
+            "required": ["sessionID", "decision"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.context.snapshot": {
         "type": "object",
@@ -8324,16 +7360,10 @@
                 ]
               }
             },
-            "required": [
-              "sessionID",
-              "snapshot"
-            ]
+            "required": ["sessionID", "snapshot"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.agent_control.state": {
         "type": "object",
@@ -8356,19 +7386,11 @@
                   },
                   "activeAgent": {
                     "type": "string",
-                    "enum": [
-                      "explore",
-                      "general",
-                      "verifier"
-                    ]
+                    "enum": ["explore", "general", "verifier"]
                   },
                   "forkMode": {
                     "type": "string",
-                    "enum": [
-                      "minimal_context",
-                      "last_n_turns",
-                      "workflow_slice"
-                    ]
+                    "enum": ["minimal_context", "last_n_turns", "workflow_slice"]
                   },
                   "decisions": {
                     "type": "array",
@@ -8394,24 +7416,13 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "sessionID",
-                  "decisions",
-                  "messages",
-                  "updatedAt"
-                ]
+                "required": ["sessionID", "decisions", "messages", "updatedAt"]
               }
             },
-            "required": [
-              "sessionID",
-              "state"
-            ]
+            "required": ["sessionID", "state"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.tool.batch": {
         "type": "object",
@@ -8444,25 +7455,14 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "toolName",
-                    "callID"
-                  ]
+                  "required": ["toolName", "callID"]
                 }
               }
             },
-            "required": [
-              "sessionID",
-              "batchId",
-              "parallel",
-              "toolCalls"
-            ]
+            "required": ["sessionID", "batchId", "parallel", "toolCalls"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.tool.lifecycle": {
         "type": "object",
@@ -8485,29 +7485,16 @@
               },
               "phase": {
                 "type": "string",
-                "enum": [
-                  "queued",
-                  "running",
-                  "completed",
-                  "failed"
-                ]
+                "enum": ["queued", "running", "completed", "failed"]
               },
               "batchId": {
                 "type": "string"
               }
             },
-            "required": [
-              "sessionID",
-              "callID",
-              "toolName",
-              "phase"
-            ]
+            "required": ["sessionID", "callID", "toolName", "phase"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.compaction": {
         "type": "object",
@@ -8524,12 +7511,7 @@
               },
               "phase": {
                 "type": "string",
-                "enum": [
-                  "snapshot",
-                  "trim",
-                  "collapse",
-                  "autocompact"
-                ]
+                "enum": ["snapshot", "trim", "collapse", "autocompact"]
               },
               "details": {
                 "type": "object",
@@ -8539,16 +7521,10 @@
                 "additionalProperties": {}
               }
             },
-            "required": [
-              "sessionID",
-              "phase"
-            ]
+            "required": ["sessionID", "phase"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.subagent.lifecycle": {
         "type": "object",
@@ -8571,26 +7547,13 @@
               },
               "phase": {
                 "type": "string",
-                "enum": [
-                  "queued",
-                  "running",
-                  "completed",
-                  "failed"
-                ]
+                "enum": ["queued", "running", "completed", "failed"]
               }
             },
-            "required": [
-              "sessionID",
-              "subagentSessionID",
-              "agent",
-              "phase"
-            ]
+            "required": ["sessionID", "subagentSessionID", "agent", "phase"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.runtime.workflow.state": {
         "type": "object",
@@ -8610,10 +7573,7 @@
               },
               "workflowLocale": {
                 "type": "string",
-                "enum": [
-                  "zh-CN",
-                  "en"
-                ]
+                "enum": ["zh-CN", "en"]
               },
               "branch": {
                 "type": "string"
@@ -8626,11 +7586,7 @@
               },
               "activeCoordinatorAgent": {
                 "type": "string",
-                "enum": [
-                  "explore",
-                  "general",
-                  "verifier"
-                ]
+                "enum": ["explore", "general", "verifier"]
               },
               "repairOnly": {
                 "type": "boolean"
@@ -8640,11 +7596,7 @@
               },
               "verifierStatus": {
                 "type": "string",
-                "enum": [
-                  "pass",
-                  "warn",
-                  "block"
-                ]
+                "enum": ["pass", "warn", "block"]
               },
               "trustedArtifacts": {
                 "default": [],
@@ -8658,11 +7610,7 @@
               },
               "approvalStatus": {
                 "type": "string",
-                "enum": [
-                  "required",
-                  "approved",
-                  "declined"
-                ]
+                "enum": ["required", "approved", "declined"]
               },
               "currentChecklistItem": {
                 "type": "object",
@@ -8675,19 +7623,10 @@
                   },
                   "status": {
                     "type": "string",
-                    "enum": [
-                      "pending",
-                      "in_progress",
-                      "completed",
-                      "blocked"
-                    ]
+                    "enum": ["pending", "in_progress", "completed", "blocked"]
                   }
                 },
-                "required": [
-                  "id",
-                  "label",
-                  "status"
-                ]
+                "required": ["id", "label", "status"]
               },
               "analysisChecklist": {
                 "default": [],
@@ -8703,12 +7642,7 @@
                     },
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "pending",
-                        "in_progress",
-                        "completed",
-                        "blocked"
-                      ]
+                      "enum": ["pending", "in_progress", "completed", "blocked"]
                     },
                     "linkedStageId": {
                       "type": "string"
@@ -8717,23 +7651,161 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "id",
-                    "label",
-                    "status"
-                  ]
+                  "required": ["id", "label", "status"]
                 }
               }
             },
-            "required": [
-              "sessionID"
-            ]
+            "required": ["sessionID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
+      },
+      "QuestionOption": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "description": "Display text (1-5 words, concise)",
+            "type": "string",
+            "maxLength": 30
+          },
+          "description": {
+            "description": "Explanation of choice",
+            "type": "string"
+          }
+        },
+        "required": ["label", "description"]
+      },
+      "QuestionInfo": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "description": "Complete question",
+            "type": "string"
+          },
+          "header": {
+            "description": "Very short label (max 30 chars)",
+            "type": "string",
+            "maxLength": 30
+          },
+          "options": {
+            "description": "Available choices",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuestionOption"
+            }
+          },
+          "multiple": {
+            "description": "Allow selecting multiple choices",
+            "type": "boolean"
+          },
+          "custom": {
+            "description": "Allow typing a custom answer (default: true)",
+            "type": "boolean"
+          }
+        },
+        "required": ["question", "header", "options"]
+      },
+      "QuestionRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^que.*"
+          },
+          "sessionID": {
+            "type": "string",
+            "pattern": "^ses.*"
+          },
+          "questions": {
+            "description": "Questions to ask",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuestionInfo"
+            }
+          },
+          "tool": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string"
+              },
+              "callID": {
+                "type": "string"
+              }
+            },
+            "required": ["messageID", "callID"]
+          }
+        },
+        "required": ["id", "sessionID", "questions"]
+      },
+      "Event.question.asked": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "question.asked"
+          },
+          "properties": {
+            "$ref": "#/components/schemas/QuestionRequest"
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "QuestionAnswer": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "Event.question.replied": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "question.replied"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string"
+              },
+              "requestID": {
+                "type": "string"
+              },
+              "answers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/QuestionAnswer"
+                }
+              }
+            },
+            "required": ["sessionID", "requestID", "answers"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "Event.question.rejected": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "question.rejected"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string"
+              },
+              "requestID": {
+                "type": "string"
+              }
+            },
+            "required": ["sessionID", "requestID"]
+          }
+        },
+        "required": ["type", "properties"]
       },
       "SessionStatus": {
         "anyOf": [
@@ -8745,9 +7817,7 @@
                 "const": "idle"
               }
             },
-            "required": [
-              "type"
-            ]
+            "required": ["type"]
           },
           {
             "type": "object",
@@ -8766,12 +7836,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "type",
-              "attempt",
-              "message",
-              "next"
-            ]
+            "required": ["type", "attempt", "message", "next"]
           },
           {
             "type": "object",
@@ -8781,9 +7846,7 @@
                 "const": "busy"
               }
             },
-            "required": [
-              "type"
-            ]
+            "required": ["type"]
           },
           {
             "type": "object",
@@ -8802,12 +7865,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "type",
-              "tool",
-              "retryStage",
-              "message"
-            ]
+            "required": ["type", "tool", "retryStage", "message"]
           }
         ]
       },
@@ -8828,16 +7886,10 @@
                 "$ref": "#/components/schemas/SessionStatus"
               }
             },
-            "required": [
-              "sessionID",
-              "status"
-            ]
+            "required": ["sessionID", "status"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.session.idle": {
         "type": "object",
@@ -8853,15 +7905,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "sessionID"
-            ]
+            "required": ["sessionID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Todo": {
         "type": "object",
@@ -8883,12 +7930,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "content",
-          "status",
-          "priority",
-          "id"
-        ]
+        "required": ["content", "status", "priority", "id"]
       },
       "Event.todo.updated": {
         "type": "object",
@@ -8910,16 +7952,10 @@
                 }
               }
             },
-            "required": [
-              "sessionID",
-              "todos"
-            ]
+            "required": ["sessionID", "todos"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.session.compacted": {
         "type": "object",
@@ -8935,50 +7971,15 @@
                 "type": "string"
               }
             },
-            "required": [
-              "sessionID"
-            ]
+            "required": ["sessionID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
-      },
-      "Event.file.edited": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "file.edited"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "file": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "file"
-            ]
-          }
-        },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event": {
         "anyOf": [
           {
             "$ref": "#/components/schemas/Event.project.updated"
-          },
-          {
-            "$ref": "#/components/schemas/Event.installation.updated"
-          },
-          {
-            "$ref": "#/components/schemas/Event.installation.update-available"
           },
           {
             "$ref": "#/components/schemas/Event.server.instance.disposed"
@@ -8988,6 +7989,12 @@
           },
           {
             "$ref": "#/components/schemas/Event.global.disposed"
+          },
+          {
+            "$ref": "#/components/schemas/Event.installation.updated"
+          },
+          {
+            "$ref": "#/components/schemas/Event.installation.update-available"
           },
           {
             "$ref": "#/components/schemas/Event.message.updated"
@@ -9020,6 +8027,9 @@
             "$ref": "#/components/schemas/Event.session.error"
           },
           {
+            "$ref": "#/components/schemas/Event.file.edited"
+          },
+          {
             "$ref": "#/components/schemas/Event.tui.prompt.append"
           },
           {
@@ -9032,12 +8042,6 @@
             "$ref": "#/components/schemas/Event.tui.session.select"
           },
           {
-            "$ref": "#/components/schemas/Event.file.watcher.updated"
-          },
-          {
-            "$ref": "#/components/schemas/Event.vcs.branch.updated"
-          },
-          {
             "$ref": "#/components/schemas/Event.mcp.tools.changed"
           },
           {
@@ -9045,15 +8049,6 @@
           },
           {
             "$ref": "#/components/schemas/Event.command.executed"
-          },
-          {
-            "$ref": "#/components/schemas/Event.question.asked"
-          },
-          {
-            "$ref": "#/components/schemas/Event.question.replied"
-          },
-          {
-            "$ref": "#/components/schemas/Event.question.rejected"
           },
           {
             "$ref": "#/components/schemas/Event.runtime.query.state"
@@ -9101,6 +8096,15 @@
             "$ref": "#/components/schemas/Event.runtime.workflow.state"
           },
           {
+            "$ref": "#/components/schemas/Event.question.asked"
+          },
+          {
+            "$ref": "#/components/schemas/Event.question.replied"
+          },
+          {
+            "$ref": "#/components/schemas/Event.question.rejected"
+          },
+          {
             "$ref": "#/components/schemas/Event.session.status"
           },
           {
@@ -9111,9 +8115,6 @@
           },
           {
             "$ref": "#/components/schemas/Event.session.compacted"
-          },
-          {
-            "$ref": "#/components/schemas/Event.file.edited"
           }
         ]
       },
@@ -9127,10 +8128,7 @@
             "$ref": "#/components/schemas/Event"
           }
         },
-        "required": [
-          "directory",
-          "payload"
-        ]
+        "required": ["directory", "payload"]
       },
       "BadRequestError": {
         "type": "object",
@@ -9151,11 +8149,7 @@
             "const": false
           }
         },
-        "required": [
-          "data",
-          "errors",
-          "success"
-        ]
+        "required": ["data", "errors", "success"]
       },
       "NotFoundError": {
         "type": "object",
@@ -9171,15 +8165,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "message"
-            ]
+            "required": ["message"]
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "KeybindsConfig": {
         "description": "Custom keybind configurations",
@@ -9661,12 +8650,7 @@
       "LogLevel": {
         "description": "Log level",
         "type": "string",
-        "enum": [
-          "DEBUG",
-          "INFO",
-          "WARN",
-          "ERROR"
-        ]
+        "enum": ["DEBUG", "INFO", "WARN", "ERROR"]
       },
       "ServerConfig": {
         "description": "Server configuration for killstata serve and web commands",
@@ -9698,11 +8682,7 @@
       },
       "PermissionActionConfig": {
         "type": "string",
-        "enum": [
-          "ask",
-          "allow",
-          "deny"
-        ]
+        "enum": ["ask", "allow", "deny"]
       },
       "PermissionObjectConfig": {
         "type": "object",
@@ -9823,11 +8803,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "subagent",
-              "primary",
-              "all"
-            ]
+            "enum": ["subagent", "primary", "all"]
           },
           "hidden": {
             "description": "Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)",
@@ -9927,15 +8903,10 @@
                       "properties": {
                         "field": {
                           "type": "string",
-                          "enum": [
-                            "reasoning_content",
-                            "reasoning_details"
-                          ]
+                          "enum": ["reasoning_content", "reasoning_details"]
                         }
                       },
-                      "required": [
-                        "field"
-                      ],
+                      "required": ["field"],
                       "additionalProperties": false
                     }
                   ]
@@ -9971,16 +8942,10 @@
                           "type": "number"
                         }
                       },
-                      "required": [
-                        "input",
-                        "output"
-                      ]
+                      "required": ["input", "output"]
                     }
                   },
-                  "required": [
-                    "input",
-                    "output"
-                  ]
+                  "required": ["input", "output"]
                 },
                 "limit": {
                   "type": "object",
@@ -9995,10 +8960,7 @@
                       "type": "number"
                     }
                   },
-                  "required": [
-                    "context",
-                    "output"
-                  ]
+                  "required": ["context", "output"]
                 },
                 "modalities": {
                   "type": "object",
@@ -10007,44 +8969,25 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": [
-                          "text",
-                          "audio",
-                          "image",
-                          "video",
-                          "pdf"
-                        ]
+                        "enum": ["text", "audio", "image", "video", "pdf"]
                       }
                     },
                     "output": {
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": [
-                          "text",
-                          "audio",
-                          "image",
-                          "video",
-                          "pdf"
-                        ]
+                        "enum": ["text", "audio", "image", "video", "pdf"]
                       }
                     }
                   },
-                  "required": [
-                    "input",
-                    "output"
-                  ]
+                  "required": ["input", "output"]
                 },
                 "experimental": {
                   "type": "boolean"
                 },
                 "status": {
                   "type": "string",
-                  "enum": [
-                    "alpha",
-                    "beta",
-                    "deprecated"
-                  ]
+                  "enum": ["alpha", "beta", "deprecated"]
                 },
                 "options": {
                   "type": "object",
@@ -10069,9 +9012,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "npm"
-                  ]
+                  "required": ["npm"]
                 },
                 "variants": {
                   "description": "Variant-specific configuration",
@@ -10180,10 +9121,7 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "type",
-          "command"
-        ],
+        "required": ["type", "command"],
         "additionalProperties": false
       },
       "McpOAuthConfig": {
@@ -10249,19 +9187,13 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "type",
-          "url"
-        ],
+        "required": ["type", "url"],
         "additionalProperties": false
       },
       "LayoutConfig": {
         "description": "@deprecated Always uses stretch layout.",
         "type": "string",
-        "enum": [
-          "auto",
-          "stretch"
-        ]
+        "enum": ["auto", "stretch"]
       },
       "KillstataRootDirectoryConfig": {
         "type": "object",
@@ -10415,17 +9347,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "enabled"
-                ]
-              },
-              "diff_style": {
-                "description": "Control diff rendering style: 'auto' adapts to terminal width, 'stacked' always shows single column",
-                "type": "string",
-                "enum": [
-                  "auto",
-                  "stacked"
-                ]
+                "required": ["enabled"]
               },
               "showAdvancedCommands": {
                 "description": "Show internal/debug slash commands and MCP prompt commands in the TUI command menu",
@@ -10472,10 +9394,7 @@
                 },
                 "queueBehavior": {
                   "type": "string",
-                  "enum": [
-                    "queued",
-                    "immediate"
-                  ]
+                  "enum": ["queued", "immediate"]
                 },
                 "workflowAware": {
                   "type": "boolean"
@@ -10505,30 +9424,11 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "template"
-              ]
+              "required": ["template"]
             }
           },
           "disabled_commands": {
             "description": "Command names to suppress from slash-command registration, including custom commands",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "watcher": {
-            "type": "object",
-            "properties": {
-              "ignore": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "plugin": {
             "type": "array",
             "items": {
               "type": "string"
@@ -10540,11 +9440,7 @@
           "share": {
             "description": "Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing",
             "type": "string",
-            "enum": [
-              "manual",
-              "auto",
-              "disabled"
-            ]
+            "enum": ["manual", "auto", "disabled"]
           },
           "autoshare": {
             "description": "@deprecated Use 'share' field instead. Share newly created sessions automatically",
@@ -10672,9 +9568,7 @@
                       "type": "boolean"
                     }
                   },
-                  "required": [
-                    "enabled"
-                  ],
+                  "required": ["enabled"],
                   "additionalProperties": false
                 }
               ]
@@ -10722,13 +9616,6 @@
                 }
               }
             ]
-          },
-          "instructions": {
-            "description": "Additional instruction files or patterns to include",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           },
           "layout": {
             "$ref": "#/components/schemas/LayoutConfig"
@@ -10799,9 +9686,7 @@
                             }
                           }
                         },
-                        "required": [
-                          "command"
-                        ]
+                        "required": ["command"]
                       }
                     }
                   },
@@ -10826,9 +9711,7 @@
                           }
                         }
                       },
-                      "required": [
-                        "command"
-                      ]
+                      "required": ["command"]
                     }
                   }
                 }
@@ -10895,11 +9778,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "id",
-              "url",
-              "npm"
-            ]
+            "required": ["id", "url", "npm"]
           },
           "name": {
             "type": "string"
@@ -10941,13 +9820,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "text",
-                  "audio",
-                  "image",
-                  "video",
-                  "pdf"
-                ]
+                "required": ["text", "audio", "image", "video", "pdf"]
               },
               "output": {
                 "type": "object",
@@ -10968,13 +9841,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "text",
-                  "audio",
-                  "image",
-                  "video",
-                  "pdf"
-                ]
+                "required": ["text", "audio", "image", "video", "pdf"]
               },
               "interleaved": {
                 "anyOf": [
@@ -10986,28 +9853,15 @@
                     "properties": {
                       "field": {
                         "type": "string",
-                        "enum": [
-                          "reasoning_content",
-                          "reasoning_details"
-                        ]
+                        "enum": ["reasoning_content", "reasoning_details"]
                       }
                     },
-                    "required": [
-                      "field"
-                    ]
+                    "required": ["field"]
                   }
                 ]
               }
             },
-            "required": [
-              "temperature",
-              "reasoning",
-              "attachment",
-              "toolcall",
-              "input",
-              "output",
-              "interleaved"
-            ]
+            "required": ["temperature", "reasoning", "attachment", "toolcall", "input", "output", "interleaved"]
           },
           "cost": {
             "type": "object",
@@ -11028,10 +9882,7 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "read",
-                  "write"
-                ]
+                "required": ["read", "write"]
               },
               "experimentalOver200K": {
                 "type": "object",
@@ -11052,24 +9903,13 @@
                         "type": "number"
                       }
                     },
-                    "required": [
-                      "read",
-                      "write"
-                    ]
+                    "required": ["read", "write"]
                   }
                 },
-                "required": [
-                  "input",
-                  "output",
-                  "cache"
-                ]
+                "required": ["input", "output", "cache"]
               }
             },
-            "required": [
-              "input",
-              "output",
-              "cache"
-            ]
+            "required": ["input", "output", "cache"]
           },
           "limit": {
             "type": "object",
@@ -11084,19 +9924,11 @@
                 "type": "number"
               }
             },
-            "required": [
-              "context",
-              "output"
-            ]
+            "required": ["context", "output"]
           },
           "status": {
             "type": "string",
-            "enum": [
-              "alpha",
-              "beta",
-              "deprecated",
-              "active"
-            ]
+            "enum": ["alpha", "beta", "deprecated", "active"]
           },
           "options": {
             "type": "object",
@@ -11156,12 +9988,7 @@
           },
           "source": {
             "type": "string",
-            "enum": [
-              "env",
-              "config",
-              "custom",
-              "api"
-            ]
+            "enum": ["env", "config", "custom", "api"]
           },
           "env": {
             "type": "array",
@@ -11189,14 +10016,7 @@
             }
           }
         },
-        "required": [
-          "id",
-          "name",
-          "source",
-          "env",
-          "options",
-          "models"
-        ]
+        "required": ["id", "name", "source", "env", "options", "models"]
       },
       "ToolIDs": {
         "type": "array",
@@ -11215,11 +10035,7 @@
           },
           "parameters": {}
         },
-        "required": [
-          "id",
-          "description",
-          "parameters"
-        ]
+        "required": ["id", "description", "parameters"]
       },
       "ToolList": {
         "type": "array",
@@ -11246,11 +10062,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "name",
-          "uri",
-          "client"
-        ]
+        "required": ["name", "uri", "client"]
       },
       "TextPartInput": {
         "type": "object",
@@ -11281,9 +10093,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "start"
-            ]
+            "required": ["start"]
           },
           "metadata": {
             "type": "object",
@@ -11293,10 +10103,7 @@
             "additionalProperties": {}
           }
         },
-        "required": [
-          "type",
-          "text"
-        ]
+        "required": ["type", "text"]
       },
       "FilePartInput": {
         "type": "object",
@@ -11321,11 +10128,7 @@
             "$ref": "#/components/schemas/FilePartSource"
           }
         },
-        "required": [
-          "type",
-          "mime",
-          "url"
-        ]
+        "required": ["type", "mime", "url"]
       },
       "AgentPartInput": {
         "type": "object",
@@ -11357,17 +10160,10 @@
                 "maximum": 9007199254740991
               }
             },
-            "required": [
-              "value",
-              "start",
-              "end"
-            ]
+            "required": ["value", "start", "end"]
           }
         },
-        "required": [
-          "type",
-          "name"
-        ]
+        "required": ["type", "name"]
       },
       "SubtaskPartInput": {
         "type": "object",
@@ -11398,21 +10194,13 @@
                 "type": "string"
               }
             },
-            "required": [
-              "providerID",
-              "modelID"
-            ]
+            "required": ["providerID", "modelID"]
           },
           "command": {
             "type": "string"
           }
         },
-        "required": [
-          "type",
-          "prompt",
-          "description",
-          "agent"
-        ]
+        "required": ["type", "prompt", "description", "agent"]
       },
       "ProviderAuthMethod": {
         "type": "object",
@@ -11433,10 +10221,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "type",
-          "label"
-        ]
+        "required": ["type", "label"]
       },
       "ProviderAuthAuthorization": {
         "type": "object",
@@ -11460,11 +10245,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "url",
-          "method",
-          "instructions"
-        ]
+        "required": ["url", "method", "instructions"]
       },
       "FileNode": {
         "type": "object",
@@ -11480,22 +10261,13 @@
           },
           "type": {
             "type": "string",
-            "enum": [
-              "file",
-              "directory"
-            ]
+            "enum": ["file", "directory"]
           },
           "ignored": {
             "type": "boolean"
           }
         },
-        "required": [
-          "name",
-          "path",
-          "absolute",
-          "type",
-          "ignored"
-        ]
+        "required": ["name", "path", "absolute", "type", "ignored"]
       },
       "FileContent": {
         "type": "object",
@@ -11507,67 +10279,6 @@
           "content": {
             "type": "string"
           },
-          "diff": {
-            "type": "string"
-          },
-          "patch": {
-            "type": "object",
-            "properties": {
-              "oldFileName": {
-                "type": "string"
-              },
-              "newFileName": {
-                "type": "string"
-              },
-              "oldHeader": {
-                "type": "string"
-              },
-              "newHeader": {
-                "type": "string"
-              },
-              "hunks": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "oldStart": {
-                      "type": "number"
-                    },
-                    "oldLines": {
-                      "type": "number"
-                    },
-                    "newStart": {
-                      "type": "number"
-                    },
-                    "newLines": {
-                      "type": "number"
-                    },
-                    "lines": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  },
-                  "required": [
-                    "oldStart",
-                    "oldLines",
-                    "newStart",
-                    "newLines",
-                    "lines"
-                  ]
-                }
-              },
-              "index": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "oldFileName",
-              "newFileName",
-              "hunks"
-            ]
-          },
           "encoding": {
             "type": "string",
             "const": "base64"
@@ -11576,42 +10287,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "type",
-          "content"
-        ]
-      },
-      "File": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string"
-          },
-          "added": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
-          },
-          "removed": {
-            "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "added",
-              "deleted",
-              "modified"
-            ]
-          }
-        },
-        "required": [
-          "path",
-          "added",
-          "removed",
-          "status"
-        ]
+        "required": ["type", "content"]
       },
       "MCPStatusConnected": {
         "type": "object",
@@ -11621,9 +10297,7 @@
             "const": "connected"
           }
         },
-        "required": [
-          "status"
-        ]
+        "required": ["status"]
       },
       "MCPStatusDisabled": {
         "type": "object",
@@ -11633,9 +10307,7 @@
             "const": "disabled"
           }
         },
-        "required": [
-          "status"
-        ]
+        "required": ["status"]
       },
       "MCPStatusFailed": {
         "type": "object",
@@ -11648,10 +10320,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "status",
-          "error"
-        ]
+        "required": ["status", "error"]
       },
       "MCPStatusNeedsAuth": {
         "type": "object",
@@ -11661,9 +10330,7 @@
             "const": "needs_auth"
           }
         },
-        "required": [
-          "status"
-        ]
+        "required": ["status"]
       },
       "MCPStatusNeedsClientRegistration": {
         "type": "object",
@@ -11676,10 +10343,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "status",
-          "error"
-        ]
+        "required": ["status", "error"]
       },
       "MCPStatus": {
         "anyOf": [
@@ -11719,24 +10383,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "home",
-          "state",
-          "config",
-          "worktree",
-          "directory"
-        ]
-      },
-      "VcsInfo": {
-        "type": "object",
-        "properties": {
-          "branch": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "branch"
-        ]
+        "required": ["home", "state", "config", "worktree", "directory"]
       },
       "Command": {
         "type": "object",
@@ -11764,10 +10411,7 @@
           },
           "queueBehavior": {
             "type": "string",
-            "enum": [
-              "queued",
-              "immediate"
-            ]
+            "enum": ["queued", "immediate"]
           },
           "workflowAware": {
             "type": "boolean"
@@ -11816,11 +10460,7 @@
             }
           }
         },
-        "required": [
-          "name",
-          "template",
-          "hints"
-        ]
+        "required": ["name", "template", "hints"]
       },
       "Agent": {
         "type": "object",
@@ -11833,11 +10473,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "subagent",
-              "primary",
-              "all"
-            ]
+            "enum": ["subagent", "primary", "all"]
           },
           "native": {
             "type": "boolean"
@@ -11867,10 +10503,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "modelID",
-              "providerID"
-            ]
+            "required": ["modelID", "providerID"]
           },
           "variant": {
             "type": "string"
@@ -11891,12 +10524,7 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "name",
-          "mode",
-          "permission",
-          "options"
-        ]
+        "required": ["name", "mode", "permission", "options"]
       },
       "OAuth": {
         "type": "object",
@@ -11921,12 +10549,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "type",
-          "refresh",
-          "access",
-          "expires"
-        ]
+        "required": ["type", "refresh", "access", "expires"]
       },
       "ApiAuth": {
         "type": "object",
@@ -11939,10 +10562,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "type",
-          "key"
-        ]
+        "required": ["type", "key"]
       },
       "WellKnownAuth": {
         "type": "object",
@@ -11958,11 +10578,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "type",
-          "key",
-          "token"
-        ]
+        "required": ["type", "key", "token"]
       },
       "Auth": {
         "anyOf": [

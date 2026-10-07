@@ -60,7 +60,8 @@ console.log(`building release packages`)
 await $`bun run script/pack-release.ts --version ${version}`.cwd(dir)
 
 const manifest = (await Bun.file(path.join(dir, "dist/release-manifest.json")).json()) as ReleaseManifest
-if (manifest.version !== version) fail(`manifest version ${manifest.version} does not match requested version ${version}`)
+if (manifest.version !== version)
+  fail(`manifest version ${manifest.version} does not match requested version ${version}`)
 const artifacts = validateReleaseManifest(manifest)
 await verifyArtifactFiles(artifacts, dir)
 

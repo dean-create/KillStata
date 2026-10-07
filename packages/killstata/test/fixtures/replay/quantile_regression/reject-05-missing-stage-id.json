@@ -1,0 +1,6 @@
+{
+  "description": "漏传 stageId",
+  "modelArgs": { "datasetId": "wage_88", "dependentVar": "wage", "treatmentVar": "union" },
+  "expect": "reject",
+  "rejectHint": ["stageId"]
+}

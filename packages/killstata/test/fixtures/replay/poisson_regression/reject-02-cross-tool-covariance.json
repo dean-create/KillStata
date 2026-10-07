@@ -1,0 +1,12 @@
+{
+  "description": "模型把 OLS 的 HC1 协方差搬到 Poisson;计数模型只接受 nonrobust/robust",
+  "modelArgs": {
+    "datasetId": "health_21",
+    "stageId": "stage_000",
+    "dependentVar": "visits",
+    "treatmentVar": "insured",
+    "covariance": "HC1"
+  },
+  "expect": "reject",
+  "rejectHint": ["covariance", "nonrobust"]
+}

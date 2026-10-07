@@ -1,0 +1,12 @@
+{
+  "description": "把 OLS 的 HC1 搬到分位数回归;分位数只接受 robust/iid",
+  "modelArgs": {
+    "datasetId": "wage_88",
+    "stageId": "stage_000",
+    "dependentVar": "wage",
+    "treatmentVar": "union",
+    "covariance": "HC1"
+  },
+  "expect": "reject",
+  "rejectHint": ["covariance"]
+}

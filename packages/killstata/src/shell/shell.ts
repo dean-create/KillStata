@@ -1,12 +1,16 @@
-﻿import { Flag } from "@/flag/flag"
-import { lazy } from "@/util/lazy"
+import { lazy } from "@killstata/util/lazy"
 import path from "path"
-import { spawn, type ChildProcess } from "child_process"
+import { spawn } from "child_process"
 
 const SIGKILL_TIMEOUT_MS = 200
 
 export namespace Shell {
-  export async function killTree(proc: ChildProcess, opts?: { exited?: () => boolean }): Promise<void> {
+  // 参数放宽为鸭子类型：node ChildProcess 与 Bun.spawn 返回的进程都只有 pid/kill 两个必需成员。
+  // BunProc 的 kill 接受 string signal，与 NodeJS.Signals 兼容。
+  export async function killTree(
+    proc: { pid?: number; kill: (signal: NodeJS.Signals | "SIGKILL") => void },
+    opts?: { exited?: () => boolean },
+  ): Promise<void> {
     const pid = proc.pid
     if (!pid || opts?.exited?.()) return
 
@@ -37,14 +41,6 @@ export namespace Shell {
 
   function fallback() {
     if (process.platform === "win32") {
-      if (Flag.KILLSTATA_GIT_BASH_PATH) return Flag.KILLSTATA_GIT_BASH_PATH
-      const git = Bun.which("git")
-      if (git) {
-        // git.exe is typically at: C:\Program Files\Git\cmd\git.exe
-        // bash.exe is at: C:\Program Files\Git\bin\bash.exe
-        const bash = path.join(git, "..", "..", "bin", "bash.exe")
-        if (Bun.file(bash).size) return bash
-      }
       return process.env.COMSPEC || "cmd.exe"
     }
     if (process.platform === "darwin") return "/bin/zsh"

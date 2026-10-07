@@ -1,0 +1,13 @@
+{
+  "description": "多控制变量 + 稳健标准误",
+  "modelArgs": {
+    "datasetId": "wage_panel",
+    "stageId": "stage_000",
+    "dependentVar": "lwage",
+    "treatmentVar": "educ",
+    "covariates": ["exper", "tenure", "black"],
+    "entityVar": "nr",
+    "timeVar": "year"
+  },
+  "expect": "pass"
+}

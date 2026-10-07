@@ -1,0 +1,6 @@
+{
+  "description": "漏 stageId",
+  "modelArgs": { "datasetId": "mode_choice", "dependentVar": "mode", "treatmentVar": "distance" },
+  "expect": "reject",
+  "rejectHint": ["stageId"]
+}

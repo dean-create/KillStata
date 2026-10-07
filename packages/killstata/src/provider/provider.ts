@@ -3,6 +3,8 @@ import fuzzysort from "fuzzysort"
 import { Config } from "../config/config"
 import { mapValues, mergeDeep, omit, pickBy, sortBy } from "remeda"
 import { NoSuchModelError, type Provider as SDK } from "ai"
+import { createAnthropic } from "@ai-sdk/anthropic"
+import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { Log } from "../util/log"
 import { BunProc } from "../bun"
 import { ModelsDev } from "./models"
@@ -11,12 +13,12 @@ import { Auth } from "../auth"
 import { Env } from "../env"
 import { Instance } from "../project/instance"
 import { Flag } from "../flag/flag"
-import { iife } from "@/util/iife"
+import { iife } from "@killstata/util/iife"
 import { Global } from "../global"
 import path from "path"
 
-// Killstata bundles exactly one SDK: the OpenAI-compatible client. It serves both the
-// built-in DeepSeek provider and any user-declared custom endpoint (Qwen / Kimi / GLM / vLLM).
+// Keep first-party provider protocols explicit: OpenAI-compatible, Anthropic Messages,
+// and Google Generative AI use separate SDK adapters and authentication contracts.
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import type { LanguageModelV2 } from "@ai-sdk/provider"
 import { ProviderTransform } from "./transform"
@@ -33,8 +35,14 @@ import {
   normalizeDeepSeekModelID,
 } from "./deepseek-policy"
 import {
+  ANTHROPIC_API_KEY_ENV,
+  ANTHROPIC_NPM,
+  ANTHROPIC_PROVIDER_ID,
   CUSTOM_API_KEY_ENV,
   CUSTOM_PROVIDER_ID,
+  GOOGLE_API_KEY_ENV,
+  GOOGLE_NPM,
+  GOOGLE_PROVIDER_ID,
   OPENAI_COMPATIBLE_NPM,
   allowedProvidersMessage,
   isAllowedProvider,
@@ -46,6 +54,19 @@ export namespace Provider {
 
   const BUNDLED_PROVIDERS: Record<string, (options: any) => SDK> = {
     [OPENAI_COMPATIBLE_NPM]: createOpenAICompatible,
+    [ANTHROPIC_NPM]: createAnthropic as unknown as (options: any) => SDK,
+    [GOOGLE_NPM]: createGoogleGenerativeAI as unknown as (options: any) => SDK,
+  }
+
+  function providerApiKeyEnv(providerID: string) {
+    if (providerID === CUSTOM_PROVIDER_ID) return CUSTOM_API_KEY_ENV
+    if (providerID === ANTHROPIC_PROVIDER_ID) return ANTHROPIC_API_KEY_ENV
+    if (providerID === GOOGLE_PROVIDER_ID) return GOOGLE_API_KEY_ENV
+    return DEEPSEEK_API_KEY_ENV
+  }
+
+  function isNativeProvider(providerID: string) {
+    return providerID === ANTHROPIC_PROVIDER_ID || providerID === GOOGLE_PROVIDER_ID
   }
 
   type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>) => Promise<any>
@@ -198,7 +219,7 @@ export namespace Provider {
       variants: {},
     }
 
-    m.variants = mapValues(ProviderTransform.variants(m), (v) => v)
+    m.variants = ProviderTransform.variants(m)
 
     return m
   }
@@ -215,7 +236,7 @@ export namespace Provider {
   }
 
   function deepSeekModel(modelID: (typeof DEEPSEEK_MODEL_IDS)[number], name: string): Model {
-    return {
+    const model: Model = {
       id: modelID,
       providerID: DEEPSEEK_PROVIDER_ID,
       name,
@@ -264,6 +285,8 @@ export namespace Provider {
       release_date: "2026-04-24",
       variants: {},
     }
+    model.variants = ProviderTransform.variants(model)
+    return model
   }
 
   function deepSeekProvider(apiKey?: string, existing?: Partial<Info>): Info {
@@ -285,15 +308,15 @@ export namespace Provider {
     }
   }
 
-  // Guarantees the final provider set is exactly what killstata supports:
-  //   - deepseek is always present (it is the default, and works from DEEPSEEK_API_KEY alone)
-  //   - custom survives only if the user actually configured a usable endpoint (baseURL + models)
-  //   - anything else that leaked through is dropped
+  // Keep the provider set explicit. Native providers survive only when a model
+  // was configured for them; unrelated providers are still dropped.
   function enforceAllowedProviders(providers: Record<string, Info>) {
     // Capture both before we clear the map: `existing` carries the key merged in from
     // auth.json / config, which must win over the env var (see deepSeekProvider).
     const existingDeepSeek = providers[DEEPSEEK_PROVIDER_ID]
     const custom = providers[CUSTOM_PROVIDER_ID]
+    const anthropic = providers[ANTHROPIC_PROVIDER_ID]
+    const google = providers[GOOGLE_PROVIDER_ID]
     const customUsable =
       custom && typeof custom.options["baseURL"] === "string" && Object.keys(custom.models).length > 0
 
@@ -308,12 +331,36 @@ export namespace Provider {
       const customKey = Env.get(CUSTOM_API_KEY_ENV)?.trim()
       providers[CUSTOM_PROVIDER_ID] = {
         ...custom,
-        key: custom.key ?? customKey,
+        // 当前进程明确提供的密钥优先于 auth.json 中的旧密钥；否则用户切换
+        // TokenHub/API key 后，模型发现可能成功，但真正请求仍会携带已失效凭证。
+        key: customKey || custom.key,
+      }
+    }
+
+    for (const [providerID, provider] of [
+      [ANTHROPIC_PROVIDER_ID, anthropic],
+      [GOOGLE_PROVIDER_ID, google],
+    ] as const) {
+      if (!provider || Object.keys(provider.models).length === 0) continue
+      const env = providerApiKeyEnv(providerID)
+      providers[providerID] = {
+        ...provider,
+        env: [env],
+        key: Env.get(env)?.trim() || provider.key,
       }
     }
   }
 
   function providerApiKey(provider: Info) {
+    // 模型发现发生在 enforceAllowedProviders() 之前；此时 provider.key 可能刚从
+    // auth.json 合并进来，不能等到最终 provider 收口后才覆盖。显式环境密钥代表
+    // 当前进程/当前端点的选择，必须在发现阶段就优先于旧的持久化凭证，否则会用
+    // 旧端点的模型目录污染当前 Provider（真实 Sidus 回放暴露的问题）。
+    const environmentKey = provider.env
+      .map((name) => Env.get(name)?.trim())
+      .find((value): value is string => Boolean(value))
+    if (environmentKey) return environmentKey
+
     const apiKey = provider.options["apiKey"]
     if (typeof apiKey === "string" && apiKey.trim()) return apiKey.trim()
     if (typeof provider.key === "string" && provider.key.trim()) return provider.key.trim()
@@ -342,6 +389,10 @@ export namespace Provider {
     if (existing) return existing
 
     const npm = Object.values(provider.models)[0]?.api.npm ?? "@ai-sdk/openai-compatible"
+    // /models 通常只返回 id，不返回推理能力和上下文窗口。TokenHub 上的
+    // deepseek-v4-flash 仍然是 DeepSeek V4 Flash，不能因为走 custom endpoint
+    // 就降级成“无推理能力、窗口为0”的普通模型。
+    const deepSeekLike = modelID.toLowerCase().includes("deepseek")
     const model: Model = {
       id: modelID,
       providerID: provider.id,
@@ -364,12 +415,12 @@ export namespace Provider {
         },
       },
       limit: {
-        context: 0,
-        output: 0,
+        context: deepSeekLike ? DEEPSEEK_V4_CONTEXT_WINDOW_TOKENS : 0,
+        output: deepSeekLike ? DEEPSEEK_V4_MAX_OUTPUT_TOKENS : 0,
       },
       capabilities: {
         temperature: true,
-        reasoning: false,
+        reasoning: deepSeekLike,
         attachment: false,
         toolcall: true,
         input: {
@@ -392,7 +443,7 @@ export namespace Provider {
       variants: {},
     }
 
-    model.variants = mapValues(ProviderTransform.variants(model), (variant) => variant)
+    model.variants = ProviderTransform.variants(model)
     return model
   }
 
@@ -436,7 +487,9 @@ export namespace Provider {
     if (!apiKey || !baseURL) return []
 
     const headers = {
-      ...(provider.options["headers"] && typeof provider.options["headers"] === "object" ? provider.options["headers"] : {}),
+      ...(provider.options["headers"] && typeof provider.options["headers"] === "object"
+        ? provider.options["headers"]
+        : {}),
       Authorization: `Bearer ${apiKey}`,
     }
 
@@ -480,9 +533,11 @@ export namespace Provider {
 
     const disabled = new Set(config.disabled_providers ?? [])
     const enabled = config.enabled_providers ? new Set(config.enabled_providers) : null
+    const configuredProviderIDs = new Set(Object.keys(config.provider ?? {}))
 
     function isProviderAllowed(providerID: string): boolean {
       if (!isAllowedProvider(providerID)) return false
+      if (isNativeProvider(providerID) && !configuredProviderIDs.has(providerID)) return false
       if (enabled && !enabled.has(providerID)) return false
       if (disabled.has(providerID)) return false
       return true
@@ -506,7 +561,9 @@ export namespace Provider {
         providers[providerID] = mergeDeep(existing, provider)
         return
       }
-      const match = database[providerID]
+      const match = database[providerID] ?? (isNativeProvider(providerID)
+        ? { id: providerID, name: provider.name ?? providerID, source: "config", env: [], options: {}, models: {} } as Info
+        : undefined)
       if (!match) return
       // @ts-expect-error
       providers[providerID] = mergeDeep(match, provider)
@@ -520,10 +577,12 @@ export namespace Provider {
       const parsed: Info = {
         id: providerID,
         name: provider.name ?? existing?.name ?? providerID,
-        env: [custom ? CUSTOM_API_KEY_ENV : DEEPSEEK_API_KEY_ENV],
+        env: [providerApiKeyEnv(providerID)],
         options: mergeDeep(
           existing?.options ?? {},
-          custom ? omit(provider.options ?? {}, ["apiKey"]) : omit(provider.options ?? {}, ["apiKey", "baseURL"]),
+          custom || isNativeProvider(providerID)
+            ? omit(provider.options ?? {}, ["apiKey"])
+            : omit(provider.options ?? {}, ["apiKey", "baseURL"]),
         ),
         source: "config",
         models: existing?.models ?? {},
@@ -531,6 +590,7 @@ export namespace Provider {
 
       for (const [modelID, model] of Object.entries(provider.models ?? {})) {
         const existingModel = parsed.models[model.id ?? modelID]
+        const deepSeekLike = `${modelID} ${model.id ?? ""}`.toLowerCase().includes("deepseek")
         const name = iife(() => {
           if (model.name) return model.name
           if (model.id && model.id !== modelID) return modelID
@@ -553,7 +613,9 @@ export namespace Provider {
           providerID,
           capabilities: {
             temperature: model.temperature ?? existingModel?.capabilities.temperature ?? false,
-            reasoning: model.reasoning ?? existingModel?.capabilities.reasoning ?? false,
+            // 配置里的精确 DeepSeek 模型不会经过 discoveredModel()；按名称补齐与
+            // 发现模型一致的 reasoning 能力，否则用户请求 medium 会静默降成 off。
+            reasoning: model.reasoning ?? existingModel?.capabilities.reasoning ?? deepSeekLike,
             attachment: model.attachment ?? existingModel?.capabilities.attachment ?? false,
             toolcall: model.tool_call ?? existingModel?.capabilities.toolcall ?? true,
             input: {
@@ -582,8 +644,8 @@ export namespace Provider {
           },
           options: mergeDeep(existingModel?.options ?? {}, model.options ?? {}),
           limit: {
-            context: model.limit?.context ?? existingModel?.limit?.context ?? 0,
-            output: model.limit?.output ?? existingModel?.limit?.output ?? 0,
+            context: model.limit?.context ?? existingModel?.limit?.context ?? (deepSeekLike ? DEEPSEEK_V4_CONTEXT_WINDOW_TOKENS : 0),
+            output: model.limit?.output ?? existingModel?.limit?.output ?? (deepSeekLike ? DEEPSEEK_V4_MAX_OUTPUT_TOKENS : 0),
           },
           headers: mergeDeep(existingModel?.headers ?? {}, model.headers ?? {}),
           family: model.family ?? existingModel?.family ?? "",
@@ -770,14 +832,11 @@ export namespace Provider {
         })
       }
 
-      // Every supported model (built-in DeepSeek and any custom endpoint) speaks the
-      // OpenAI-compatible protocol, so there is exactly one SDK to construct and nothing
-      // to install at runtime.
       const bundledFn = BUNDLED_PROVIDERS[model.api.npm]
       if (!bundledFn) {
         throw new Error(
           `Unsupported provider SDK "${model.api.npm}" for ${model.providerID}/${model.id}. ` +
-            `Killstata only bundles ${OPENAI_COMPATIBLE_NPM}; a custom provider must expose an OpenAI-compatible API.`,
+            `KillStata only bundles explicitly supported provider protocols.`,
         )
       }
 
@@ -819,10 +878,34 @@ export namespace Provider {
     if (!info) {
       const availableModels = Object.keys(provider.models)
       const matches = fuzzysort.go(modelID, availableModels, { limit: 3, threshold: -10000 })
-      const suggestions = matches.map((m) => m.target)
+      // 动态目录中的模型名可能与用户手动配置的名字完全不同（例如服务端
+      // 更新了别名）。模糊匹配为空时仍列出真实可用候选，帮助用户修正配置，
+      // 但绝不把候选模型静默当成用户要求的模型执行。
+      const suggestions = matches.length ? matches.map((m) => m.target) : availableModels.slice(0, 5)
       throw new ModelNotFoundError({ providerID, modelID, suggestions })
     }
     return info
+  }
+
+  /**
+   * 解析用户或测试驱动选择的模型：裸模型 ID 跟随配置的默认 provider，只有显式的
+   * provider/model 才切换 provider。这样 custom OpenAI 兼容端点的选择策略集中在
+   * Provider 内，调用方不用各自复制一份。
+   */
+  export async function resolveModel(model?: string) {
+    const requested = model?.trim()
+    if (!requested) {
+      const configured = await defaultModel()
+      return getModel(configured.providerID, configured.modelID)
+    }
+
+    if (requested.includes("/")) {
+      const parsed = parseModel(requested)
+      return getModel(parsed.providerID, parsed.modelID)
+    }
+
+    const configured = await defaultModel()
+    return getModel(configured.providerID, requested)
   }
 
   export async function getLanguage(model: Model): Promise<LanguageModelV2> {
@@ -867,16 +950,37 @@ export namespace Provider {
     }
   }
 
-  export async function getSmallModel(_providerID: string) {
+  export async function getSmallModel(providerID: string, preferredModelID?: string) {
     const cfg = await Config.get()
+
+    // 前台显式选择模型时，标题/摘要等后台装饰请求必须沿用同一个模型。
+    // 否则全局 small_model 即使属于同一 Provider，也可能是旧端点或旧模型，
+    // 造成后台请求失败、额外消耗额度，并把正常前台会话污染成错误状态。
+    if (preferredModelID?.trim()) {
+      return getModel(providerID, preferredModelID)
+    }
 
     if (cfg.small_model) {
       const parsed = parseModel(cfg.small_model)
-      if (!isAllowedProvider(parsed.providerID))
+      // 标题/摘要必须和当前前台请求使用同一 Provider。全局 small_model 可能
+      // 属于另一个 Provider（例如前台显式选择 deepseek、配置仍保留 custom），
+      // 不能让后台装饰请求跨 Provider 夺走凭证、额度和模型语义。
+      if (parsed.providerID !== providerID) {
+        // 忽略跨 Provider 的全局小模型，继续按当前 Provider 选择默认模型。
+      } else if (!isAllowedProvider(parsed.providerID)) {
         throw new Error(allowedProvidersMessage(parsed.providerID, parsed.modelID))
-      return getModel(parsed.providerID, parsed.modelID)
+      } else {
+        return getModel(parsed.providerID, parsed.modelID)
+      }
     }
 
+    // 标题、摘要等后台请求必须沿用当前会话的 provider。此前这里无视 providerID，
+    // 始终返回内置 DeepSeek；自定义 OpenAI 兼容端点的主请求因此能成功，收尾标题却
+    // 被发往另一个模型/端点，最终把正常分析误报成 Unauthorized。
+    const provider = await getProvider(providerID)
+    if (provider) return getModel(providerID, defaultModelID(provider, cfg))
+
+    // 保留旧调用方在 provider 尚未可用时的 DeepSeek 兜底行为。
     return getModel(DEEPSEEK_PROVIDER_ID, DEEPSEEK_DEFAULT_MODEL_ID)
   }
 
@@ -900,9 +1004,7 @@ export namespace Provider {
       const parsed = parseModel(configured)
       if (!isAllowedProvider(parsed.providerID)) continue
       if (parsed.providerID !== provider.id) continue
-      const modelID = isDeepSeekProvider(parsed.providerID)
-        ? normalizeDeepSeekModelID(parsed.modelID)
-        : parsed.modelID
+      const modelID = isDeepSeekProvider(parsed.providerID) ? normalizeDeepSeekModelID(parsed.modelID) : parsed.modelID
       if (modelID && provider.models[modelID]) return modelID
     }
 
@@ -929,9 +1031,7 @@ export namespace Provider {
       const parsed = parseModel(cfg.model)
       if (!isAllowedProvider(parsed.providerID))
         throw new Error(allowedProvidersMessage(parsed.providerID, parsed.modelID))
-      const modelID = isDeepSeekProvider(parsed.providerID)
-        ? normalizeDeepSeekModelID(parsed.modelID)
-        : parsed.modelID
+      const modelID = isDeepSeekProvider(parsed.providerID) ? normalizeDeepSeekModelID(parsed.modelID) : parsed.modelID
       if (!modelID) throw new Error(allowedProvidersMessage(parsed.providerID, parsed.modelID))
       return {
         providerID: parsed.providerID,

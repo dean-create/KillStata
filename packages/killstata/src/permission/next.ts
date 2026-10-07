@@ -4,11 +4,12 @@ import { Config } from "@/config/config"
 import { Identifier } from "@/id/id"
 import { Instance } from "@/project/instance"
 import { Storage } from "@/storage/storage"
-import { fn } from "@/util/fn"
+import { fn } from "@killstata/util/fn"
 import { Log } from "@/util/log"
 import { Wildcard } from "@/util/wildcard"
 import os from "os"
 import z from "zod"
+import { Global } from "@/global"
 
 export namespace PermissionNext {
   const log = Log.create({ service: "permission" })
@@ -124,6 +125,66 @@ export namespace PermissionNext {
     }
   })
 
+  function managedRuntimeSafetyAction(
+    permission: string,
+    normalizedPattern: string,
+    metadata: Record<string, unknown>,
+  ): Action | undefined {
+    if (permission !== "bash") return undefined
+    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const globalRuntimeRoot = `${Global.Path.data.replaceAll("\\", "/")}/venv`
+    const legacyRuntimeRoot = `${os.homedir().replaceAll("\\", "/")}/.killstata/venv`
+    const runtimeRoot = `(?:${escapeRegExp(globalRuntimeRoot)}|${escapeRegExp(legacyRuntimeRoot)}|\\.killstata/venv)`
+    const executable = "(?:bin/python(?:\\d+(?:\\.\\d+)*)?|Scripts/python(?:\\.exe)?)"
+    const runtimeCommand = new RegExp(`^${runtimeRoot}/(.+)$`, "i").exec(normalizedPattern)
+    if (!runtimeCommand) return undefined
+    const match = new RegExp(`^${executable}\\s+(.+)$`, "i").exec(runtimeCommand[1])
+
+    // 自动放行的是“受管解释器 + 单个方法 capability”，不是解释器本身。
+    // 只要命令位于受管 runtime 根目录，就进入该安全边界：非 Python 可执行文件、
+    // 伪装名称，以及 -c、脚本路径、重定向或组合命令全部必须确认，不能回落到
+    // agent.ts 为内部 runner 设置的目录级 allow 规则。
+    const capability = match?.[1]
+    if (metadata.managedRuntime === true && capability && /^\*[A-Za-z0-9_-]+\*$/.test(capability)) {
+      return "allow"
+    }
+    return "ask"
+  }
+
+  // safetyCheck：敏感路径即使被 allow 规则命中也要弹权限（对齐 claude-code 的
+  // safetyCheck 免疫 bypass）。.env* 是密钥文件，用户/项目规则不能把它们静默
+  // 放行给模型——**无论读写**都拦。
+  //
+  // .killstata/ 是本产品的内部状态目录（datasets/inspection/reports/runtime），
+  // 模型读它是正常工作流（读检查表、看 stage 状态），因此只拦**写**操作
+  // （edit/write/bash 改内部状态要用户批准），只读工具（read/glob/grep）
+  // 放行。这是与 claude-code 的关键差异：claude-code 保护的是用户机器的
+  // .git/.env（产品从不读），而 killstata 必须读自己的 .killstata。
+  function safetyActionFor(
+    permission: string,
+    pattern: string,
+    metadata: Record<string, unknown>,
+  ): Action | undefined {
+    const normalized = pattern.replaceAll("\\", "/")
+    const managedRuntimeAction = managedRuntimeSafetyAction(permission, normalized, metadata)
+    if (managedRuntimeAction) return managedRuntimeAction
+    // 边界要求：敏感路径前必须是"非路径字符"（空格/引号/操作符/字符串首尾），
+    // 不能只认 / 或字符串开头——bash 权限传入的是整条命令字符串（tool/bash.ts
+    // patterns 为 token 拼接，如 "rm -rf .killstata/datasets"），.killstata 前是空格
+    // 而不是 /。右边界用 lookahead 防误报：.killstata.bak / .killstata_backup /
+    // backup.killstata.tar.gz 这类不相关文件名不能命中。
+    const NON_PATH_BOUNDARY = "[^A-Za-z0-9_.-]"
+    const isKillstata = new RegExp(`(^|${NON_PATH_BOUNDARY})\\.killstata(?=${NON_PATH_BOUNDARY}|$)`).test(normalized)
+    const isEnv = new RegExp(`(^|${NON_PATH_BOUNDARY})\\.env(?=[./]|${NON_PATH_BOUNDARY}|$)`, "i").test(normalized)
+    if (isEnv) return "ask"
+    if (isKillstata) {
+      const readOnly = ["read", "glob", "grep", "list"].includes(permission)
+      if (readOnly) return undefined
+      return "ask"
+    }
+    return undefined
+  }
+
   export const ask = fn(
     Request.partial({ id: true }).extend({
       ruleset: Ruleset,
@@ -136,7 +197,10 @@ export namespace PermissionNext {
         log.info("evaluated", { permission: request.permission, pattern, action: rule })
         if (rule.action === "deny")
           throw new DeniedError(ruleset.filter((r) => Wildcard.match(request.permission, r.permission)))
-        if (rule.action === "ask") {
+        const safeAction = safetyActionFor(request.permission, pattern, request.metadata)
+        const executionPolicyRequiresApproval = request.permission === "bash"
+          && (request.metadata.execPolicyDecision as { action?: unknown } | undefined)?.action === "ask"
+        if (rule.action === "ask" || executionPolicyRequiresApproval || (rule.action === "allow" && safeAction === "ask")) {
           const id = input.id ?? Identifier.ascending("permission")
           return new Promise<void>((resolve, reject) => {
             const info: Request = {
@@ -202,6 +266,12 @@ export namespace PermissionNext {
           })
         }
 
+        // 持久化 always 批准：重启后仍然有效（对齐 claude-code persistPermissionUpdates）。
+        // 先落盘再放行——用户看到"已记住"时重启一定生效。写盘失败不阻断本次放行。
+        await Storage.write(["permission", Instance.project.id], s.approved).catch((error) => {
+          log.warn("failed to persist permission ruleset", { error })
+        })
+
         existing.resolve()
 
         const sessionID = existing.info.sessionID
@@ -219,10 +289,6 @@ export namespace PermissionNext {
           })
           pending.resolve()
         }
-
-        // TODO: we don't save the permission ruleset to disk yet until there's
-        // UI to manage it
-        // await Storage.write(["permission", Instance.project.id], s.approved)
         return
       }
     },
@@ -264,10 +330,10 @@ export namespace PermissionNext {
     }
   }
 
-  /** User rejected with message - continues with guidance */
+  /** User rejected with message — terminal; feedback is persisted for the next user-directed run. */
   export class CorrectedError extends Error {
-    constructor(message: string) {
-      super(`The user rejected permission to use this specific tool call with the following feedback: ${message}`)
+    constructor(public readonly feedback: string) {
+      super(`The user rejected permission to use this specific tool call with the following feedback: ${feedback}`)
     }
   }
 

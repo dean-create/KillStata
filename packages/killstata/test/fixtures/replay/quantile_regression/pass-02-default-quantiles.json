@@ -1,0 +1,5 @@
+{
+  "description": "不传 quantiles,应默认 [0.25,0.5,0.75]",
+  "modelArgs": { "datasetId": "wage_88", "stageId": "stage_000", "dependentVar": "wage", "treatmentVar": "union" },
+  "expect": "pass"
+}

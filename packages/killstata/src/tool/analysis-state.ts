@@ -3,83 +3,88 @@ import path from "path"
 import crypto from "crypto"
 import { Instance } from "../project/instance"
 
-export type DatasetStageRecord = {
-  stageId: string
-  runId?: string
-  parentStageId?: string
-  branch: string
-  action: string
-  label?: string
-  workingPath: string
-  workingFormat: "parquet"
-  rowCount?: number
-  columnCount?: number
-  schemaPath?: string
-  labelsPath?: string
-  summaryPath?: string
-  logPath?: string
-  inspectionPath?: string
-  inspectionWorkbookPath?: string
-  createdAt: string
-  metadata?: Record<string, unknown>
+// ── 只读查询、路径与布局管理已下沉到 runtime/dataset-state（消除 runtime → tool 反依赖）──
+import {
+  projectRoot,
+  projectInternalRoot,
+  projectStateRoot,
+  projectReflectionRoot,
+  projectPlansRoot,
+  projectTempRoot,
+  projectErrorsRoot,
+  projectHealthRoot,
+  deliveryStateRoot,
+  datasetsRoot,
+  datasetRoot,
+  datasetManifestPath,
+  datasetIndexPath,
+  sourcesRoot,
+  sourceAssetRoot,
+  sourceAssetMetadataPath,
+  ensureSourceAsset,
+  resolveManagedDatasetPath,
+  writeImportReceipt,
+  inferSourceFormat,
+  getStage,
+  readDatasetManifest,
+  readDatasetIndex,
+  writeDatasetIndex,
+  ensureInternalLayout,
+} from "../runtime/dataset-state"
+
+import type {
+  DatasetManifest,
+  DatasetStageRecord,
+  DatasetArtifactRecord,
+  FinalOutputRecord,
+  DatasetConversationOrigin,
+  SourceAsset,
+  ImportReceipt,
+  SourceFingerprint,
+  DatasetIndex,
+  DatasetIndexEntry,
+} from "../runtime/dataset-state"
+
+// ── Re-export 给 tool/ 下游使用，保持既有 import 路径不变 ──
+export {
+  projectRoot,
+  projectInternalRoot,
+  projectStateRoot,
+  projectReflectionRoot,
+  projectPlansRoot,
+  projectTempRoot,
+  projectErrorsRoot,
+  projectHealthRoot,
+  deliveryStateRoot,
+  datasetsRoot,
+  datasetRoot,
+  datasetManifestPath,
+  datasetIndexPath,
+  sourcesRoot,
+  sourceAssetRoot,
+  sourceAssetMetadataPath,
+  ensureSourceAsset,
+  writeImportReceipt,
+  inferSourceFormat,
+  getStage,
+  readDatasetManifest,
+  readDatasetIndex,
+  writeDatasetIndex,
+  ensureInternalLayout,
 }
 
-export type DatasetArtifactRecord = {
-  artifactId: string
-  runId?: string
-  stageId?: string
-  branch: string
-  action: string
-  outputPath: string
-  workbookPath?: string
-  summaryPath?: string
-  logPath?: string
-  createdAt: string
-  metadata?: Record<string, unknown>
-}
-
-export type FinalOutputRecord = {
-  key: string
-  label: string
-  path: string
-  runId?: string
-  stageId?: string
-  branch: string
-  sourcePath: string
-  createdAt: string
-  metadata?: Record<string, unknown>
-}
-
-export type DatasetManifest = {
-  datasetId: string
-  sourcePath: string
-  sourceFormat: "csv" | "xlsx" | "xls" | "dta" | "parquet" | "unknown"
-  workingFormat: "parquet"
-  createdAt: string
-  updatedAt: string
-  stages: DatasetStageRecord[]
-  artifacts: DatasetArtifactRecord[]
-  finalOutputs: FinalOutputRecord[]
-}
-
-export type SourceFingerprint = {
-  realPath: string
-  sizeBytes: number
-  mtimeMs: number
-  key: string
-}
-
-type DatasetIndexEntry = {
-  datasetId: string
-  sourcePath: string
-  fingerprint: SourceFingerprint
-  updatedAt: string
-}
-
-type DatasetIndex = {
-  version: 1
-  entries: Record<string, DatasetIndexEntry>
-}
+export type {
+  DatasetStageRecord,
+  DatasetArtifactRecord,
+  FinalOutputRecord,
+  DatasetConversationOrigin,
+  SourceAsset,
+  ImportReceipt,
+  DatasetManifest,
+  SourceFingerprint,
+  DatasetIndex,
+  DatasetIndexEntry,
+} from "../runtime/dataset-state"
 
 type DeliveryRunManifest = {
   version: 1
@@ -100,16 +105,6 @@ function stableHash(value: string) {
   return crypto.createHash("sha1").update(value).digest("hex").slice(0, 8)
 }
 
-function inferSourceFormat(filePath: string): DatasetManifest["sourceFormat"] {
-  const ext = path.extname(filePath).toLowerCase()
-  if (ext === ".csv") return "csv"
-  if (ext === ".xlsx") return "xlsx"
-  if (ext === ".xls") return "xls"
-  if (ext === ".dta") return "dta"
-  if (ext === ".parquet") return "parquet"
-  return "unknown"
-}
-
 function fileStamp(input = new Date()) {
   const pad = (value: number) => value.toString().padStart(2, "0")
   return [
@@ -120,15 +115,17 @@ function fileStamp(input = new Date()) {
     pad(input.getHours()),
     pad(input.getMinutes()),
     pad(input.getSeconds()),
+    input.getMilliseconds().toString().padStart(3, "0"),
   ].join("")
 }
 
-function projectRoot() {
-  return Instance.project.vcs ? Instance.worktree : Instance.directory
-}
-
 function sanitizeSegment(value: string) {
-  return value.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "") || "item"
+  return (
+    value
+      .replace(/[^a-zA-Z0-9_-]+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "") || "item"
+  )
 }
 
 function sanitizeBranchPath(value: string) {
@@ -148,9 +145,12 @@ function sanitizeUserSegment(value: string) {
   return cleaned || "dataset"
 }
 
-export function createDatasetId(inputPath: string, fingerprintKey?: string) {
+export function createDatasetId(inputPath: string, fingerprintKey?: string, sessionID?: string) {
   const basename = sanitizeSegment(path.basename(inputPath, path.extname(inputPath)))
-  const suffix = stableHash(fingerprintKey ?? inputPath)
+  // 同一源文件可被多个会话独立导入。dataset 目录是可写状态，不能只按文件指纹共享，
+  // 否则后一个会话的 stage/abort 清理会覆盖或删除前一个会话的数据。
+  const identity = sessionID ? `${fingerprintKey ?? inputPath}::session::${sessionID}` : (fingerprintKey ?? inputPath)
+  const suffix = stableHash(identity)
   return `${basename}_${suffix}`
 }
 
@@ -168,11 +168,32 @@ export function createRunId(input = new Date()) {
 export function inferRunId(input: {
   requestedRunId?: string
   stage?: Pick<DatasetStageRecord, "runId" | "metadata">
+  source?: "workflow" | "model"
 }) {
-  if (input.requestedRunId) return normalizeRunId(input.requestedRunId)
   const fromStage = typeof input.stage?.runId === "string" ? input.stage.runId : undefined
   const fromMetadata = typeof input.stage?.metadata?.runId === "string" ? input.stage.metadata.runId : undefined
-  return normalizeRunId(fromStage ?? fromMetadata ?? createRunId())
+  const canonical = fromStage ?? fromMetadata
+  if (
+    canonical &&
+    input.requestedRunId &&
+    normalizeRunId(input.requestedRunId) !== normalizeRunId(canonical) &&
+    input.source !== "model"
+  ) {
+    throw new Error("runId 与当前规范化数据阶段不一致；不得由模型创建新的运行身份。")
+  }
+  return normalizeRunId(canonical ?? input.requestedRunId ?? createRunId())
+}
+
+export function inferBranch(input: {
+  requestedBranch?: string
+  stage?: Pick<DatasetStageRecord, "branch">
+  source?: "workflow" | "model"
+}) {
+  const canonical = input.stage?.branch ?? "main"
+  if (input.requestedBranch && input.requestedBranch !== canonical && input.source !== "model") {
+    throw new Error("branch 与当前规范化数据阶段不一致；新分支必须通过显式工作流动作创建。")
+  }
+  return canonical
 }
 
 export function buildStageId(index: number) {
@@ -182,26 +203,6 @@ export function buildStageId(index: number) {
 export function stageIndex(stageId: string) {
   const match = /stage_(\d+)/.exec(stageId)
   return match ? Number.parseInt(match[1], 10) : 0
-}
-
-export function datasetsRoot() {
-  return path.join(projectInternalRoot(), "datasets")
-}
-
-export function datasetIndexPath() {
-  return path.join(datasetsRoot(), "index.json")
-}
-
-export function projectInternalRoot() {
-  return path.join(projectRoot(), ".killstata")
-}
-
-export function projectStateRoot() {
-  return path.join(projectInternalRoot(), "runtime")
-}
-
-export function projectPlansRoot() {
-  return path.join(projectInternalRoot(), "plans")
 }
 
 export function sourceOutputsRoot(sourcePath: string) {
@@ -219,10 +220,6 @@ export function runOutputsRoot(sourcePath: string, runId: string) {
   return path.join(sourceOutputsRoot(sourcePath), normalizeRunId(runId))
 }
 
-export function deliveryStateRoot() {
-  return path.join(projectStateRoot(), "delivery")
-}
-
 function runIdDeliveryStamp(runId: string) {
   const normalized = normalizeRunId(runId)
   const match = /^run_(\d{8})-(\d{6})/.exec(normalized)
@@ -230,14 +227,15 @@ function runIdDeliveryStamp(runId: string) {
     return `${match[1]}_${match[2].slice(0, 4)}`
   }
   const now = new Date()
-  return [
-    now.getFullYear().toString(),
-    (now.getMonth() + 1).toString().padStart(2, "0"),
-    now.getDate().toString().padStart(2, "0"),
-  ].join("") + "_" + [
-    now.getHours().toString().padStart(2, "0"),
-    now.getMinutes().toString().padStart(2, "0"),
-  ].join("")
+  return (
+    [
+      now.getFullYear().toString(),
+      (now.getMonth() + 1).toString().padStart(2, "0"),
+      now.getDate().toString().padStart(2, "0"),
+    ].join("") +
+    "_" +
+    [now.getHours().toString().padStart(2, "0"), now.getMinutes().toString().padStart(2, "0")].join("")
+  )
 }
 
 const DELIVERY_BUNDLE_PREFIX = "killstata_output_"
@@ -247,22 +245,10 @@ function baseDeliveryBundleName(runId: string) {
   return `${DELIVERY_BUNDLE_PREFIX}${runIdDeliveryStamp(runId)}`
 }
 
-function normalizeLegacyDeliveryBundleName(name: string) {
-  if (!name.startsWith(LEGACY_DELIVERY_BUNDLE_PREFIX)) return name
-  const suffix = name.slice(LEGACY_DELIVERY_BUNDLE_PREFIX.length)
-  if (/^\d{12}$/.test(suffix)) {
-    return `${DELIVERY_BUNDLE_PREFIX}${suffix.slice(0, 8)}_${suffix.slice(8)}`
-  }
-  return `${DELIVERY_BUNDLE_PREFIX}${suffix}`
-}
-
 function legacyDeliveryBundleNames(runId: string) {
   const stamp = runIdDeliveryStamp(runId)
   const compactStamp = stamp.replace("_", "")
-  return [
-    `${DELIVERY_BUNDLE_PREFIX}${compactStamp}`,
-    `${LEGACY_DELIVERY_BUNDLE_PREFIX}${compactStamp}`,
-  ]
+  return [`${DELIVERY_BUNDLE_PREFIX}${compactStamp}`, `${LEGACY_DELIVERY_BUNDLE_PREFIX}${compactStamp}`]
 }
 
 export function deliveryBundleName(runId: string) {
@@ -283,7 +269,9 @@ function deliveryManifestPath(runId: string) {
 }
 
 function legacyDeliveryManifestPaths(runId: string) {
-  return legacyDeliveryBundleNames(runId).map((name) => path.join(deliveryStateRoot(), "manifests", name, "final_outputs.json"))
+  return legacyDeliveryBundleNames(runId).map((name) =>
+    path.join(deliveryStateRoot(), "manifests", name, "final_outputs.json"),
+  )
 }
 
 function readDeliveryRunManifest(runId: string): DeliveryRunManifest | undefined {
@@ -291,9 +279,14 @@ function readDeliveryRunManifest(runId: string): DeliveryRunManifest | undefined
   const primaryPath = deliveryManifestPath(normalizedRunId)
   for (const manifestPath of [primaryPath, ...legacyDeliveryManifestPaths(normalizedRunId)]) {
     if (!fs.existsSync(manifestPath)) continue
-    const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as Partial<DeliveryRunManifest> & { outputs?: FinalOutputRecord[] }
+    const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as Partial<DeliveryRunManifest> & {
+      outputs?: FinalOutputRecord[]
+    }
     const bundleName =
-      parsed.bundleName ?? (manifestPath === primaryPath ? baseDeliveryBundleName(normalizedRunId) : path.basename(path.dirname(manifestPath)))
+      parsed.bundleName ??
+      (manifestPath === primaryPath
+        ? baseDeliveryBundleName(normalizedRunId)
+        : path.basename(path.dirname(manifestPath)))
     return {
       version: 1,
       runId: normalizedRunId,
@@ -354,168 +347,17 @@ function ensureUniqueFilePath(dir: string, fileName: string) {
   return candidate
 }
 
-export function projectReflectionRoot() {
-  return path.join(projectStateRoot(), "reflection")
-}
-
-export function projectTempRoot() {
-  return path.join(projectStateRoot(), "tmp")
-}
-
-export function projectErrorsRoot() {
-  return path.join(projectStateRoot(), "errors")
-}
-
-export function projectHealthRoot() {
-  return path.join(projectStateRoot(), "health")
-}
-
-export function datasetRoot(datasetId: string) {
-  return path.join(datasetsRoot(), datasetId)
-}
-
-function legacyDatasetsRoot() {
-  return path.join(projectInternalRoot(), "state", "datasets")
-}
-
-function legacyDatasetRoot(datasetId: string) {
-  return path.join(legacyDatasetsRoot(), datasetId)
-}
-
-function replaceRoot(value: unknown, fromRoot: string, toRoot: string): unknown {
-  if (typeof value === "string") {
-    return value.startsWith(fromRoot) ? path.join(toRoot, value.slice(fromRoot.length)) : value
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => replaceRoot(item, fromRoot, toRoot))
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, replaceRoot(item, fromRoot, toRoot)]),
-    )
-  }
-  return value
-}
-
-function migrateDirectoryIfNeeded(fromDir: string, toDir: string) {
-  if (!fs.existsSync(fromDir) || fs.existsSync(toDir)) return
-  fs.mkdirSync(path.dirname(toDir), { recursive: true })
-  fs.renameSync(fromDir, toDir)
-}
-
-function rewriteFileTokensIfNeeded(filePath: string, replacements: Array<{ from: string; to: string }>) {
-  if (!fs.existsSync(filePath)) return
-  const original = fs.readFileSync(filePath, "utf-8")
-  const updated = replacements.reduce((text, replacement) => text.split(replacement.from).join(replacement.to), original)
-  if (updated !== original) fs.writeFileSync(filePath, updated, "utf-8")
-}
-
-function migrateLegacyDeliveryBundles() {
-  const replacements: Array<{ from: string; to: string }> = []
-  const roots = [Instance.directory, path.join(deliveryStateRoot(), "manifests")]
-
-  for (const root of roots) {
-    if (!fs.existsSync(root)) continue
-    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-      if (!entry.isDirectory() || !entry.name.startsWith(LEGACY_DELIVERY_BUNDLE_PREFIX)) continue
-      const legacyName = entry.name
-      const currentName = normalizeLegacyDeliveryBundleName(legacyName)
-      migrateDirectoryIfNeeded(path.join(root, legacyName), path.join(root, currentName))
-      replacements.push({ from: legacyName, to: currentName })
-    }
-  }
-
-  if (replacements.length === 0) return
-
-  if (fs.existsSync(datasetsRoot())) {
-    for (const entry of fs.readdirSync(datasetsRoot(), { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      rewriteFileTokensIfNeeded(path.join(datasetsRoot(), entry.name, "manifest.json"), replacements)
-    }
-  }
-
-  const manifestRoot = path.join(deliveryStateRoot(), "manifests")
-  if (fs.existsSync(manifestRoot)) {
-    for (const entry of fs.readdirSync(manifestRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      rewriteFileTokensIfNeeded(path.join(manifestRoot, entry.name, "final_outputs.json"), replacements)
-    }
-  }
-}
-
-export function ensureInternalLayout() {
-  const root = projectInternalRoot()
-  fs.mkdirSync(root, { recursive: true })
-
-  migrateDirectoryIfNeeded(path.join(root, "errors"), projectErrorsRoot())
-  migrateDirectoryIfNeeded(path.join(root, "health"), projectHealthRoot())
-  migrateDirectoryIfNeeded(path.join(root, "reflection"), projectReflectionRoot())
-  migrateDirectoryIfNeeded(path.join(root, "tmp"), projectTempRoot())
-
-  const legacyRoot = path.join(root, "state")
-  const legacyDatasets = path.join(legacyRoot, "datasets")
-  if (fs.existsSync(legacyDatasets)) {
-    fs.mkdirSync(datasetsRoot(), { recursive: true })
-    for (const entry of fs.readdirSync(legacyDatasets, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const fromDir = path.join(legacyDatasets, entry.name)
-      const toDir = path.join(datasetsRoot(), entry.name)
-      if (fs.existsSync(toDir)) continue
-      fs.renameSync(fromDir, toDir)
-      const manifestPath = path.join(toDir, "manifest.json")
-      if (fs.existsSync(manifestPath)) {
-        const oldRoot = fromDir
-        const newRoot = toDir
-        const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"))
-        const migrated = replaceRoot(manifest, oldRoot, newRoot)
-        fs.writeFileSync(manifestPath, JSON.stringify(migrated, null, 2), "utf-8")
-      }
-    }
-    const remaining = fs.existsSync(legacyDatasets) ? fs.readdirSync(legacyDatasets) : []
-    if (remaining.length === 0) fs.rmSync(legacyDatasets, { recursive: true, force: true })
-  }
-
-  if (fs.existsSync(legacyRoot)) {
-    const remaining = fs.readdirSync(legacyRoot)
-    if (remaining.length === 0) fs.rmSync(legacyRoot, { recursive: true, force: true })
-  }
-
-  for (const dir of [
-    projectStateRoot(),
-    projectPlansRoot(),
-    projectReflectionRoot(),
-    projectTempRoot(),
-    projectErrorsRoot(),
-    projectHealthRoot(),
-    deliveryStateRoot(),
-    datasetsRoot(),
-  ]) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-
-  if (!fs.existsSync(datasetIndexPath())) {
-    writeDatasetIndex({ version: 1, entries: {} })
-  }
-
-  migrateLegacyDeliveryBundles()
-}
-
-export function datasetManifestPath(datasetId: string) {
-  return path.join(datasetRoot(datasetId), "manifest.json")
-}
-
 export function ensureDatasetDirs(datasetId: string) {
   ensureInternalLayout()
   const root = datasetRoot(datasetId)
   for (const dir of [
     root,
     path.join(root, "stages"),
-    path.join(root, "inspection"),
     path.join(root, "reports"),
     path.join(root, "meta"),
     path.join(root, "audit"),
   ]) {
-    fs.mkdirSync(dir, { recursive: true })
+    fs.mkdirSync(resolveManagedDatasetPath({ datasetId, filePath: dir }), { recursive: true })
   }
 }
 
@@ -524,6 +366,8 @@ export function createDatasetManifest(input: {
   sourcePath: string
   sourceFormat?: DatasetManifest["sourceFormat"]
   workingFormat?: "parquet"
+  origin?: DatasetConversationOrigin
+  sourceAsset?: SourceAsset
 }): DatasetManifest {
   ensureDatasetDirs(input.datasetId)
   return {
@@ -536,50 +380,35 @@ export function createDatasetManifest(input: {
     stages: [],
     artifacts: [],
     finalOutputs: [],
-  }
-}
-
-export function readDatasetManifest(datasetId: string) {
-  ensureInternalLayout()
-  const manifestPath = datasetManifestPath(datasetId)
-  if (!fs.existsSync(manifestPath)) {
-    throw new Error(`Dataset manifest not found for datasetId=${datasetId}`)
-  }
-  const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as DatasetManifest
-  return {
-    ...parsed,
-    sourceFormat: parsed.sourceFormat ?? inferSourceFormat(parsed.sourcePath),
-    workingFormat: "parquet" as const,
-    stages: (parsed.stages ?? []).map((stage) => ({
-      ...stage,
-      workingFormat: "parquet" as const,
-    })),
-    artifacts: parsed.artifacts ?? [],
-    finalOutputs: parsed.finalOutputs ?? [],
+    origin: input.origin,
+    sourceAsset: input.sourceAsset,
   }
 }
 
 export function writeDatasetManifest(manifest: DatasetManifest) {
   ensureDatasetDirs(manifest.datasetId)
+  // 运行期校验：保证 readDatasetManifest 之后的工作格式查询不会撒谎。
+  // 读侧无条件改写为 "parquet"，所以写也必须匹配；否则读路径会把磁盘上的
+  // csv/csv 静默改写成 parquet，下游按 stage.workingFormat === "parquet"
+  // 去读 workingPath 就崩。
+  if (manifest.workingFormat !== "parquet") {
+    throw new Error(
+      `DatasetManifest.workingFormat 必须是 "parquet"，收到 "${manifest.workingFormat}"（datasetId=${manifest.datasetId}）`,
+    )
+  }
+  for (const stage of manifest.stages) {
+    if (stage.workingFormat !== "parquet") {
+      throw new Error(
+        `DatasetStageRecord.workingFormat 必须是 "parquet"，stageId=${stage.stageId} 收到 "${stage.workingFormat}"`,
+      )
+    }
+  }
   manifest.updatedAt = nowIso()
-  fs.writeFileSync(datasetManifestPath(manifest.datasetId), JSON.stringify(manifest, null, 2), "utf-8")
-}
-
-export function readDatasetIndex(): DatasetIndex {
-  ensureInternalLayout()
-  if (!fs.existsSync(datasetIndexPath())) {
-    return { version: 1, entries: {} }
-  }
-  const parsed = JSON.parse(fs.readFileSync(datasetIndexPath(), "utf-8")) as DatasetIndex
-  return {
-    version: 1,
-    entries: parsed.entries ?? {},
-  }
-}
-
-export function writeDatasetIndex(index: DatasetIndex) {
-  fs.mkdirSync(datasetsRoot(), { recursive: true })
-  fs.writeFileSync(datasetIndexPath(), JSON.stringify(index, null, 2), "utf-8")
+  const safeManifestPath = resolveManagedDatasetPath({
+    datasetId: manifest.datasetId,
+    filePath: datasetManifestPath(manifest.datasetId),
+  })
+  fs.writeFileSync(safeManifestPath, JSON.stringify(manifest, null, 2), "utf-8")
 }
 
 export function fingerprintSourceFile(sourcePath: string): SourceFingerprint {
@@ -594,16 +423,26 @@ export function fingerprintSourceFile(sourcePath: string): SourceFingerprint {
   }
 }
 
-export function findDatasetForSource(sourcePath: string) {
+export function findDatasetForSource(sourcePath: string, sessionID?: string) {
   const fingerprint = fingerprintSourceFile(sourcePath)
   const index = readDatasetIndex()
-  const entry = index.entries[fingerprint.key]
+  const candidates = Object.entries(index.entries)
+    .filter(([key, entry]) => key === fingerprint.key || entry.fingerprint.key === fingerprint.key)
+    .sort(([, a], [, b]) => b.updatedAt.localeCompare(a.updatedAt))
+  const match = sessionID
+    ? candidates.find(([, entry]) => entry.createdBySessionID === sessionID)
+    : candidates[0]
+  const entry = match?.[1]
   if (!entry) {
     return { fingerprint }
   }
+  // 跨会话隔离：指纹命中的数据集必须属于**当前会话**才允许复用。同一源文件在别的会话
+  // 导入过时，这里返回"无 manifest"，让 data_import 新建独立数据集——新窗口不应继承
+  // 上一窗口的 stages/artifacts。历史条目没有 createdBySessionID（旧版本写入）也视为
+  // 不属于本会话。本会话内重复导入同一文件仍正常复用（entry 带 createdBySessionID）。
   const manifestPath = datasetManifestPath(entry.datasetId)
   if (!fs.existsSync(manifestPath)) {
-    delete index.entries[fingerprint.key]
+    delete index.entries[match![0]]
     writeDatasetIndex(index)
     return { fingerprint }
   }
@@ -617,39 +456,54 @@ export function upsertDatasetIndexEntry(input: {
   datasetId: string
   sourcePath: string
   fingerprint: SourceFingerprint
+  sessionID?: string
 }) {
   const index = readDatasetIndex()
-  index.entries[input.fingerprint.key] = {
+  // 新条目按会话分键，避免 B 覆盖 A 的 fingerprint 索引；旧版无 session 条目仍保留
+  // 原始 fingerprint key，findDatasetForSource 会兼容读取但不会在 session scope 复用。
+  const storageKey = input.sessionID
+    ? `${input.fingerprint.key}::session::${stableHash(input.sessionID)}`
+    : input.fingerprint.key
+  index.entries[storageKey] = {
     datasetId: input.datasetId,
     sourcePath: input.sourcePath,
     fingerprint: input.fingerprint,
     updatedAt: nowIso(),
+    createdBySessionID: input.sessionID,
   }
   writeDatasetIndex(index)
 }
 
-export function latestImportStageForFingerprint(manifest: DatasetManifest, fingerprintKey: string) {
+/**
+ * 工作表选择的稳定标识。同一个 xlsx 的不同 sheet 是不同的数据表，
+ * 文件指纹（路径+大小+mtime）对它们完全相同，因此复用判定必须再带上这一维，
+ * 否则导入 Sheet2 会静默复用 Sheet1 的 stage 并返回错的数据。
+ */
+export function sheetSelectionKey(policy?: { mode?: string; sheetName?: string; headerRow?: number }) {
+  const mode = policy?.mode ?? "first_sheet"
+  const name = policy?.sheetName ?? ""
+  const headerRow = policy?.headerRow ?? 0
+  return `${mode}::${name}::${headerRow}`
+}
+
+export function latestImportStageForFingerprint(
+  manifest: DatasetManifest,
+  fingerprintKey: string,
+  sheetKey?: string,
+) {
   return [...manifest.stages]
     .reverse()
     .find(
       (stage) =>
         stage.action === "import" &&
         stage.metadata?.sourceFingerprint === fingerprintKey &&
+        // 历史 stage 没有记录 sheet，按“首表”处理以保持向后兼容。
+        (sheetKey === undefined ||
+          (typeof stage.metadata?.sourceSheet === "string" ? stage.metadata.sourceSheet : sheetSelectionKey()) ===
+            sheetKey) &&
         typeof stage.workingPath === "string" &&
         fs.existsSync(stage.workingPath),
     )
-}
-
-export function getStage(manifest: DatasetManifest, stageId?: string) {
-  if (!manifest.stages.length) {
-    throw new Error(`Dataset ${manifest.datasetId} has no stages yet`)
-  }
-  if (!stageId) return manifest.stages[manifest.stages.length - 1]
-  const match = manifest.stages.find((item) => item.stageId === stageId)
-  if (!match) {
-    throw new Error(`Stage not found: datasetId=${manifest.datasetId}, stageId=${stageId}`)
-  }
-  return match
 }
 
 export function nextStageId(manifest: DatasetManifest) {
@@ -667,12 +521,20 @@ export function stageOutputPath(input: {
 }) {
   const ext = input.format ?? "parquet"
   const suffix = input.stamp ? `_${input.stamp}` : ""
-  return path.join(datasetRoot(input.datasetId), "stages", `${input.stageId}_${sanitizeSegment(input.action)}${suffix}.${ext}`)
+  return path.join(
+    datasetRoot(input.datasetId),
+    "stages",
+    `${input.stageId}_${sanitizeSegment(input.action)}${suffix}.${ext}`,
+  )
 }
 
 export function stageInspectionPaths(input: { datasetId: string; stageId: string; action: string; stamp?: string }) {
   const suffix = input.stamp ? `_${input.stamp}` : ""
-  const base = path.join(datasetRoot(input.datasetId), "inspection", `${input.stageId}_${sanitizeSegment(input.action)}${suffix}`)
+  const base = path.join(
+    datasetRoot(input.datasetId),
+    "inspection",
+    `${input.stageId}_${sanitizeSegment(input.action)}${suffix}`,
+  )
   return {
     csvPath: `${base}.csv`,
     workbookPath: `${base}.xlsx`,
@@ -685,6 +547,7 @@ export function stageMetaPaths(input: { datasetId: string; stageId: string; acti
   return {
     schemaPath: path.join(root, "meta", `${suffix}_schema.json`),
     labelsPath: path.join(root, "meta", `${suffix}_labels.json`),
+    importReceiptPath: path.join(root, "meta", `${suffix}_import_receipt.json`),
     summaryPath: path.join(root, "audit", `${suffix}_summary.json`),
     logPath: path.join(root, "audit", `${suffix}_log.md`),
   }
@@ -763,7 +626,7 @@ function classifyFinalOutputSection(output: FinalOutputRecord) {
     signature.includes("import") ||
     signature.includes("filter") ||
     signature.includes("preprocess") ||
-    signature.includes("describe") ||
+    signature.includes("profile") ||
     signature.includes("correlation") ||
     signature.includes("cleaned_workbook") ||
     signature.includes("prep")
@@ -786,20 +649,37 @@ function recommendedOutputScore(output: FinalOutputRecord) {
   const signature = [output.key, output.label, output.path].filter(Boolean).join(" ").toLowerCase()
   if (signature.includes("delivery_summary")) return 100
   if (signature.includes("results")) return 90
-  if (signature.includes("describe")) return 80
+  if (signature.includes("profile")) return 80
   if (signature.includes("diagnostics")) return 70
-  if (signature.includes("table_docx") || signature.includes("table_latex") || signature.includes("coefficients")) return 60
+  if (signature.includes("table_docx") || signature.includes("table_latex") || signature.includes("coefficients"))
+    return 60
   return 10
 }
 
 function buildUserFacingRunArtifacts(sourcePath: string, runId: string, outputs: FinalOutputRecord[]) {
   const runRoot = runOutputsRoot(sourcePath, runId)
   const sections = [
-    { id: "prep", title: "01_Data_Preparation", description: "Import, filtering, cleaning, and descriptive-statistics artifacts." },
-    { id: "core_results", title: "02_Core_Results", description: "Regression outputs, summaries, and narrative result files." },
-    { id: "diagnostics", title: "03_Diagnostics_And_Risks", description: "QA, diagnostics, robustness checks, and numeric snapshots." },
-    { id: "tables", title: "04_Citable_Tables", description: "Three-line tables and coefficient tables ready for papers or slides." },
-    { id: "other", title: "05_Other_Outputs", description: "Supplementary files outside the main delivery path." },
+    {
+      id: "prep",
+      title: "01_Data_Preparation",
+      description: "导入、筛选、清洗和描述统计产物。",
+    },
+    {
+      id: "core_results",
+      title: "02_Core_Results",
+      description: "回归输出、摘要和结果说明文件。",
+    },
+    {
+      id: "diagnostics",
+      title: "03_Diagnostics_And_Risks",
+      description: "数据质量检查、诊断、稳健性检验和数字快照。",
+    },
+    {
+      id: "tables",
+      title: "04_Citable_Tables",
+      description: "可用于论文或汇报的三线表和系数表。",
+    },
+    { id: "other", title: "05_Other_Outputs", description: "主交付路径外的补充文件。" },
   ].map((section) => ({
     ...section,
     items: outputs
@@ -869,7 +749,7 @@ function writeUserFacingRunGuide(sourcePath: string, runId: string, outputs: Fin
 
   lines.push(``, `## How To Read This Run`)
   lines.push(`- If you only want the takeaway first, open the summary or results file in Core Results.`)
-  lines.push(`- If you want to audit cleaning decisions, open the inspection or describe files in Data Preparation.`)
+  lines.push(`- If you want to audit cleaning decisions, open the stage summary or profile files in Data Preparation.`)
   lines.push(`- If you care about reliability, read diagnostics and numeric snapshots in Diagnostics And Risks.`)
   lines.push(`- If you are preparing a paper or deck, start with the citable tables.`)
   lines.push(``, `## File Groups`)
@@ -1026,11 +906,11 @@ export function publishVisibleOutput(input: {
 function finalOutputMatches(existing: FinalOutputRecord | undefined, candidate: FinalOutputRecord) {
   return Boolean(
     existing &&
-    existing.path === candidate.path &&
-    existing.sourcePath === candidate.sourcePath &&
-    existing.stageId === candidate.stageId &&
-    existing.branch === candidate.branch &&
-    JSON.stringify(existing.metadata ?? {}) === JSON.stringify(candidate.metadata ?? {}),
+      existing.path === candidate.path &&
+      existing.sourcePath === candidate.sourcePath &&
+      existing.stageId === candidate.stageId &&
+      existing.branch === candidate.branch &&
+      JSON.stringify(existing.metadata ?? {}) === JSON.stringify(candidate.metadata ?? {}),
   )
 }
 
@@ -1141,14 +1021,19 @@ export function publishDeliveryOutput(input: {
     metadata,
   }
 
-  const unchanged =
-    finalOutputMatches(existing, nextRecord) && fs.existsSync(nextRecord.path)
+  const unchanged = finalOutputMatches(existing, nextRecord) && fs.existsSync(nextRecord.path)
 
   if (!unchanged) {
     fs.copyFileSync(input.sourcePath, outputPath)
   }
 
-  if (input.manifest && !finalOutputMatches(input.manifest.finalOutputs.find((item) => item.key === input.key && item.runId === runId), nextRecord)) {
+  if (
+    input.manifest &&
+    !finalOutputMatches(
+      input.manifest.finalOutputs.find((item) => item.key === input.key && item.runId === runId),
+      nextRecord,
+    )
+  ) {
     upsertFinalOutput(input.manifest, nextRecord)
   }
 
@@ -1164,11 +1049,7 @@ export function publishDeliveryOutput(input: {
   return outputPath
 }
 
-export function resolveArtifactInput(input: {
-  datasetId?: string
-  stageId?: string
-  inputPath?: string
-}): {
+export function resolveArtifactInput(input: { datasetId?: string; stageId?: string; inputPath?: string }): {
   manifest?: DatasetManifest
   stage?: DatasetStageRecord
   resolvedInputPath?: string

@@ -11,8 +11,8 @@ describe("independent econometrics tool lifecycle", () => {
     }
   })
 
-  test("estimator failures retry the estimation stage instead of falling through to verification", () => {
-    for (const toolName of ["ols_regression", "panel_fe_regression", "iv_2sls", "psm_matching", "psm_ipw"]) {
+  test("admitted estimator failures retry the estimation stage instead of falling through to verification", () => {
+    for (const toolName of ["psm_matching", "psm_ipw", "psm_regression", "psm_double_robust", "did2s"]) {
       expect(retryStageForToolFailure(toolName, "estimation_failure")).toBe("estimate")
     }
   })
@@ -24,8 +24,8 @@ describe("independent econometrics tool lifecycle", () => {
   test("propensity-score diagnostic failures return to profile or QA instead of pretending estimation completed", () => {
     for (const toolName of ["psm_construction", "psm_visualize"]) {
       expect(retryStageForToolFailure(toolName, "column_not_found")).toBe("profile")
-      expect(retryStageForToolFailure(toolName, "qa_gate_blocked")).toBe("qa")
-      expect(retryStageForToolFailure(toolName, "estimation_failure")).toBe("qa")
+      expect(retryStageForToolFailure(toolName, "validate_blocked")).toBe("validate")
+      expect(retryStageForToolFailure(toolName, "estimation_failure")).toBe("validate")
     }
   })
 

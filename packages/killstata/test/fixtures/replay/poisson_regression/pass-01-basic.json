@@ -1,0 +1,11 @@
+{
+  "description": "就诊次数计数结果(visits)对参保 + 年龄收入控制的 Poisson",
+  "modelArgs": {
+    "datasetId": "health_21",
+    "stageId": "stage_000",
+    "dependentVar": "visits",
+    "treatmentVar": "insured",
+    "covariates": ["age", "income"]
+  },
+  "expect": "pass"
+}

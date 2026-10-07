@@ -22,3 +22,6 @@ process.env["XDG_CONFIG_HOME"] = path.join(dir, "config")
 process.env["XDG_STATE_HOME"] = path.join(dir, "state")
 process.env["KILLSTATA_DISABLE_MODELS_FETCH"] = "true"
 process.env["KILLSTATA_DISABLE_AUTO_RUNTIME"] = "true"
+// 离线测试不读取仓库/用户项目配置；需要配置的 provider 测试通过
+// KILLSTATA_CONFIG_CONTENT 注入临时配置。
+process.env["KILLSTATA_DISABLE_PROJECT_CONFIG"] = "true"

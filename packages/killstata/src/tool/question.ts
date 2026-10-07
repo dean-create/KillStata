@@ -1,12 +1,13 @@
 import z from "zod"
 import { Tool } from "./tool"
+import { ToolModel } from "./model-contracts"
 import { Question } from "../question"
 import DESCRIPTION from "./question.txt"
 
-export const QuestionTool = Tool.define("question", {
+export const QuestionTool = Tool.define("question", Tool.Execution.interactive, ToolModel.forTool("question"), {
   description: DESCRIPTION,
   parameters: z.object({
-    questions: z.array(Question.Info.omit({ custom: true })).describe("Questions to ask"),
+    questions: z.array(Question.Info.omit({ custom: true })).describe("要向用户提出的问题"),
   }),
   async execute(params, ctx) {
     const answers = await Question.ask({
@@ -16,15 +17,15 @@ export const QuestionTool = Tool.define("question", {
     })
 
     function format(answer: Question.Answer | undefined) {
-      if (!answer?.length) return "Unanswered"
+      if (!answer?.length) return "未回答"
       return answer.join(", ")
     }
 
     const formatted = params.questions.map((q, i) => `"${q.question}"="${format(answers[i])}"`).join(", ")
 
     return {
-      title: `Asked ${params.questions.length} question${params.questions.length > 1 ? "s" : ""}`,
-      output: `User has answered your questions: ${formatted}. You can now continue with the user's answers in mind.`,
+      title: `已提问 ${params.questions.length} 项`,
+      output: `用户回答如下：${formatted}。请严格按这些回答的范围继续执行。`,
       metadata: {
         answers,
       },

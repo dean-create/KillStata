@@ -1,0 +1,11 @@
+{
+  "description": "交通方式选择(3 类别)对通勤距离 + 年龄控制",
+  "modelArgs": {
+    "datasetId": "mode_choice",
+    "stageId": "stage_000",
+    "dependentVar": "mode",
+    "treatmentVar": "distance",
+    "covariates": ["age"]
+  },
+  "expect": "pass"
+}

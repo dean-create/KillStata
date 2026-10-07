@@ -1,5 +1,5 @@
-// Killstata supports exactly two providers. This list drives display ordering only.
-export const POPULAR_PROVIDER_ORDER = ["deepseek", "custom"] as const
+// This list drives user-visible display ordering; provider availability is enforced separately.
+export const POPULAR_PROVIDER_ORDER = ["deepseek", "custom", "anthropic", "google"] as const
 
 export const PROVIDER_PRIORITY: Record<string, number> = Object.fromEntries(
   POPULAR_PROVIDER_ORDER.map((providerID, index) => [providerID, index + 1]),
@@ -27,6 +27,16 @@ const PROVIDER_DISPLAY_OVERRIDES: Record<
     region: "Self-declared",
     note: "Point provider.custom.options.baseURL at any OpenAI-compatible endpoint (Qwen, Kimi, GLM, vLLM, …)",
   },
+  anthropic: {
+    name: "Anthropic",
+    region: "Native API",
+    note: "Uses the Anthropic Messages protocol and Anthropic API credentials.",
+  },
+  google: {
+    name: "Google Gemini",
+    region: "Native API",
+    note: "Uses the Gemini Generative Language protocol and Google API credentials.",
+  },
 }
 
 export function providerPriority(providerID: string) {
@@ -42,10 +52,7 @@ export function isUserSelectableProvider(provider: { id: string; name?: string }
   return !HIDDEN_PROVIDER_PATTERNS.some((pattern) => haystacks.some((value) => pattern.test(value)))
 }
 
-export function supportsApiKeyProvider(
-  provider: { env?: string[] },
-  methods: Array<{ type: "oauth" | "api" }> = [],
-) {
+export function supportsApiKeyProvider(provider: { env?: string[] }, methods: Array<{ type: "oauth" | "api" }> = []) {
   if (methods.some((method) => method.type === "api")) return true
   return (provider.env?.length ?? 0) > 0 || methods.length === 0
 }

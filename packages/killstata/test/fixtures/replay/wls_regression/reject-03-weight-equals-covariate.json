@@ -1,0 +1,1 @@
+{"description":"权重列和某个控制变量相同","modelArgs":{"datasetId":"panel_98","stageId":"stage_000","dependentVar":"y","treatmentVar":"x","covariates":["z"],"weightsVar":"z"},"expect":"reject","rejectHint":["weightsVar","不能同时作为解释变量"]}

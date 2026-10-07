@@ -1,51 +1,21 @@
-Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
+# 终端命令
+在持久 Shell 会话中执行没有专用工具可替代的命令。默认工作目录是 ${directory}；需要其他目录时使用 workdir，不要在 command 中拼接 cd。
 
-All commands run in ${directory} by default. Use the `workdir` parameter if you need to run a command in a different directory. AVOID using `cd <directory> && <command>` patterns - use `workdir` instead.
+## 适用场景
+- 检查托管 Python、系统依赖或运行环境；运行用户明确要求的受控命令。
+- KillStata 是计量分析工作台，不默认把用户目录当成代码仓库。除非用户明确在 Git 项目中请求，否则不要提交、推送、建分支或创建 PR。
 
-IMPORTANT: This tool is for terminal operations like git, npm, docker, etc. DO NOT use it for file operations (reading, writing, editing, searching, finding files) - use the specialized tools for this instead.
+## 专用工具优先
+- 读文件用 read，精确修改用 edit，创建/覆盖用 write，找路径用 glob/list，搜文本用 grep。
+- 数据导入、画像和 数据质量检查 用 data_import；清洗用 data_preprocess；估计用专用计量工具。不得用 Shell 绕过这些工具的 schema、权限、血缘或 数据质量检查 门禁。
+- 不要用 find、grep/rg、cat、head、tail、sed、awk、echo 重定向代替已有专用工具；输出过长会自动截断，无需手工截流。
 
-Before executing the command, please follow these steps:
+## 参数与执行
+- command 必填；description 用 5 至 10 个中文词说明目的，便于用户审查。
+- timeout 为可选毫秒数，默认 120000，最大 900000；不要用超长超时掩盖卡死。
+- 含空格的路径必须正确引用。创建文件或目录前先用 list 核对父目录与目标位置。
+- 输出超过 ${maxLines} 行或 ${maxBytes} 字节时会截断并保存完整结果；再用 read 的 offset/limit 或 grep 查看相关部分。
+- 互不依赖、只读且安全的命令可并行调用；存在依赖的命令按顺序执行。不要用分号忽略前序失败。
 
-1. Directory Verification:
-   - If the command will create new directories or files, first use `ls` to verify the parent directory exists and is the correct location
-   - For example, before running "mkdir foo/bar", first use `ls foo` to check that "foo" exists and is the intended parent directory
-
-2. Command Execution:
-   - Always quote file paths that contain spaces with double quotes (e.g., rm "path with spaces/file.txt")
-   - Examples of proper quoting:
-     - mkdir "/Users/name/My Documents" (correct)
-     - mkdir /Users/name/My Documents (incorrect - will fail)
-     - python "/path/with spaces/script.py" (correct)
-     - python /path/with spaces/script.py (incorrect - will fail)
-   - After ensuring proper quoting, execute the command.
-   - Capture the output of the command.
-
-Usage notes:
-  - The command argument is required.
-  - You can specify an optional timeout in milliseconds. If not specified, commands will time out after 120000ms (2 minutes).
-  - It is very helpful if you write a clear, concise description of what this command does in 5-10 words.
-  - If the output exceeds ${maxLines} lines or ${maxBytes} bytes, it will be truncated and the full output will be written to a file. You can use Read with offset/limit to read specific sections or Grep to search the full content. Because of this, you do NOT need to use `head`, `tail`, or other truncation commands to limit output - just run the command directly.
-
-  - Avoid using Bash with the `find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo` commands, unless explicitly instructed or when these commands are truly necessary for the task. Instead, always prefer using the dedicated tools for these commands:
-    - File search: Use Glob (NOT find or ls)
-    - Content search: Use Grep (NOT grep or rg)
-    - Read files: Use Read (NOT cat/head/tail)
-    - Edit files: Use Edit (NOT sed/awk)
-    - Write files: Use Write (NOT echo >/cat <<EOF)
-    - Communication: Output text directly (NOT echo/printf)
-  - When issuing multiple commands:
-    - If the commands are independent and can run in parallel, make multiple Bash tool calls in a single message. For example, if you need to run "git status" and "git diff", send a single message with two Bash tool calls in parallel.
-    - If the commands depend on each other and must run sequentially, use a single Bash call with '&&' to chain them together (e.g., `git add . && git commit -m "message" && git push`). For instance, if one operation must complete before another starts (like mkdir before cp, Write before Bash for git operations, or git add before git commit), run these operations sequentially instead.
-    - Use ';' only when you need to run commands sequentially but don't care if earlier commands fail
-    - DO NOT use newlines to separate commands (newlines are ok in quoted strings)
-  - AVOID using `cd <directory> && <command>`. Use the `workdir` parameter to change directories instead.
-    <good-example>
-    Use workdir="/foo/bar" with command: pytest tests
-    </good-example>
-    <bad-example>
-    cd /foo/bar && pytest tests
-    </bad-example>
-
-# What bash is for here
-
-This is an econometrics workflow, not a software project. Use bash for environment checks (python -c "import pandas"), package installs when a Python dependency is missing, and inspecting files that are not data. Do not commit, push, or open pull requests unless the user is explicitly working in a git repository and asks for it — the user's working directory is usually a plain data folder, not a repo.
+## 安全与失败
+执行前按可逆性和影响范围判断风险。删除、覆盖、修改工作目录外内容、联网上传、安装依赖或影响共享系统必须先获得针对本次范围的授权。失败时先读退出码和错误输出，核对命令、工作目录、引用和依赖，再做最小修复；不得原样盲目重试。

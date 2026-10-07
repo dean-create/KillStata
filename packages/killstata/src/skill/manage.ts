@@ -83,7 +83,9 @@ async function fetchGithubJson<T>(url: string, fetchFn: typeof fetch): Promise<T
 async function fetchGithubText(url: string, fetchFn: typeof fetch): Promise<string> {
   const response = await fetchFn(url, { headers: githubHeaders() })
   if (!response.ok) {
-    throw new InstallFromGitHubError({ message: `GitHub file download failed: ${response.status} ${response.statusText}` })
+    throw new InstallFromGitHubError({
+      message: `GitHub file download failed: ${response.status} ${response.statusText}`,
+    })
   }
   return response.text()
 }
@@ -95,9 +97,7 @@ async function downloadGithubDirectory(
   destination: string,
   fetchFn: typeof fetch,
 ) {
-  const queue = [
-    `${GITHUB_API_ROOT}/repos/${repo}/contents/${skillPath}?ref=${encodeURIComponent(ref)}`,
-  ]
+  const queue = [`${GITHUB_API_ROOT}/repos/${repo}/contents/${skillPath}?ref=${encodeURIComponent(ref)}`]
   let foundSkill = false
 
   while (queue.length > 0) {
@@ -254,9 +254,7 @@ export async function doctorSkillFile(filePath: string) {
 }
 
 export async function uninstallSkillDirectory(skillDir: string) {
-  const allowedRoots = [
-    userSkillsRoot(),
-  ]
+  const allowedRoots = [userSkillsRoot()]
   if (!allowedRoots.some((root) => pathWithin(root, skillDir))) {
     throw new InstallFromGitHubError({
       message: `Refusing to uninstall skill outside ${userSkillsRoot()}`,

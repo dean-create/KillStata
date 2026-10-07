@@ -3,14 +3,7 @@ import { createMemo, createSignal } from "solid-js"
 import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 import { DATA_FILE_EXTENSIONS, isDataFile } from "@/tool/data-file"
-import {
-  type BrowserEntry,
-  expandPath,
-  formatSize,
-  listDataDir,
-  looksLikePath,
-  parentDir,
-} from "./data-file-browser"
+import { type BrowserEntry, expandPath, formatSize, listDataDir, looksLikePath, parentDir } from "./data-file-browser"
 
 // 超过这个大小，导入时 Python 解析会明显等一会儿，先把话说在前面。
 const SLOW_IMPORT_BYTES = 20 * 1024 * 1024
@@ -80,9 +73,7 @@ export function DialogDataFile(props: { onPick: (filePath: string) => void }) {
         value: entry,
         category: dir,
         description:
-          entry.size === undefined
-            ? undefined
-            : `${formatSize(entry.size)}${slow ? " · 较大，导入需要一些时间" : ""}`,
+          entry.size === undefined ? undefined : `${formatSize(entry.size)}${slow ? " · 较大，导入需要一些时间" : ""}`,
       })
     }
 

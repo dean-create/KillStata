@@ -1,128 +1,260 @@
+/**
+ * 会话隔离：data-context 必须只反映本会话真正操作过的数据集，绝不暴露别会话的导入。
+ *
+ * 用户诉求（2026-08-08）：新会话窗口必须干净、隔离。新会话第一轮不应该看到上一窗口
+ * 导入的 did_7f1335de，也不应被 `hasActiveDataset && 非闲聊 → ingest` 兜底推向旧数据。
+ */
+
 import { describe, expect, test } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { execFileSync } from "child_process"
 import { Instance } from "@/project/instance"
-import { DataImportTool } from "@/tool/data-import"
-import { EconometricsTool } from "@/tool/econometrics"
 import { DataContext } from "@/session/data-context"
-import { resolveRuntimePythonCommand } from "@/killstata/runtime-config"
+import { writeDatasetIndex, readDatasetManifest, projectInternalRoot } from "@/runtime/dataset-state"
+import {
+  appendStage,
+  createDatasetManifest,
+} from "@/tool/analysis-state"
+import { readWorkflowSession, writeWorkflowSession } from "@/runtime/workflow/state"
 
-// 模型过去每轮只拿到 cwd 和日期——它不知道当前数据集是哪个、活跃阶段是哪个、试了几组设定，
-// 只能靠翻对话历史去回忆，压缩之后连历史都没了。<data-context> 把这些已落盘的事实每轮
-// 重新注入。这些断言锁住"注入的内容和数据的真实状态一致"。
-async function supportsPython() {
+async function withInstance<T>(fn: (root: string) => Promise<T>) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "killstata-ctx-iso-"))
   try {
-    execFileSync(await resolveRuntimePythonCommand(), ["-c", "import pandas"], { stdio: "ignore" })
-    return true
-  } catch {
-    return false
-  }
-}
-
-const ctx = {
-  sessionID: "dctx-test",
-  messageID: "",
-  callID: "",
-  agent: "general",
-  abort: AbortSignal.any([]),
-  metadata: async () => {},
-  ask: async () => {},
-} as never
-
-async function withDataDir<T>(fn: (dir: string) => Promise<T>) {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "killstata-dctx-")))
-  try {
-    return await fn(dir)
+    return await Instance.provide({ directory: root, fn: () => fn(root) })
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    fs.rmSync(root, { recursive: true, force: true })
   }
 }
 
-describe("data-context injection", () => {
-  test("an empty working directory produces no data-context (no empty shell)", async () => {
-    await withDataDir(async (dir) => {
-      await Instance.provide({
-        directory: dir,
-        fn: async () => {
-          expect(DataContext.build()).toBeUndefined()
+/** 在另一会话（"legacy"）里写入一个完整数据集 + workflow run，模拟"上一窗口导入 did_7f1335de" */
+function seedLegacyDataset(root: string, legacySessionID: string, datasetId: string) {
+  fs.mkdirSync(projectInternalRoot(), { recursive: true })
+  const manifest = createDatasetManifest({ datasetId, sourcePath: path.join(root, "did.xlsx"), sourceFormat: "xlsx" })
+  appendStage(manifest, {
+    stageId: "stage_000",
+    branch: "main",
+    action: "import",
+    workingPath: path.join(root, "did.xlsx"),
+    workingFormat: "parquet",
+    createdAt: new Date().toISOString(),
+  })
+  // 显式写盘：dataset index / manifest 是项目级，新会话建好后读得到
+  fs.writeFileSync(path.join(projectInternalRoot(), "datasets", datasetId, "manifest.json"), JSON.stringify(manifest, null, 2))
+  fs.writeFileSync(
+    path.join(projectInternalRoot(), "datasets", "index.json"),
+    JSON.stringify({
+      version: 1,
+      entries: {
+        [`${path.join(root, "did.xlsx")}::1::1`]: {
+          datasetId,
+          sourcePath: path.join(root, "did.xlsx"),
+          fingerprint: { realPath: path.join(root, "did.xlsx"), sizeBytes: 1, mtimeMs: 1, key: `${path.join(root, "did.xlsx")}::1::1` },
+          updatedAt: new Date().toISOString(),
+          createdBySessionID: legacySessionID,
+        },
+      },
+    }, null, 2),
+  )
+  // legacy 会话的工作流 session：runs 里有这个 datasetId
+  const state = readWorkflowSession(legacySessionID)
+  state.runs.push({
+    workflowRunId: "wf_legacy",
+    sessionID: legacySessionID,
+    workflowMode: "econometrics",
+    workflowLocale: "zh-CN",
+    datasetId,
+    branch: "main",
+    activeStage: "import",
+    stageSequence: [],
+    edges: [],
+    trustedArtifacts: [],
+    analysisChecklist: [],
+    stages: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  })
+  writeWorkflowSession(state)
+}
+
+describe("DataContext 会话隔离", () => {
+  test("当前会话环境包含上传后保存的数据就绪摘要", async () => {
+    await withInstance(async (root) => {
+      const sessionID = "ses_readiness_context"
+      const datasetId = "dataset_readiness"
+      const manifest = createDatasetManifest({ datasetId, sourcePath: path.join(root, "gf.xlsx"), sourceFormat: "xlsx" })
+      appendStage(manifest, {
+        stageId: "stage_000",
+        branch: "main",
+        action: "import",
+        workingPath: path.join(root, "gf.parquet"),
+        workingFormat: "parquet",
+        createdAt: new Date().toISOString(),
+        metadata: {
+          dataReadiness: {
+            version: 1,
+            rowCount: 10,
+            columnCount: 3,
+            columns: [],
+            panelCandidates: [],
+            exactLinearDependencies: [],
+            candidateMethods: [{ methodID: "ols_regression", status: "candidate", reason: "数值列", repairSuggestions: [] }],
+            warnings: [],
+          },
         },
       })
+      fs.writeFileSync(path.join(projectInternalRoot(), "datasets", datasetId, "manifest.json"), JSON.stringify(manifest, null, 2))
+      const state = readWorkflowSession(sessionID)
+      state.runs.push({
+        workflowRunId: "wf_readiness_context",
+        sessionID,
+        workflowMode: "econometrics",
+        workflowLocale: "zh-CN",
+        datasetId,
+        branch: "main",
+        activeStage: "import",
+        stageSequence: [],
+        edges: [],
+        trustedArtifacts: [],
+        analysisChecklist: [],
+        stages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      writeWorkflowSession(state)
+
+      expect(DataContext.readiness(sessionID)).toContain("ols_regression")
+      expect(DataContext.readiness(sessionID)).toContain("数据就绪检查")
     })
   })
 
-  test("a data file present but nothing imported yet is surfaced as importable", async () => {
-    await withDataDir(async (dir) => {
-      fs.writeFileSync(path.join(dir, "面板.csv"), "id,year,y\n1,2020,3\n")
-      await Instance.provide({
-        directory: dir,
-        fn: async () => {
-          const ctxBlock = DataContext.build()
-          expect(ctxBlock).toContain("可导入的数据文件")
-          expect(ctxBlock).toContain("面板.csv")
-        },
-      })
+  test("新会话（没碰过数据集）：hasActiveDataset=false，build 绝不暴露上一会话的 datasetId", async () => {
+    await withInstance(async (root) => {
+      seedLegacyDataset(root, "ses_legacy", "did_legacy_xxx")
+      const newSession = "ses_fresh_a"
+      expect(DataContext.hasActiveDataset(newSession)).toBe(false)
+      const ctx = DataContext.build(newSession)
+      if (ctx !== undefined) {
+        expect(ctx).not.toContain("did_legacy_xxx")
+        expect(ctx).not.toContain("上次会话遗留")
+        expect(ctx).not.toContain("本会话尚未操作过")
+      }
     })
   })
 
-  test("after import → regress → filter, the context reflects the true current state", async () => {
-    if (!(await supportsPython())) return
-
-    await withDataDir(async (dir) => {
-      const csv = path.join(dir, "面板.csv")
-      fs.copyFileSync(path.join(process.cwd(), "test", "fixtures", "golden", "grunfeld.csv"), csv)
-
-      await Instance.provide({
-        directory: dir,
-        fn: async () => {
-          const di = await DataImportTool.init()
-          const eco = await EconometricsTool.init()
-          const spec = {
-            dependentVar: "invest",
-            treatmentVar: "value",
-            covariates: ["capital"],
-            entityVar: "firm",
-            timeVar: "year",
-            clusterVar: "firm",
-          }
-
-          const imported = await di.execute({ action: "import", inputPath: csv } as never, ctx)
-          const datasetId = (imported.metadata as { datasetId: string }).datasetId
-          const baseStage = (imported.metadata as { stageId: string }).stageId
-
-          // 刚导入：当前数据集 + 活跃阶段（220 行）
-          const afterImport = DataContext.build()!
-          expect(afterImport).toContain(datasetId)
-          expect(afterImport).toContain("stage_000 [import]")
-          expect(afterImport).toContain("220 行")
-          // 还没跑回归，不该有"已试设定"
-          expect(afterImport).not.toContain("已试设定")
-
-          await eco.execute({ methodName: "panel_fe_regression", datasetId, ...spec } as never, ctx)
-          const filtered = await di.execute(
-            {
-              action: "filter",
-              datasetId,
-              stageId: baseStage,
-              filters: [{ column: "year", operator: "gte", value: 1940 }],
-            } as never,
-            ctx,
-          )
-          await eco.execute(
-            { methodName: "panel_fe_regression", datasetId, stageId: (filtered.metadata as { stageId: string }).stageId, ...spec } as never,
-            ctx,
-          )
-
-          // 跑了 2 次回归 + 换了样本：活跃阶段变 filter、阶段链、已试设定 2 次
-          const afterWork = DataContext.build()!
-          expect(afterWork).toContain("stage_001 [filter]")
-          expect(afterWork).toContain("165 行")
-          expect(afterWork).toContain("阶段链")
-          expect(afterWork).toContain("stage_000(import,220行) → stage_001(filter,165行)")
-          expect(afterWork).toContain("已试设定: 2 次")
+  test("本会话碰过数据集：hasActiveDataset=true，build 显示'当前数据集'", async () => {
+    await withInstance(async (root) => {
+      seedLegacyDataset(root, "ses_legacy", "did_legacy_xxx")
+      // 本会话也写一份数据集（不模拟"上一会话"的隔离场景，只验证 build 的正向路径）
+      const myDataset = "did_mine_xxx"
+      fs.mkdirSync(path.join(projectInternalRoot(), "datasets", myDataset), { recursive: true })
+      const manifest = createDatasetManifest({
+        datasetId: myDataset,
+        sourcePath: path.join(root, "mine.xlsx"),
+        sourceFormat: "xlsx",
+        origin: {
+          sessionID: "ses_legacy",
+          messageID: "msg_legacy_upload",
+          attachmentPartID: "prt_legacy_upload",
+          importedAt: "2026-08-22T00:00:00.000Z",
         },
       })
+      appendStage(manifest, {
+        stageId: "stage_000",
+        branch: "main",
+        action: "import",
+        workingPath: path.join(root, "mine.xlsx"),
+        workingFormat: "parquet",
+        createdAt: new Date().toISOString(),
+      })
+      fs.writeFileSync(
+        path.join(projectInternalRoot(), "datasets", myDataset, "manifest.json"),
+        JSON.stringify(manifest, null, 2),
+      )
+      const mySession = "ses_fresh_b"
+      const state = readWorkflowSession(mySession)
+      state.runs.push({
+        workflowRunId: "wf_mine",
+        sessionID: mySession,
+        workflowMode: "econometrics",
+        workflowLocale: "zh-CN",
+        datasetId: myDataset,
+        branch: "main",
+        activeStage: "import",
+        stageSequence: [],
+        edges: [],
+        trustedArtifacts: [],
+        analysisChecklist: [],
+        stages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      writeWorkflowSession(state)
+      expect(DataContext.hasActiveDataset(mySession)).toBe(true)
+      const ctx = DataContext.build(mySession) ?? ""
+      expect(ctx).toContain("本会话已关联当前数据集")
+      expect(ctx).not.toContain(myDataset)
+      expect(ctx).not.toContain("did_legacy_xxx")
+      expect(ctx).not.toContain("msg_legacy_upload")
     })
-  }, 120_000)
+  })
+
+  test("无索引条目 + 无数据文件时 build 返回 undefined（不塞空壳）", async () => {
+    await withInstance(async () => {
+      expect(DataContext.build("ses_empty")).toBeUndefined()
+      expect(DataContext.hasActiveDataset("ses_empty")).toBe(false)
+    })
+  })
+
+  test("A→B 后切回 A 时，build 以 activeRunId 对应的数据集为准", async () => {
+    await withInstance(async (root) => {
+      const sessionID = "ses_switch"
+      for (const datasetId of ["dataset_a", "dataset_b"]) {
+        fs.mkdirSync(path.join(projectInternalRoot(), "datasets", datasetId), { recursive: true })
+        const manifest = createDatasetManifest({
+          datasetId,
+          sourcePath: path.join(root, `${datasetId}.csv`),
+          sourceFormat: "csv",
+        })
+        appendStage(manifest, {
+          stageId: "stage_000",
+          branch: "main",
+          action: "import",
+          workingPath: path.join(root, `${datasetId}.parquet`),
+          workingFormat: "parquet",
+          createdAt: new Date().toISOString(),
+        })
+        fs.writeFileSync(
+          path.join(projectInternalRoot(), "datasets", datasetId, "manifest.json"),
+          JSON.stringify(manifest, null, 2),
+        )
+      }
+
+      const state = readWorkflowSession(sessionID)
+      const run = (workflowRunId: string, datasetId: string) => ({
+        workflowRunId,
+        sessionID,
+        workflowMode: "econometrics" as const,
+        workflowLocale: "zh-CN" as const,
+        datasetId,
+        branch: "main",
+        activeStage: "import" as const,
+        stageSequence: [],
+        edges: [],
+        trustedArtifacts: [],
+        analysisChecklist: [],
+        stages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      state.runs.push(run("wf_a", "dataset_a"), run("wf_b", "dataset_b"))
+      state.activeRunId = "wf_a"
+      writeWorkflowSession(state)
+
+      const context = DataContext.build(sessionID) ?? ""
+      expect(context).toContain("本会话已关联当前数据集")
+      expect(context).not.toContain("dataset_a")
+      expect(context).not.toContain("stage_a")
+    })
+  })
 })

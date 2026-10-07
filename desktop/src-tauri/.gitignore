@@ -1,0 +1,2 @@
+# 运行期由 Core TraceLogger 写入的工具调用日志（tauri dev 下 cwd 为 src-tauri）
+/test/

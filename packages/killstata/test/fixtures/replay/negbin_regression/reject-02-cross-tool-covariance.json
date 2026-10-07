@@ -1,0 +1,12 @@
+{
+  "description": "把 HC3 搬到负二项;计数模型只接受 nonrobust/robust",
+  "modelArgs": {
+    "datasetId": "health_21",
+    "stageId": "stage_000",
+    "dependentVar": "visits",
+    "treatmentVar": "insured",
+    "covariance": "HC3"
+  },
+  "expect": "reject",
+  "rejectHint": ["covariance", "nonrobust"]
+}

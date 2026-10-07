@@ -29,7 +29,23 @@ function getVersion(cmd, flag = "--version") {
   }
 }
 
-const WINDOWS_X64_NATIVE_PACKAGE = "killstata-windows-x64"
+function candidateBinaryPackages() {
+  const platform = os.platform() === "win32" ? "windows" : os.platform()
+  const arch = os.arch() === "x64" || os.arch() === "arm64" ? os.arch() : "x64"
+  const names = [`killstata-${platform}-${arch}`]
+
+  if (platform === "linux") {
+    names.push(
+      `killstata-${platform}-${arch}-musl`,
+      `killstata-${platform}-${arch}-baseline`,
+      `killstata-${platform}-${arch}-baseline-musl`,
+    )
+  } else if (arch === "x64") {
+    names.push(`killstata-${platform}-${arch}-baseline`)
+  }
+
+  return names
+}
 
 function hasInstalledNativeBinary() {
   const nodeModulesDirs = [
@@ -37,7 +53,7 @@ function hasInstalledNativeBinary() {
     path.resolve(import.meta.dirname, "../../node_modules"),
   ]
 
-  return nodeModulesDirs.some((dir) => fs.existsSync(path.join(dir, WINDOWS_X64_NATIVE_PACKAGE)))
+  return candidateBinaryPackages().some((name) => nodeModulesDirs.some((dir) => fs.existsSync(path.join(dir, name))))
 }
 
 function readPackageInfo() {
@@ -52,7 +68,7 @@ function readPackageInfo() {
 function advertisedNativeBinary() {
   const pkg = readPackageInfo()
   const optionalDeps = Object.keys(pkg.optionalDependencies ?? {})
-  return optionalDeps.includes(WINDOWS_X64_NATIVE_PACKAGE)
+  return candidateBinaryPackages().some((name) => optionalDeps.includes(name))
 }
 
 console.log("")
@@ -61,30 +77,33 @@ console.log("")
 
 const hasNativeBinary = hasInstalledNativeBinary()
 const hasAdvertisedNativeBinary = advertisedNativeBinary()
-const supportedPlatform = os.platform() === "win32" && os.arch() === "x64"
-if (!supportedPlatform) {
-  console.log(`${YELLOW}[WARN]${RESET} This npm release supports Windows x64 only.`)
-} else if (hasNativeBinary) {
+if (hasNativeBinary) {
   console.log(`  ${GREEN}[OK]${RESET} Native package installed for ${os.platform()}/${os.arch()}`)
 } else if (hasAdvertisedNativeBinary) {
-  console.log(`  ${YELLOW}[WARN]${RESET} Native package for ${os.platform()}/${os.arch()} was expected but was not found after install`)
+  console.log(
+    `  ${YELLOW}[WARN]${RESET} Native package for ${os.platform()}/${os.arch()} was expected but was not found after install`,
+  )
 } else {
-  console.log(`  ${YELLOW}[WARN]${RESET} This release does not currently bundle a native package for ${os.platform()}/${os.arch()}`)
+  console.log(
+    `  ${YELLOW}[WARN]${RESET} This release does not currently bundle a native package for ${os.platform()}/${os.arch()}`,
+  )
 }
 
 const hasBun = commandExists("bun")
-if (!supportedPlatform) {
-  console.log(`  ${YELLOW}[WARN]${RESET} Install KillStata on Windows x64 to run the npm package.`)
-} else if (hasBun) {
+if (hasBun) {
   console.log(`  ${GREEN}[OK]${RESET} Bun runtime: ${getVersion("bun")}`)
 } else if (hasNativeBinary) {
   console.log(`  ${GREEN}[OK]${RESET} Bun runtime not required for this install`)
 } else {
-  console.log(`  ${YELLOW}[WARN]${RESET} Bun runtime not found; this install will not run without Bun or a bundled native binary`)
+  console.log(
+    `  ${YELLOW}[WARN]${RESET} Bun runtime not found; this install will not run without Bun or a bundled native binary`,
+  )
 }
 
 console.log("")
 console.log(`${BOLD}Next steps${RESET}`)
-console.log(`  Windows users: reinstall with ${CYAN}npm i -g killstata@latest${RESET} if the native binary was not installed correctly.`)
+console.log(
+  `  Windows users: reinstall with ${CYAN}npm i -g killstata@latest${RESET} if the native binary was not installed correctly.`,
+)
 console.log(`  Run ${CYAN}killstata${RESET} to begin. KillStata will prepare its analysis tools automatically.`)
 console.log("")

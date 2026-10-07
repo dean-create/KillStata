@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "KillStata",
+  "version": "0.1.0",
+  "identifier": "com.killstata.desktop",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "",
+        "width": 1180,
+        "height": 780,
+        "minWidth": 720,
+        "minHeight": 600,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline';"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "externalBin": [
+      "binaries/killstata-core"
+    ],
+    "resources": {
+      "resources/killstata-core-provenance.json": "resources/killstata-core-provenance.json"
+    }
+  }
+}

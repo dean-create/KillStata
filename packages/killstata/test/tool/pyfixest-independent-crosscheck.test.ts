@@ -3,7 +3,7 @@ import { execFileSync } from "child_process"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { runPyfixestBackend } from "../../src/tool/pyfixest-backend"
+import { runPyfixestBackend } from "../fixtures/legacy/tool/pyfixest-backend"
 
 /**
  * 对标权威性分级（PLAN.md 缺口 2）：hdfe_regression / did2s /
@@ -42,7 +42,7 @@ describe("PyFixest independent cross-check (对标分级：C → B)", () => {
       for (let year = 2018; year <= 2023; year += 1) {
         const treatment = ((firm * 3 + year * 2) % 7) - 3
         const control = ((firm * year) % 5) - 2
-        const noise = ((firm + year) % 3 - 1) * 0.01
+        const noise = (((firm + year) % 3) - 1) * 0.01
         const outcome = 2 * treatment + 0.7 * control + firm * 0.5 + (year - 2018) * 0.3 + noise
         rows.push(`${firm},${year},${outcome},${treatment},${control}`)
       }
@@ -98,7 +98,7 @@ describe("PyFixest independent cross-check (对标分级：C → B)", () => {
       for (let year = 1; year <= 8; year += 1) {
         const treated = cohort > 0 && year >= cohort ? 1 : 0
         const eventTime = cohort > 0 ? year - cohort : "-inf"
-        const noise = ((unit * 7 + year * 3) % 11 - 5) * 0.01
+        const noise = (((unit * 7 + year * 3) % 11) - 5) * 0.01
         const outcome = unit * 0.2 + year * 0.1 + treated * 1.5 + noise
         rows.push(`${unit},${year},${cohort},${treated},${eventTime},${outcome}`)
       }
@@ -137,7 +137,8 @@ describe("PyFixest independent cross-check (对标分级：C → B)", () => {
     if (productionEstimate === null || productionEstimate === undefined) {
       throw new Error("production DID2S result had no primary estimate")
     }
-    const relativeGap = Math.abs(productionEstimate - independent.eventTimeZeroEstimate) / independent.eventTimeZeroEstimate
+    const relativeGap =
+      Math.abs(productionEstimate - independent.eventTimeZeroEstimate) / independent.eventTimeZeroEstimate
     expect(relativeGap).toBeLessThan(0.01)
   }, 60_000)
 
@@ -149,7 +150,7 @@ describe("PyFixest independent cross-check (对标分级：C → B)", () => {
       for (let year = 1; year <= 8; year += 1) {
         const treated = cohort > 0 && year >= cohort ? 1 : 0
         const eventTime = cohort > 0 ? year - cohort : "-inf"
-        const noise = ((unit * 7 + year * 3) % 11 - 5) * 0.01
+        const noise = (((unit * 7 + year * 3) % 11) - 5) * 0.01
         const outcome = unit * 0.2 + year * 0.1 + treated * 1.5 + noise
         rows.push(`${unit},${year},${cohort},${treated},${eventTime},${outcome}`)
       }

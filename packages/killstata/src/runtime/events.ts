@@ -1,6 +1,22 @@
 import { BusEvent } from "@/bus/bus-event"
 import z from "zod"
 
+/** 与 types.ts 的 CompactionLifecycle 对应；任务记录和时间线事件共用同一份定义。 */
+const CompactionLifecycleSchema = z.object({
+  operationId: z.string(),
+  sessionID: z.string(),
+  parentID: z.string(),
+  reason: z.enum(["manual", "threshold", "overflow"]),
+  status: z.enum(["started", "completed", "failed", "cancelled"]),
+  inputMessageCount: z.number().int().nonnegative(),
+  inputHistoryVersion: z.number().int().nonnegative().optional(),
+  summarySource: z.enum(["model", "fallback"]).optional(),
+  errorCode: z.string().optional(),
+  errorMessage: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+
 const RuntimeTaskRecord = z.object({
   taskId: z.string(),
   sessionID: z.string(),
@@ -20,6 +36,7 @@ const RuntimeTaskRecord = z.object({
   policyDecisions: z.array(z.record(z.string(), z.any())).optional(),
   audit: z.array(z.record(z.string(), z.any())).optional(),
   contextVersion: z.number().optional(),
+  compaction: CompactionLifecycleSchema.optional(),
   metadata: z.record(z.string(), z.any()).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -27,11 +44,14 @@ const RuntimeTaskRecord = z.object({
 
 const TaskTimelineEvent = z.object({
   id: z.string(),
+  sequence: z.number().int().nonnegative().optional(),
   taskId: z.string(),
   sessionID: z.string(),
   kind: z.string(),
+  correlation: z.record(z.string(), z.any()).optional(),
   stageId: z.string().optional(),
   workflowRunId: z.string().optional(),
+  compaction: CompactionLifecycleSchema.optional(),
   message: z.string().optional(),
   metadata: z.record(z.string(), z.any()).optional(),
   createdAt: z.string(),
@@ -79,6 +99,67 @@ const ExecPolicyDecisionSchema = z.object({
   createdAt: z.string(),
 })
 
+const ContextUsageSnapshotSchema = z.object({
+  providerID: z.string(),
+  modelID: z.string(),
+  contextLimit: z.number().nullable(),
+  inputBudget: z.number().nullable(),
+  reserveTokens: z.number().nonnegative(),
+  estimatedPromptTokens: z.number().int().nonnegative(),
+  estimatedSystemTokens: z.number().int().nonnegative(),
+  estimatedToolTokens: z.number().int().nonnegative(),
+  estimatedMessageTokens: z.number().int().nonnegative(),
+  actual: z
+    .object({
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      reasoningTokens: z.number().int().nonnegative(),
+      cacheReadTokens: z.number().int().nonnegative(),
+      cacheWriteTokens: z.number().int().nonnegative(),
+      promptTokens: z.number().int().nonnegative(),
+      usedTokens: z.number().int().nonnegative(),
+    })
+    .optional(),
+  usedTokens: z.number().int().nonnegative(),
+  remainingTokens: z.number().nullable(),
+  percentage: z.number().nullable(),
+  source: z.enum(["estimated", "actual"]),
+  compactionState: z.enum(["none", "pending", "microcompact", "summary"]),
+  updatedAt: z.string(),
+  cache: z
+    .object({
+      observationCount: z.number().int().nonnegative(),
+      truncated: z.boolean(),
+      uncachedInputTokens: z.number().int().nonnegative(),
+      cacheReadTokens: z.number().int().nonnegative(),
+      cacheWriteTokens: z.number().int().nonnegative(),
+      promptTokens: z.number().int().nonnegative(),
+      hitRatio: z.number().nonnegative(),
+      breakCount: z.number().int().nonnegative(),
+      breakReasons: z.record(z.string(), z.number().int().nonnegative()),
+      lastBreakReason: z.string().optional(),
+      updatedAt: z.string(),
+    })
+    .optional(),
+  lastAction: z
+    .object({
+      action: z.enum(["offload", "read-bound", "history-snip", "progressive", "microcompact", "collapse", "prune", "summary", "restoring", "failed"]),
+      operationId: z.string().optional(),
+      beforeTokens: z.number().int().nonnegative().optional(),
+      afterTokens: z.number().int().nonnegative().optional(),
+      savedEstimate: z.number().int().nonnegative().optional(),
+      restoredReferences: z.number().int().nonnegative().optional(),
+      removedTurns: z.number().int().nonnegative().optional(),
+      clearedParts: z.number().int().nonnegative().optional(),
+      emergency: z.boolean().optional(),
+      reason: z.enum(["pressure", "time-gap"]).optional(),
+      summarySource: z.enum(["model", "fallback"]).optional(),
+      failureStreak: z.number().int().nonnegative().optional(),
+      updatedAt: z.string(),
+    })
+    .optional(),
+})
+
 const ContextManagerSnapshotSchema = z.object({
   sessionID: z.string(),
   historyVersion: z.number().int().nonnegative(),
@@ -87,6 +168,9 @@ const ContextManagerSnapshotSchema = z.object({
   protectedItems: z.array(z.string()),
   imageInputs: z.array(z.record(z.string(), z.any())),
   createdAt: z.string(),
+  usage: ContextUsageSnapshotSchema.optional(),
+  capsule: z.record(z.string(), z.any()).optional(),
+  lastAction: ContextUsageSnapshotSchema.shape.lastAction,
 })
 
 const AgentControlStateSchema = z.object({
@@ -121,6 +205,7 @@ export namespace RuntimeEvents {
           type: z.string(),
           priority: z.number(),
           createdAt: z.number(),
+          delivery: z.enum(["queued", "steer"]).optional(),
         }),
       ),
     }),
@@ -211,8 +296,21 @@ export namespace RuntimeEvents {
       sessionID: z.string(),
       callID: z.string(),
       toolName: z.string(),
-      phase: z.enum(["queued", "running", "completed", "failed"]),
+      phase: z.enum(["queued", "running", "completed", "failed", "cancelled"]),
       batchId: z.string().optional(),
+      correlation: z.record(z.string(), z.any()).optional(),
+      reason: z.enum(["cancelled_before_dispatch", "cancelled_during_execution"]).optional(),
+    }),
+  )
+
+  export const ToolProgress = BusEvent.define(
+    "runtime.tool.progress",
+    z.object({
+      sessionID: z.string(),
+      callID: z.string(),
+      toolName: z.string(),
+      message: z.string(),
+      metadata: z.record(z.string(), z.any()).optional(),
     }),
   )
 
@@ -232,7 +330,7 @@ export namespace RuntimeEvents {
       subagentSessionID: z.string(),
       agent: z.string(),
       phase: z.enum(["queued", "running", "completed", "failed"]),
-      }),
+    }),
   )
 
   export const WorkflowState = BusEvent.define(

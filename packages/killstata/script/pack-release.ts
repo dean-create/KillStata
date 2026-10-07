@@ -5,12 +5,19 @@ import path from "node:path"
 import pkg from "../package.json"
 import { fileURLToPath } from "url"
 import { fileIntegrity, parseReleaseVersion, validateReleaseManifest, type ReleaseManifest } from "./release-core"
+import { copyWebAssets } from "./web-assets"
 
 const dir = fileURLToPath(new URL("..", import.meta.url))
 process.chdir(dir)
 const cliBinaryName = "killstata"
+const engineSourceRoot = path.resolve(dir, "../killstata-econometrics-engine")
 const version = parseReleaseVersion(process.argv.slice(2))
 process.env.KILLSTATA_VERSION = version
+
+function currentBinaryPackageName() {
+  const platform = process.platform === "win32" ? "windows" : process.platform
+  return `${pkg.name}-${platform}-${process.arch}`
+}
 
 async function localBinaryPath(name: string) {
   const windowsPath = `./dist/${name}/bin/${cliBinaryName}.exe`
@@ -18,18 +25,13 @@ async function localBinaryPath(name: string) {
   return `./dist/${name}/bin/${cliBinaryName}`
 }
 
-const { binaries } = await import("./build.ts")
+const { binaries, webAssetsDirectory } = await import("./build.ts")
 {
-  const name = `${pkg.name}-windows-x64`
+  const name = currentBinaryPackageName()
   const binaryPath = await localBinaryPath(name)
-  if (!(await Bun.file(binaryPath).exists())) throw new Error(`missing Windows binary: ${binaryPath}`)
-  if (process.platform === "win32" && process.arch === "x64") {
-    console.log(`smoke test: running ${binaryPath} --version`)
-    const builtVersion = await $`${binaryPath} --version`.text().then((output) => output.trim())
-    if (builtVersion !== version) throw new Error(`binary version mismatch: expected ${version}, got ${builtVersion}`)
-  } else {
-    console.log(`smoke test: Windows binary exists; runtime smoke requires Windows x64`)
-  }
+  console.log(`smoke test: running ${binaryPath} --version`)
+  const builtVersion = await $`${binaryPath} --version`.text().then((output) => output.trim())
+  if (builtVersion !== version) throw new Error(`binary version mismatch: expected ${version}, got ${builtVersion}`)
 }
 
 fs.mkdirSync(`./dist/${pkg.name}`, { recursive: true })
@@ -37,6 +39,11 @@ fs.cpSync("./bin", `./dist/${pkg.name}/bin`, { recursive: true })
 fs.copyFileSync("./script/postinstall.mjs", `./dist/${pkg.name}/postinstall.mjs`)
 fs.copyFileSync("./README.md", `./dist/${pkg.name}/README.md`)
 fs.copyFileSync("../../LICENSE", `./dist/${pkg.name}/LICENSE`)
+copyWebAssets(webAssetsDirectory, `./dist/${pkg.name}`)
+fs.cpSync(engineSourceRoot, `./dist/${pkg.name}/engine`, {
+  recursive: true,
+  filter: (source) => !source.includes(`${path.sep}__pycache__${path.sep}`) && !source.endsWith(`${path.sep}__pycache__`),
+})
 
 await Bun.file(`./dist/${pkg.name}/package.json`).write(
   JSON.stringify(
@@ -54,9 +61,8 @@ await Bun.file(`./dist/${pkg.name}/package.json`).write(
       scripts: {
         postinstall: "bun ./postinstall.mjs || node ./postinstall.mjs",
       },
+      files: ["bin/", "dist-web/", "engine/", "README.md", "LICENSE", "postinstall.mjs"],
       version,
-      os: ["win32"],
-      cpu: ["x64"],
       optionalDependencies: binaries,
     },
     null,

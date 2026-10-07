@@ -1,0 +1,12 @@
+{
+  "description": "核心解释变量又出现在控制变量列表里",
+  "modelArgs": {
+    "datasetId": "nsw_98",
+    "stageId": "stage_000",
+    "dependentVar": "employed",
+    "treatmentVar": "train",
+    "covariates": ["age", "train"]
+  },
+  "expect": "reject",
+  "rejectHint": ["covariates", "核心解释变量不能在控制变量中重复"]
+}

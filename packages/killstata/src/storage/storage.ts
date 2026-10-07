@@ -3,11 +3,11 @@ import path from "path"
 import fs from "fs/promises"
 import { Global } from "../global"
 import { Filesystem } from "../util/filesystem"
-import { lazy } from "../util/lazy"
+import { lazy } from "@killstata/util/lazy"
 import { Lock } from "../util/lock"
-import { $ } from "bun"
 import { NamedError } from "@killstata/util/error"
 import z from "zod"
+import { createHash } from "crypto"
 
 export namespace Storage {
   const log = Log.create({ service: "storage" })
@@ -45,26 +45,12 @@ export namespace Storage {
           }
           if (!worktree) continue
           if (!(await Filesystem.isDir(worktree))) continue
-          const [id] = await $`git rev-list --max-parents=0 --all`
-            .quiet()
-            .nothrow()
-            .cwd(worktree)
-            .text()
-            .then((x) =>
-              x
-                .split("\n")
-                .filter(Boolean)
-                .map((x) => x.trim())
-                .toSorted(),
-            )
-          if (!id) continue
-          projectID = id
+          projectID = createHash("sha256").update(path.resolve(worktree)).digest("hex").slice(0, 16)
 
           await Bun.write(
             path.join(dir, "project", projectID + ".json"),
             JSON.stringify({
-              id,
-              vcs: "git",
+              id: projectID,
               worktree,
               time: {
                 created: Date.now(),

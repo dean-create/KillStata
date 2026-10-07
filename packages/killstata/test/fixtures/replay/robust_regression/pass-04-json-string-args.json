@@ -1,0 +1,1 @@
+{"description":"模型把参数整体序列化成 JSON 字符串","modelArgs":"{\"datasetId\":\"panel_98\",\"stageId\":\"stage_000\",\"dependentVar\":\"y\",\"treatmentVar\":\"x1\"}","expect":"pass"}

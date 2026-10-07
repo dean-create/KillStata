@@ -72,6 +72,17 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
       })
       return
     }
+    // 最后一个问题选完直接提交，无需再进确认 tab
+    const isLastQuestion = store.tab === questions().length - 1
+    const isSingleChoice = !multi()
+    if (isLastQuestion && isSingleChoice) {
+      const finalAnswers = questions().map((_, i) => answers[i] ?? [])
+      sdk.client.question.reply({
+        requestID: props.request.id,
+        answers: finalAnswers,
+      })
+      return
+    }
     setStore("tab", store.tab + 1)
     setStore("selected", 0)
   }
@@ -120,6 +131,9 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
   }
 
   const dialog = useDialog()
+
+  // A/B/C 快捷键：与数字 1/2/3 等价
+  const alphaFor = (i: number) => String.fromCharCode(65 + i)
 
   useKeyboard((evt) => {
     // Skip processing if a dialog (e.g., command palette) is open
@@ -226,6 +240,16 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
         selectOption()
         return
       }
+      // A/B/C 大写字母快捷键
+      if (/^[a-z]$/i.test(evt.name) && evt.name.length === 1) {
+        const idx = evt.name.toLowerCase().charCodeAt(0) - 97
+        if (idx >= 0 && idx < total) {
+          evt.preventDefault()
+          moveTo(idx)
+          selectOption()
+          return
+        }
+      }
 
       if (evt.name === "up" || evt.name === "k") {
         evt.preventDefault()
@@ -255,10 +279,11 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
       border={["left"]}
       borderColor={theme.accent}
       customBorderChars={SplitBorder.customBorderChars}
+      width={76}
     >
-      <box gap={1} paddingLeft={1} paddingRight={3} paddingTop={1} paddingBottom={1}>
+      <box gap={0} paddingLeft={1} paddingRight={4} paddingTop={1} paddingBottom={1}>
         <Show when={!single()}>
-          <box flexDirection="row" gap={1} paddingLeft={1}>
+          <box flexDirection="row" gap={1} paddingLeft={0} paddingTop={0} paddingBottom={0}>
             <For each={questions()}>
               {(q, index) => {
                 const isActive = () => index() === store.tab
@@ -269,11 +294,21 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                   <box
                     paddingLeft={1}
                     paddingRight={1}
-                    backgroundColor={isActive() ? theme.accent : theme.backgroundElement}
+                    paddingTop={0}
+                    paddingBottom={0}
+                    backgroundColor={
+                      isActive()
+                        ? theme.accent
+                        : isAnswered()
+                          ? tint(theme.backgroundElement, theme.success, 0.14)
+                          : theme.backgroundElement
+                    }
+                    border={isActive() ? undefined : isAnswered() ? ["bottom"] : undefined}
+                    borderColor={isAnswered() ? theme.success : undefined}
                     onMouseUp={() => selectTab(index())}
                   >
-                    <text fg={isActive() ? theme.selectedListItemText : isAnswered() ? theme.text : theme.textMuted}>
-                      {q.header}
+                    <text fg={isActive() ? theme.selectedListItemText : isAnswered() ? theme.success : theme.textMuted}>
+                      {isAnswered() ? "✓ " : `${index() + 1} `}{q.header}
                     </text>
                   </box>
                 )
@@ -282,129 +317,186 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
             <box
               paddingLeft={1}
               paddingRight={1}
-              backgroundColor={confirm() ? theme.accent : theme.backgroundElement}
+              backgroundColor={
+                confirm()
+                  ? theme.accent
+                  : questions().every((_, i) => (store.answers[i]?.length ?? 0) > 0)
+                    ? tint(theme.backgroundElement, theme.success, 0.14)
+                    : theme.backgroundElement
+              }
+              border={confirm() ? undefined : questions().every((_, i) => (store.answers[i]?.length ?? 0) > 0) ? ["bottom"] : undefined}
+              borderColor={theme.success}
               onMouseUp={() => selectTab(questions().length)}
             >
-              <text fg={confirm() ? theme.selectedListItemText : theme.textMuted}>Confirm</text>
+              <text fg={confirm() ? theme.selectedListItemText : theme.textMuted}>确认</text>
             </box>
           </box>
         </Show>
 
         <Show when={!confirm()}>
-          <box paddingLeft={1} gap={1}>
-            <box>
+          <box paddingLeft={0} gap={0}>
+            <box flexDirection="row" gap={1} alignItems="center" paddingLeft={1}>
+              <box
+                width={1}
+                height={1}
+                backgroundColor={theme.accent}
+              >
+                <text fg={theme.selectedListItemText}>◆</text>
+              </box>
               <text fg={theme.text}>
                 {question()?.question}
-                {multi() ? " (select all that apply)" : ""}
+                {multi() ? "（可多选，A/B 切换）" : "（A/B/C 快捷键）"}
               </text>
             </box>
-            <box>
+            <box flexDirection="column" gap={0} paddingTop={0}>
               <For each={options()}>
                 {(opt, i) => {
                   const active = () => i() === store.selected
                   const picked = () => store.answers[store.tab]?.includes(opt.label) ?? false
+                  const letter = () => alphaFor(i())
                   return (
-                    <box onMouseOver={() => moveTo(i())} onMouseUp={() => selectOption()}>
-                      <box flexDirection="row">
-                        <box backgroundColor={active() ? theme.backgroundElement : undefined} paddingRight={1}>
-                          <text fg={active() ? tint(theme.textMuted, theme.secondary, 0.6) : theme.textMuted}>
-                            {`${i() + 1}.`}
-                          </text>
-                        </box>
-                        <box backgroundColor={active() ? theme.backgroundElement : undefined}>
-                          <text fg={active() ? theme.secondary : picked() ? theme.success : theme.text}>
-                            {multi() ? `[${picked() ? "✓" : " "}] ${opt.label}` : opt.label}
-                          </text>
-                        </box>
-                        <Show when={!multi()}>
-                          <text fg={theme.success}>{picked() ? "✓" : ""}</text>
-                        </Show>
+                    <box
+                      flexDirection="row"
+                      gap={1}
+                      paddingLeft={1}
+                      paddingRight={1}
+                      paddingTop={0}
+                      paddingBottom={0}
+                      backgroundColor={
+                        active()
+                          ? tint(theme.backgroundElement, theme.accent, 0.18)
+                          : picked()
+                            ? tint(theme.backgroundElement, theme.success, 0.10)
+                            : undefined
+                      }
+                      border={active() ? ["left"] : picked() ? ["left"] : undefined}
+                      borderColor={active() ? theme.accent : picked() ? theme.success : undefined}
+                      onMouseOver={() => moveTo(i())}
+                      onMouseUp={() => selectOption()}
+                    >
+                      <box
+                        width={3}
+                        height={1}
+                        justifyContent="center"
+                        alignItems="center"
+                        backgroundColor={picked() ? theme.success : active() ? theme.accent : theme.backgroundElement}
+                      >
+                        <text fg={picked() || active() ? theme.selectedListItemText : theme.textMuted}>{letter()}</text>
                       </box>
-
-                      <box paddingLeft={3}>
-                        <text fg={theme.textMuted}>{opt.description}</text>
+                      <box flexDirection="row" flexGrow={1} gap={1} alignItems="center">
+                        <text fg={active() ? theme.secondary : picked() ? theme.success : theme.text}>
+                          {opt.label}
+                        </text>
+                        <Show when={picked() && !multi()}>
+                          <text fg={theme.success}> ✓</text>
+                        </Show>
+                        <Show when={multi() && picked()}>
+                          <text fg={theme.success}> ✓ 已选</text>
+                        </Show>
                       </box>
                     </box>
                   )
                 }}
               </For>
               <Show when={custom()}>
-                <box onMouseOver={() => moveTo(options().length)} onMouseUp={() => selectOption()}>
-                  <box flexDirection="row">
-                    <box backgroundColor={other() ? theme.backgroundElement : undefined} paddingRight={1}>
-                      <text fg={other() ? tint(theme.textMuted, theme.secondary, 0.6) : theme.textMuted}>
-                        {`${options().length + 1}.`}
-                      </text>
-                    </box>
-                    <box backgroundColor={other() ? theme.backgroundElement : undefined}>
+                <box
+                  flexDirection="row"
+                  gap={1}
+                  paddingLeft={1}
+                  paddingRight={1}
+                  backgroundColor={
+                    other()
+                      ? tint(theme.backgroundElement, theme.accent, 0.18)
+                      : customPicked()
+                        ? tint(theme.backgroundElement, theme.success, 0.10)
+                        : undefined
+                  }
+                  border={other() ? ["left"] : customPicked() ? ["left"] : undefined}
+                  borderColor={other() ? theme.accent : customPicked() ? theme.success : undefined}
+                  onMouseOver={() => moveTo(options().length)}
+                  onMouseUp={() => selectOption()}
+                >
+                  <box
+                    width={3}
+                    height={1}
+                    justifyContent="center"
+                    alignItems="center"
+                    backgroundColor={customPicked() ? theme.success : other() ? theme.accent : theme.backgroundElement}
+                  >
+                    <text fg={customPicked() || other() ? theme.selectedListItemText : theme.textMuted}>{alphaFor(options().length)}</text>
+                  </box>
+                  <box flexDirection="column" flexGrow={1}>
+                    <box flexDirection="row" gap={1} alignItems="center">
                       <text fg={other() ? theme.secondary : customPicked() ? theme.success : theme.text}>
-                        {multi() ? `[${customPicked() ? "✓" : " "}] Type your own answer` : "Type your own answer"}
+                        自己输入答案
                       </text>
+                      <Show when={customPicked()}>
+                        <text fg={theme.success}> ✓ 已选</text>
+                      </Show>
                     </box>
-
-                    <Show when={!multi()}>
-                      <text fg={theme.success}>{customPicked() ? "✓" : ""}</text>
+                    <Show when={!store.editing && input()}>
+                      <text fg={theme.textMuted}>{input()}</text>
                     </Show>
                   </box>
-                  <Show when={store.editing}>
-                    <box paddingLeft={3}>
-                      <textarea
-                        ref={(val: TextareaRenderable) => {
-                          textarea = val
-                          queueMicrotask(() => {
-                            val.focus()
-                            val.gotoLineEnd()
-                          })
-                        }}
-                        initialValue={input()}
-                        placeholder="Type your own answer"
-                        textColor={theme.text}
-                        focusedTextColor={theme.text}
-                        cursorColor={theme.primary}
-                        keyBindings={bindings()}
-                      />
-                    </box>
-                  </Show>
-                  <Show when={!store.editing && input()}>
-                    <box paddingLeft={3}>
-                      <text fg={theme.textMuted}>{input()}</text>
-                    </box>
-                  </Show>
                 </box>
+                <Show when={store.editing}>
+                  <box paddingLeft={5} paddingRight={1}>
+                    <textarea
+                      ref={(val: TextareaRenderable) => {
+                        textarea = val
+                        queueMicrotask(() => {
+                          val.focus()
+                          val.gotoLineEnd()
+                        })
+                      }}
+                      initialValue={input()}
+                      placeholder="输入自定义答案，回车确认"
+                      textColor={theme.text}
+                      focusedTextColor={theme.text}
+                      cursorColor={theme.primary}
+                      keyBindings={bindings()}
+                    />
+                  </box>
+                </Show>
               </Show>
             </box>
           </box>
         </Show>
 
         <Show when={confirm() && !single()}>
-          <box paddingLeft={1}>
-            <text fg={theme.text}>Review</text>
+          <box paddingLeft={0} gap={0}>
+            <box flexDirection="row" gap={1} alignItems="center" paddingLeft={1}>
+              <text fg={theme.success}>✓</text>
+              <text fg={theme.text}>确认提交 · 请核对你的选择</text>
+            </box>
+            <For each={questions()}>
+              {(q, index) => {
+                const value = () => store.answers[index()]?.join(", ") ?? ""
+                const answered = () => Boolean(value())
+                return (
+                  <box flexDirection="row" gap={1} paddingLeft={1}>
+                    <text fg={answered() ? theme.success : theme.warning}>{answered() ? "●" : "○"}</text>
+                    <text>
+                      <span style={{ fg: theme.textMuted }}>{q.header}：</span>{" "}
+                      <span style={{ fg: answered() ? theme.text : theme.error }}>
+                        {answered() ? value() : "（未回答）"}
+                      </span>
+                    </text>
+                  </box>
+                )
+              }}
+            </For>
           </box>
-          <For each={questions()}>
-            {(q, index) => {
-              const value = () => store.answers[index()]?.join(", ") ?? ""
-              const answered = () => Boolean(value())
-              return (
-                <box paddingLeft={1}>
-                  <text>
-                    <span style={{ fg: theme.textMuted }}>{q.header}:</span>{" "}
-                    <span style={{ fg: answered() ? theme.text : theme.error }}>
-                      {answered() ? value() : "(not answered)"}
-                    </span>
-                  </text>
-                </box>
-              )
-            }}
-          </For>
         </Show>
       </box>
       <box
         flexDirection="row"
         flexShrink={0}
         gap={1}
-        paddingLeft={2}
-        paddingRight={3}
-        paddingBottom={1}
+        paddingLeft={1}
+        paddingRight={2}
+        paddingBottom={0}
+        paddingTop={0}
         justifyContent="space-between"
       >
         <box flexDirection="row" gap={2}>
@@ -416,6 +508,9 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
           <Show when={!confirm()}>
             <text fg={theme.text}>
               {"↑↓"} <span style={{ fg: theme.textMuted }}>选择</span>
+            </text>
+            <text fg={theme.text}>
+              {"A-C"} <span style={{ fg: theme.textMuted }}>快捷</span>
             </text>
           </Show>
           <text fg={theme.text}>

@@ -40,6 +40,44 @@ describe("managed process", () => {
     expect(result.durationMs).toBeGreaterThanOrEqual(0)
   })
 
+  test("reports stderr progress lines through onProgressLine (TUI 执行中反馈)", async () => {
+    const lines: string[] = []
+    await runScript(
+      'process.stderr.write("stage1: loading\\n"); setTimeout(() => process.stderr.write("stage2: fitting\\n"), 10)',
+      { onProgressLine: (line) => lines.push(line) },
+    )
+
+    expect(lines).toEqual(["stage1: loading", "stage2: fitting"])
+  })
+
+  test("buffers progress lines split across chunk boundaries (chunk 边界切行)", async () => {
+    const lines: string[] = []
+    // 模拟 stderr 分两次 flush，第二次恰好切在 "stage2: fit|ting" 中间
+    await runScript(
+      'process.stderr.write("stage1: load"); setTimeout(() => { process.stderr.write("ing\\nstage2: fit"); setTimeout(() => process.stderr.write("ting\\n"), 5) }, 5)',
+      { onProgressLine: (line) => lines.push(line) },
+    )
+
+    expect(lines).toEqual(["stage1: loading", "stage2: fitting"])
+  })
+
+  test("\\r-only 进度条不撑爆 progressLineBuffer（tqdm 类）", async () => {
+    const lines: string[] = []
+    // 模拟 tqdm 进度条：在同一行反复用 \r 重写，最后以 \n 结束；buffer 不能被前面的帧累积撑大。
+    await runScript(
+      [
+        'process.stdout.write("");',
+        'for (let i = 1; i <= 200; i++) { process.stderr.write(`\\rframe ${i} of 200`); }',
+        'process.stderr.write("\\nfinal");',
+      ].join(""),
+      { onProgressLine: (line) => lines.push(line) },
+    )
+
+    // 200 帧 \r 重写 + 末尾 \n 后跟 "final" + 进程退出 flush 残留。
+    // 200 帧中没有累积到一行（每帧的 \r 重置 buffer），最终收到两行：循环末帧 + "final"。
+    expect(lines).toEqual(["frame 200 of 200", "final"])
+  })
+
   test("builds a bounded execution summary without copying process output", async () => {
     const result = await runScript('process.stdout.write("PRIVATE DATA"); process.stderr.write("TRACE")')
     const summary = summarizeManagedProcess(result)
@@ -58,10 +96,9 @@ describe("managed process", () => {
   })
 
   test("keeps only the high-signal tail when a process floods stdout", async () => {
-    const result = await runScript(
-      'process.stdout.write("x".repeat(4096)); process.stdout.write("TAIL_MARKER")',
-      { maxOutputBytes: 256 },
-    )
+    const result = await runScript('process.stdout.write("x".repeat(4096)); process.stdout.write("TAIL_MARKER")', {
+      maxOutputBytes: 256,
+    })
 
     expect(result.stdoutBytes).toBeGreaterThan(4_096)
     expect(Buffer.byteLength(result.stdout)).toBeLessThanOrEqual(256)
@@ -150,7 +187,7 @@ describe("managed process", () => {
     const previous = process.env.DEEPSEEK_API_KEY
     process.env.DEEPSEEK_API_KEY = "sk-secret-that-must-not-reach-python"
     try {
-      const result = await runScript('process.stdout.write(String(process.env.DEEPSEEK_API_KEY))')
+      const result = await runScript("process.stdout.write(String(process.env.DEEPSEEK_API_KEY))")
       expect(result.stdout).toBe("undefined")
     } finally {
       if (previous === undefined) delete process.env.DEEPSEEK_API_KEY

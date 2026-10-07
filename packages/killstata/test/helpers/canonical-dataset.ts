@@ -39,8 +39,8 @@ export function registerCanonicalDataset(input: {
   recordWorkflowStageSuccess({
     sessionID: input.sessionID,
     toolName: "data_import",
-    args: { action: "qa", datasetId, stageId },
-    metadata: { action: "qa", datasetId, stageId, qaGateStatus: "pass" },
+    args: { action: "validate", datasetId, stageId },
+    metadata: { action: "validate", datasetId, stageId, qaGateStatus: "pass" },
   })
   return { datasetId, stageId }
 }

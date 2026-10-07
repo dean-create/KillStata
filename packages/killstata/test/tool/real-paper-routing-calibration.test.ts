@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { PanelFeRegressionTool } from "@/tool/econometrics-method-tools"
-import { Did2sTool } from "@/tool/pyfixest"
+import { PanelFeRegressionTool } from "../fixtures/legacy/tool/econometrics-method-tools"
+import { Did2sTool } from "../fixtures/legacy/tool/pyfixest"
 import {
   loadRoutingFixtures,
   scoreCapturedRouting,

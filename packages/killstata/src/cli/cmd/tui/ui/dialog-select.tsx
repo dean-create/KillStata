@@ -34,7 +34,7 @@ export interface DialogSelectOption<T = any> {
   title: string
   value: T
   description?: string
-  footer?: JSX.Element | string
+  footer?: string
   category?: string
   disabled?: boolean
   bg?: RGBA
@@ -335,7 +335,7 @@ function Option(props: {
   description?: string
   active?: boolean
   current?: boolean
-  footer?: JSX.Element | string
+  footer?: string
   gutter?: JSX.Element
   onMouseOver?: () => void
 }) {

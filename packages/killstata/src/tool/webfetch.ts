@@ -1,5 +1,6 @@
 import z from "zod"
 import { Tool } from "./tool"
+import { ToolModel } from "./model-contracts"
 import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
 
@@ -7,20 +8,20 @@ const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
 const MAX_TIMEOUT = 120 * 1000 // 2 minutes
 
-export const WebFetchTool = Tool.define("webfetch", {
+export const WebFetchTool = Tool.define("webfetch", Tool.Execution.protectedExternalRead, ToolModel.forTool("webfetch"), {
   description: DESCRIPTION,
   parameters: z.object({
-    url: z.string().describe("The URL to fetch content from"),
+    url: z.string().describe("要获取内容的已验证 URL"),
     format: z
       .enum(["text", "markdown", "html"])
       .default("markdown")
-      .describe("The format to return the content in (text, markdown, or html). Defaults to markdown."),
-    timeout: z.number().describe("Optional timeout in seconds (max 120)").optional(),
+      .describe("返回内容格式：text、markdown 或 html；默认 markdown。"),
+    timeout: z.number().describe("可选超时秒数，最大 120。").optional(),
   }),
   async execute(params, ctx) {
     // Validate URL
     if (!params.url.startsWith("http://") && !params.url.startsWith("https://")) {
-      throw new Error("URL must start with http:// or https://")
+      throw new Error("URL 必须以 http:// 或 https:// 开头。")
     }
 
     await ctx.ask({
@@ -69,18 +70,18 @@ export const WebFetchTool = Tool.define("webfetch", {
     clearTimeout(timeoutId)
 
     if (!response.ok) {
-      throw new Error(`Request failed with status code: ${response.status}`)
+      throw new Error(`网页请求失败，HTTP 状态码：${response.status}。`)
     }
 
     // Check content length
     const contentLength = response.headers.get("content-length")
     if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE) {
-      throw new Error("Response too large (exceeds 5MB limit)")
+      throw new Error("网页响应超过 5MB 上限，无法安全注入上下文。")
     }
 
     const arrayBuffer = await response.arrayBuffer()
     if (arrayBuffer.byteLength > MAX_RESPONSE_SIZE) {
-      throw new Error("Response too large (exceeds 5MB limit)")
+      throw new Error("网页响应超过 5MB 上限，无法安全注入上下文。")
     }
 
     const content = new TextDecoder().decode(arrayBuffer)

@@ -38,9 +38,10 @@ function normalizeLines(input?: Array<string | undefined | null | false>) {
 }
 
 function normalizeArtifacts(input?: Array<PresentationArtifact | undefined | null | false>) {
-  return (input ?? []).filter(
-    (item): item is PresentationArtifact =>
-      Boolean(item && typeof item.label === "string" && item.label.trim() && typeof item.path === "string" && item.path.trim()),
+  return (input ?? []).filter((item): item is PresentationArtifact =>
+    Boolean(
+      item && typeof item.label === "string" && item.label.trim() && typeof item.path === "string" && item.path.trim(),
+    ),
   )
 }
 
@@ -76,9 +77,14 @@ export function createPresentation(input: {
     headline: input.headline.trim(),
     status: input.status,
     summary: normalizeLines(input.summary),
-    keyMetrics: (input.keyMetrics ?? []).filter(
-      (item): item is PresentationMetric =>
-        Boolean(item && typeof item.label === "string" && item.label.trim() && typeof item.value === "string" && item.value.trim()),
+    keyMetrics: (input.keyMetrics ?? []).filter((item): item is PresentationMetric =>
+      Boolean(
+        item &&
+          typeof item.label === "string" &&
+          item.label.trim() &&
+          typeof item.value === "string" &&
+          item.value.trim(),
+      ),
     ),
     highlights: normalizeLines(input.highlights),
     risks: normalizeLines(input.risks),

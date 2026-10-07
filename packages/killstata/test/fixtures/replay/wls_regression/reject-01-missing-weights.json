@@ -1,0 +1,1 @@
+{"description":"漏传 weightsVar（WLS 必填参数）","modelArgs":{"datasetId":"panel_98","stageId":"stage_000","dependentVar":"y","treatmentVar":"x"},"expect":"reject","rejectHint":["weightsVar"]}

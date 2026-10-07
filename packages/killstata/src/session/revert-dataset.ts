@@ -1,7 +1,36 @@
 import type { MessageV2 } from "./message-v2"
 import { Log } from "../util/log"
-import { DataImportTool, isStageProducingAction, type DataAction } from "../tool/data-import"
-import { readDatasetManifest } from "../tool/analysis-state"
+import { readDatasetManifest } from "../runtime/dataset-state"
+import { DataImportTool } from "../tool/data-import"
+import { MUTATING_METHODS } from "../tool/data-preprocess"
+
+// 历史数据中可能含 data_import 产生的 filter/preprocess 阶段，必须一起识别。
+const STAGE_PRODUCING_ACTIONS = new Set(["import", "filter", "preprocess", "rollback"])
+
+/**
+ * 从 tool part metadata 提取操作标识符。
+ * data_import 存的是 meta.action（"import"/"filter"/"preprocess"/"rollback"），
+ * data_preprocess 存的是 meta.method（"combine_columns"/"filter"/"winsorize" 等）。
+ * 返回统一格式：data_import 原样，data_preprocess 加 "preprocess_" 前缀。
+ */
+function partAction(meta: Record<string, unknown>): string | undefined {
+  if (typeof meta.action === "string") return meta.action
+  if (typeof meta.method === "string") return `preprocess_${meta.method}`
+  return undefined
+}
+
+/**
+ * data_preprocess 中会创建新数据阶段的方法（排除 zscore_detect/iqr_detect 两个只读诊断）。
+ * 从 data-preprocess.ts 的 MUTATING_METHODS 派生，避免两处硬编码漂移。
+ */
+const DATA_PREPROCESS_MUTATING_METHODS = new Set(
+  [...MUTATING_METHODS].map((method) => `preprocess_${method}`),
+)
+
+function isStageProducingAction(action: string | undefined): boolean {
+  if (!action) return false
+  return STAGE_PRODUCING_ACTIONS.has(action) || DATA_PREPROCESS_MUTATING_METHODS.has(action)
+}
 
 // 撤销（/undo）在 OpenCode 里意味着"把源代码文件还原回去"，靠一个 git 影子仓库实现。
 // 对计量用户毫无意义：他们不改源文件，而且数据目录根本不是 git 仓库——那套机制在他们身上
@@ -35,20 +64,22 @@ export namespace RevertDataset {
     for (const msg of messages) {
       for (const part of msg.parts) {
         if (part.type !== "tool" || part.state.status !== "completed") continue
-        if (part.tool !== "data_import") continue
+        if (part.tool !== "data_import" && part.tool !== "data_preprocess") continue
 
-        const meta = part.state.metadata as { action?: string; datasetId?: string; stageId?: string } | undefined
-        if (!meta?.action || !meta.datasetId || !meta.stageId) continue
-        // qa / describe / correlation 也带 stageId，但它们只是读了那个阶段，没有推进数据。
-        if (!isStageProducingAction(meta.action as DataAction)) continue
+        const meta = part.state.metadata as Record<string, unknown> | undefined
+        const action = partAction(meta ?? {})
+        const datasetId = meta?.datasetId
+        const stageId = meta?.stageId
+        if (!action || typeof datasetId !== "string" || typeof stageId !== "string") continue
+        if (!isStageProducingAction(action)) continue
 
         try {
-          const manifest = readDatasetManifest(meta.datasetId)
-          const stage = manifest.stages.find((item) => item.stageId === meta.stageId)
+          const manifest = readDatasetManifest(datasetId)
+          const stage = manifest.stages.find((item) => item.stageId === stageId)
           if (!stage?.parentStageId) return undefined
 
           return {
-            datasetId: meta.datasetId,
+            datasetId,
             stageId: stage.parentStageId,
             undoneAction: stage.label || stage.action,
           }
@@ -63,23 +94,26 @@ export namespace RevertDataset {
 
   /**
    * 最后一次 /redo 会把剩余的隐藏消息全部恢复，因此数据也必须回到这些消息执行完后的状态。
-   * 取最后一个真正派生了数据阶段的操作；qa/describe 等只读步骤不能覆盖恢复目标。
+   * 取最后一个真正派生了数据阶段的操作；profile/validate等只读步骤不能覆盖恢复目标。
    */
   export function findRestoreTarget(messages: MessageV2.WithParts[], datasetId: string): Target | undefined {
     let target: Target | undefined
 
     for (const msg of messages) {
       for (const part of msg.parts) {
-        if (part.type !== "tool" || part.state.status !== "completed" || part.tool !== "data_import") continue
+        if (part.type !== "tool" || part.state.status !== "completed") continue
+        const tool = part.tool
+        if (tool !== "data_import" && tool !== "data_preprocess") continue
 
-        const meta = part.state.metadata as { action?: string; datasetId?: string; stageId?: string } | undefined
-        if (meta?.datasetId !== datasetId || !meta.action || !meta.stageId) continue
-        if (!isStageProducingAction(meta.action as DataAction)) continue
+        const meta = part.state.metadata as Record<string, unknown> | undefined
+        const action = partAction(meta ?? {})
+        if (meta?.datasetId !== datasetId || !action || !meta?.stageId) continue
+        if (!isStageProducingAction(action)) continue
 
         target = {
           datasetId,
-          stageId: meta.stageId,
-          undoneAction: meta.action,
+          stageId: meta.stageId as string,
+          undoneAction: action.replace(/^preprocess_/, ""),
         }
       }
     }
@@ -93,40 +127,36 @@ export namespace RevertDataset {
     toMessageID: string,
     datasetId: string,
   ) {
-    const revealed = messages.filter(
-      (message) => message.info.id >= fromMessageID && message.info.id < toMessageID,
-    )
+    const revealed = messages.filter((message) => message.info.id >= fromMessageID && message.info.id < toMessageID)
     return findRestoreTarget(revealed, datasetId)
   }
 
   /**
    * 真正执行回滚：复用 data_import(action="rollback")，它会以目标阶段为父派生出一个新阶段。
-   *
-   * 注意这是「往前长」而不是「抹掉历史」——和 git revert 同理。被撤销的那个阶段仍然留在
-   * manifest 和实验日志里。这正是学术诚信要的：试过什么就得留痕，不能假装没试过。
    */
   export async function rollback(target: Target, sessionID: string) {
     const tool = await DataImportTool.init()
+    // /undo is the user's explicit authorization for this local, reversible stage restore.
+    // This internal tool invocation has no model Tool.Context, so provide the required context
+    // instead of calling the permission callback on an incomplete object.
+    const ctx = {
+      sessionID,
+      messageID: "",
+      callID: "",
+      agent: "system",
+      abort: new AbortController().signal,
+      metadata: async () => undefined,
+      ask: async () => {},
+    }
 
     await tool.execute(
       {
         action: "rollback",
         datasetId: target.datasetId,
         stageId: target.stageId,
-      } as never,
-      {
-        sessionID,
-        messageID: "",
-        callID: "",
-        // 不能用 analyst：它的审批闸门会对 rollback 弹出「执行计划」要求用户签字，
-        // 而用户此刻正是在明确要求撤销，再问一遍是荒谬的。
-        agent: "general",
-        abort: new AbortController().signal,
-        metadata: async () => {},
-        ask: async () => {},
-      } as never,
+        preserveLabels: true,
+      },
+      ctx as never,
     )
-
-    log.info("rolled back dataset", { datasetId: target.datasetId, stageId: target.stageId })
   }
 }

@@ -6,7 +6,7 @@ import { Session } from "../../session"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import { AsyncQueue } from "../../util/queue"
 import { errors } from "../error"
-import { lazy } from "../../util/lazy"
+import { lazy } from "@killstata/util/lazy"
 
 const TuiRequest = z.object({
   path: z.string(),

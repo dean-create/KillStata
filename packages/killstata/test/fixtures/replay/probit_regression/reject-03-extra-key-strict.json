@@ -1,0 +1,12 @@
+{
+  "description": "模型带了旧万能入口的 methodName 字段;strict 契约拒绝多余键",
+  "modelArgs": {
+    "datasetId": "loans_11",
+    "stageId": "stage_000",
+    "dependentVar": "default",
+    "treatmentVar": "income",
+    "methodName": "probit"
+  },
+  "expect": "reject",
+  "rejectHint": ["methodName"]
+}

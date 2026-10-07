@@ -22,6 +22,7 @@ import { TuiThreadCommand } from "./cli/cmd/tui/thread"
 import { EOL } from "os"
 import { SessionCommand } from "./cli/cmd/session"
 import { ConfigCommand } from "./cli/cmd/config"
+import { WebCommand } from "./cli/cmd/web"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -82,6 +83,7 @@ const parser = yargs(hideBin(process.argv))
   .command(UpgradeCommand)
   .command(UninstallCommand)
   .command(ServeCommand)
+  .command(WebCommand)
   .command(ModelsCommand)
   .command(StatsCommand)
   .command(ExportCommand)

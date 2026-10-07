@@ -9,5 +9,7 @@
     "lib": ["es2022", "dom", "dom.iterable"]
   },
   "include": ["src"],
-  "exclude": ["src/gen"]
+  // src/gen 是 v1 旧版生成物（已移入 trash），不编译
+  // src/v2/gen 是自动生成的客户端代码，不编译（构建脚本会单独处理）
+  "exclude": ["src/gen", "src/v2/gen"]
 }

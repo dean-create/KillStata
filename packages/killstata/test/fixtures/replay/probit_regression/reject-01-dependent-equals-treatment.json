@@ -1,0 +1,6 @@
+{
+  "description": "结果变量与核心解释变量同列",
+  "modelArgs": { "datasetId": "loans_11", "stageId": "stage_000", "dependentVar": "income", "treatmentVar": "income" },
+  "expect": "reject",
+  "rejectHint": ["dependentVar", "不能同时作为解释变量"]
+}

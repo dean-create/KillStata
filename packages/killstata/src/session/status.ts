@@ -24,6 +24,11 @@ export namespace SessionStatus {
         retryStage: z.string(),
         message: z.string(),
       }),
+      z.object({
+        type: z.literal("model-switch"),
+        from: z.string(),
+        to: z.string(),
+      }),
     ])
     .meta({
       ref: "SessionStatus",

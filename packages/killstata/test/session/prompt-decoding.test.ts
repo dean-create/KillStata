@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import fs from "fs"
 import path from "path"
+import { readSourceUnit } from "../helpers/read-source"
 
 // KillStata 是在 OpenCode（一个"AI 改代码库"的工具）上二次开发的，系统提示里到处是
 // "codebase / pull request / refactor / file_path:line_number" 这类代码假设。
@@ -81,12 +82,12 @@ describe("prompts are de-coded (no OpenCode coding assumptions)", () => {
     expect(read("session/llm.ts")).not.toContain("isCodex")
   })
 
-  test("the plan-mode injection is about data, not codebases", () => {
-    const prompt = read("session/prompt.ts")
-    // 计量版关键词必须在
-    expect(prompt).toContain("设计识别策略")
-    expect(prompt).toContain("identification strategy")
-    // 编码版关键词必须没了
+  test("the primary analyst prompt has no retired plan-mode injection", () => {
+    const prompt = readSourceUnit("session/prompt")
+
+    expect(prompt).not.toContain("plan_enter")
+    expect(prompt).not.toContain("plan_exit")
+    expect(prompt).not.toContain("Explorer Workflow")
     expect(prompt).not.toContain("探索代码库")
     expect(prompt).not.toContain("explore agents IN PARALLEL")
     expect(prompt).not.toContain("files to be modified")

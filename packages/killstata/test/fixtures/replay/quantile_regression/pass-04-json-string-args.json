@@ -1,0 +1,5 @@
+{
+  "description": "模型把参数整体序列化成 JSON 字符串,normalizeToolArgs 应解回对象",
+  "modelArgs": "{\"datasetId\":\"wage_88\",\"stageId\":\"stage_000\",\"dependentVar\":\"wage\",\"treatmentVar\":\"union\",\"quantiles\":[0.1,0.9]}",
+  "expect": "pass"
+}

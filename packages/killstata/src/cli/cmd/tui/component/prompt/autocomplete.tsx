@@ -12,6 +12,9 @@ import { useTerminalDimensions } from "@opentui/solid"
 import { Locale } from "@/util/locale"
 import type { PromptInfo } from "./history"
 import { useFrecency } from "./frecency"
+import { shouldSubmitImmediateCommand } from "./command"
+
+export { shouldSubmitImmediateCommand } from "./command"
 
 function removeLineRange(input: string) {
   const hashIndex = input.lastIndexOf("#")
@@ -68,6 +71,7 @@ export type AutocompleteOption = {
   aliases?: string[]
   disabled?: boolean
   description?: string
+  immediate?: boolean
   isDirectory?: boolean
   onSelect?: () => void
   path?: string
@@ -80,6 +84,7 @@ export function Autocomplete(props: {
   setExtmark: (partIndex: number, extmarkId: number) => void
   anchor: () => BoxRenderable
   input: () => TextareaRenderable
+  onSubmit: () => void
   ref: (ref: AutocompleteRef) => void
   fileStyleId: number
   agentStyleId: number
@@ -226,7 +231,7 @@ export function Autocomplete(props: {
       const { lineRange, baseQuery } = extractLineRange(query ?? "")
 
       // Get files from SDK
-      const result = await sdk.client.find.files({
+      const result = await sdk.client.data.files({
         query: baseQuery,
       })
 
@@ -323,8 +328,10 @@ export function Autocomplete(props: {
       results.push({
         display: "/" + serverCommand.name,
         description: commandCapabilityDescription(serverCommand),
+        value: "/" + serverCommand.name,
+        immediate: serverCommand.immediate,
         onSelect: () => {
-          const newText = "/" + serverCommand.name + " "
+          const newText = "/" + serverCommand.name + (serverCommand.immediate ? "" : " ")
           const cursor = props.input().logicalCursor
           props.input().deleteRange(0, 0, cursor.row, cursor.col)
           props.input().insertText(newText)
@@ -412,8 +419,10 @@ export function Autocomplete(props: {
   function select() {
     const selected = options()[store.selected]
     if (!selected) return
+    const submit = shouldSubmitImmediateCommand(props.input().plainText, selected)
     hide()
     selected.onSelect?.()
+    if (submit) props.onSubmit()
   }
 
   function expandDirectory() {

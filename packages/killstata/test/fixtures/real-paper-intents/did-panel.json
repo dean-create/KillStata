@@ -11,7 +11,15 @@
         "stageId": "stage_imported",
         "dependentVar": "经济发展水平",
         "treatmentVar": "did",
-        "covariates": ["人口密度", "金融发展程度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "covariates": [
+          "人口密度",
+          "金融发展程度",
+          "城镇化水平",
+          "产业结构整体升级",
+          "产业结构高级化",
+          "教育水平支出",
+          "人力资本"
+        ],
         "entityVar": "city",
         "timeVar": "year",
         "clusterVar": "city"
@@ -30,7 +38,15 @@
         "stageId": "stage_imported",
         "dependentVar": "人均GDP",
         "treatmentVar": "did",
-        "covariates": ["人口密度", "金融发展程度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "covariates": [
+          "人口密度",
+          "金融发展程度",
+          "城镇化水平",
+          "产业结构整体升级",
+          "产业结构高级化",
+          "教育水平支出",
+          "人力资本"
+        ],
         "entityVar": "city",
         "timeVar": "year",
         "clusterVar": "city"
@@ -49,7 +65,15 @@
         "stageId": "stage_imported",
         "dependentVar": "高质量发展指数",
         "treatmentVar": "did",
-        "covariates": ["人口密度", "金融发展程度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "covariates": [
+          "人口密度",
+          "金融发展程度",
+          "城镇化水平",
+          "产业结构整体升级",
+          "产业结构高级化",
+          "教育水平支出",
+          "人力资本"
+        ],
         "entityVar": "city",
         "timeVar": "year",
         "clusterVar": "city"
@@ -68,7 +92,15 @@
         "stageId": "stage_imported",
         "dependentVar": "包容性TFP指数",
         "treatmentVar": "did",
-        "covariates": ["人口密度", "金融发展程度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "covariates": [
+          "人口密度",
+          "金融发展程度",
+          "城镇化水平",
+          "产业结构整体升级",
+          "产业结构高级化",
+          "教育水平支出",
+          "人力资本"
+        ],
         "entityVar": "city",
         "timeVar": "year",
         "clusterVar": "city"
@@ -87,7 +119,15 @@
         "stageId": "stage_imported",
         "dependentVar": "创新指数",
         "treatmentVar": "did",
-        "covariates": ["人口密度", "金融发展程度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "covariates": [
+          "人口密度",
+          "金融发展程度",
+          "城镇化水平",
+          "产业结构整体升级",
+          "产业结构高级化",
+          "教育水平支出",
+          "人力资本"
+        ],
         "entityVar": "city",
         "timeVar": "year",
         "clusterVar": "city"
@@ -107,7 +147,15 @@
         "stageId": "stage_imported",
         "dependentVar": "产业结构高级化2",
         "treatmentVar": "did",
-        "covariates": ["人口密度", "金融发展程度", "城镇化水平", "产业结构整体升级", "产业结构高级化", "教育水平支出", "人力资本"],
+        "covariates": [
+          "人口密度",
+          "金融发展程度",
+          "城镇化水平",
+          "产业结构整体升级",
+          "产业结构高级化",
+          "教育水平支出",
+          "人力资本"
+        ],
         "entityVar": "city",
         "timeVar": "year",
         "clusterVar": "city"

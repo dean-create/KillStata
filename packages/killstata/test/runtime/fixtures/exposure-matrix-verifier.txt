@@ -1,0 +1,1680 @@
+-|conversation|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|conversation|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|conversation|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|conversation|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|conversation|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|conversation|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|conversation|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|conversation|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|status|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|status|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|status|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|status|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|status|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|status|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|status|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|status|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|repair|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|repair|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|repair|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|repair|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|repair|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|repair|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|repair|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|repair|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|verify|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|verify|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|verify|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|verify|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|verify|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|verify|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|verify|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|verify|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|report|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,experiment_log,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|report|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,experiment_log,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|report|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,experiment_log,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|report|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,experiment_log,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|report|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,experiment_log,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|report|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,experiment_log,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|report|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,experiment_log,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|report|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,experiment_log,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|analysis|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|analysis|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|analysis|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|analysis|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|analysis|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|analysis|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|analysis|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|analysis|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|ingest|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|ingest|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|ingest|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|ingest|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|ingest|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|ingest|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|ingest|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+-|ingest|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|conversation|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|conversation|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|conversation|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|conversation|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|conversation|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|conversation|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|conversation|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|conversation|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|status|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|status|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|status|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|status|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|status|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|status|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|status|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|status|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|repair|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|repair|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|repair|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|repair|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|repair|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|repair|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|repair|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|repair|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|verify|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|verify|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|verify|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|verify|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|verify|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|verify|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|verify|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|verify|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|report|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|report|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|report|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|report|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|report|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|report|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|report|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|report|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|analysis|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|analysis|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|analysis|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|analysis|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|analysis|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|analysis|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|analysis|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|analysis|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|ingest|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|ingest|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|ingest|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|ingest|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|ingest|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|ingest|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|ingest|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+healthcheck|ingest|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|conversation|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|conversation|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|conversation|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|conversation|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|conversation|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|conversation|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|conversation|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|conversation|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|status|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|status|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|status|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|status|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|status|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|status|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|status|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|status|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|repair|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|repair|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|repair|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|repair|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|repair|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|repair|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|repair|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|repair|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|verify|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|verify|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|verify|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|verify|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|verify|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|verify|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|verify|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|verify|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|report|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|report|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|report|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|report|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|report|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|report|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|report|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|report|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|analysis|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|analysis|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|analysis|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|analysis|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|analysis|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|analysis|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|analysis|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|analysis|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|ingest|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|ingest|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|ingest|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|ingest|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|ingest|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|ingest|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|ingest|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+import|ingest|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|conversation|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|conversation|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|conversation|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|conversation|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|conversation|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|conversation|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|conversation|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|conversation|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|status|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|status|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|status|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|status|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|status|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|status|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|status|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|status|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|repair|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|repair|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|repair|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|repair|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|repair|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|repair|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|repair|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|repair|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|verify|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|verify|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|verify|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|verify|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|verify|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|verify|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|verify|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|verify|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|report|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|report|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|report|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|report|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|report|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|report|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|report|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|report|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|analysis|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|analysis|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|analysis|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|analysis|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|analysis|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|analysis|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|analysis|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|analysis|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|ingest|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|ingest|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|ingest|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|ingest|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|ingest|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|ingest|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|ingest|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_schema_check|ingest|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|conversation|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|conversation|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|conversation|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|conversation|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|conversation|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|conversation|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|conversation|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|conversation|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|status|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|status|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|status|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|status|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|status|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|status|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|status|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|status|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|repair|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|repair|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|repair|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|repair|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|repair|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|repair|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|repair|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|repair|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|verify|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|verify|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|verify|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|verify|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|verify|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|verify|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|verify|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|verify|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|report|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|report|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|report|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|report|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|report|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|report|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|report|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|report|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|analysis|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|analysis|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|analysis|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|analysis|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|analysis|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|analysis|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|analysis|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|analysis|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|ingest|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|ingest|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|ingest|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|ingest|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|ingest|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|ingest|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|ingest|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+validate|ingest|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|conversation|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|conversation|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|conversation|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|conversation|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|conversation|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|conversation|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|conversation|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|conversation|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|status|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|status|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|status|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|status|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|status|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|status|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|status|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|status|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|repair|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|repair|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|repair|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|repair|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|repair|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|repair|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|repair|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|repair|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|verify|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|verify|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|verify|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|verify|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|verify|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|verify|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|verify|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|verify|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|report|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|report|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|report|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|report|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|report|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|report|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|report|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|report|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|analysis|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|analysis|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|analysis|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|analysis|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|analysis|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|analysis|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|analysis|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|analysis|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|ingest|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|ingest|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|ingest|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|ingest|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|ingest|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|ingest|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|ingest|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+preprocess_or_filter|ingest|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|conversation|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|conversation|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|conversation|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|conversation|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|conversation|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|conversation|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|conversation|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|conversation|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|status|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|status|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|status|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|status|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|status|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|status|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|status|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|status|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|repair|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|repair|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|repair|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|repair|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|repair|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|repair|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|repair|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|repair|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|verify|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|verify|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|verify|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|verify|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|verify|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|verify|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|verify|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|verify|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|report|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|report|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|report|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|report|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|report|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|report|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|report|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|report|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|analysis|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|analysis|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|analysis|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|analysis|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|analysis|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|analysis|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|analysis|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|analysis|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|ingest|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|ingest|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|ingest|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|ingest|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|ingest|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|ingest|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|ingest|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+profile_or_diagnostics|ingest|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|conversation|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|conversation|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|conversation|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|conversation|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|conversation|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|conversation|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|conversation|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|conversation|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|status|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|status|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|status|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|status|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|status|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|status|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|status|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|status|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|repair|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|repair|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|repair|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|repair|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|repair|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|repair|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|repair|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|repair|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|verify|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|verify|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|verify|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|verify|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|verify|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|verify|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|verify|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|verify|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|report|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|report|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|report|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|report|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|report|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|report|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|report|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|report|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|analysis|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|analysis|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|analysis|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|analysis|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|analysis|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|analysis|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|analysis|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|analysis|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|ingest|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|ingest|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|ingest|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|ingest|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|ingest|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|ingest|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|ingest|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+baseline_estimate|ingest|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|conversation|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|conversation|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|conversation|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|conversation|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|conversation|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|conversation|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|conversation|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|conversation|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|status|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|status|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|status|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|status|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|status|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|status|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|status|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|status|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|repair|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|repair|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|repair|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|repair|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|repair|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|repair|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|repair|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|repair|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|verify|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|verify|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|verify|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|verify|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|verify|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|verify|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|verify|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|verify|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|report|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|report|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|report|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|report|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|report|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|report|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|report|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|report|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|analysis|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|analysis|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|analysis|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|analysis|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|analysis|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|analysis|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|analysis|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|analysis|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|ingest|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|ingest|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|ingest|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|ingest|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|ingest|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|ingest|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|ingest|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+verifier|ingest|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|conversation|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|conversation|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|conversation|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|conversation|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|conversation|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|conversation|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|conversation|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|conversation|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|status|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|status|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|status|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|status|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|status|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|status|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|status|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|status|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|repair|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|repair|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|repair|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|repair|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|repair|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|repair|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|repair|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|repair|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|verify|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|verify|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|verify|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|verify|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|verify|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|verify|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|verify|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|verify|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|report|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|report|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|report|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|report|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|report|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|report|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|report|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|report|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|analysis|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|analysis|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|analysis|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|analysis|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|analysis|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|analysis|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|analysis|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|analysis|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|ingest|verifier|approved|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|ingest|verifier|approved|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|ingest|verifier|approved|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|ingest|verifier|approved|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|ingest|verifier|required|auto|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|ingest|verifier|required|auto|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|ingest|verifier|required|plan|running
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)
+report|ingest|verifier|required|plan|blocked
+  direct  : composite_evaluation,data_import,data_preprocess,econometrics_execute,econometrics_recommend,glob,grep,list,pipeline,question,read,skill,todoread,todowrite,tool_search,webfetch
+  deferred: (none)

@@ -1,0 +1,6 @@
+{
+  "description": "结果变量和核心解释变量填了同一列",
+  "modelArgs": { "datasetId": "nsw_98", "stageId": "stage_000", "dependentVar": "train", "treatmentVar": "train" },
+  "expect": "reject",
+  "rejectHint": ["dependentVar", "不能同时作为解释变量"]
+}

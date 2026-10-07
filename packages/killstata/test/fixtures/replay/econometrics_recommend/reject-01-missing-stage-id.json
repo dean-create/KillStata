@@ -1,8 +1,9 @@
 {
-  "description": "模型漏传 stageId（只知道数据集，忘了当前阶段）",
+  "description": "结果变量类型错误，Python Pydantic 在算法前拒绝",
   "modelArgs": {
-    "datasetId": "grunfeld_08bce7a7"
+    "dependentVar": 123,
+    "treatmentVar": "value"
   },
   "expect": "reject",
-  "rejectHint": ["stageId"]
+  "rejectHint": ["dependentVar"]
 }

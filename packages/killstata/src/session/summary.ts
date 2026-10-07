@@ -1,6 +1,6 @@
 import { Provider } from "@/provider/provider"
 
-import { fn } from "@/util/fn"
+import { fn } from "@killstata/util/fn"
 import z from "zod"
 import { Session } from "."
 
@@ -9,8 +9,10 @@ import { Identifier } from "@/id/id"
 
 import { Log } from "@/util/log"
 
-import { LLM } from "./llm"
+import { ModelGateway } from "@/runtime/services/model-gateway"
+import { emptyToolSet } from "./prompt/tools"
 import { Agent } from "@/agent/agent"
+import { SessionRetry } from "./retry"
 
 export namespace SessionSummary {
   const log = Log.create({ service: "session.summary" })
@@ -21,8 +23,13 @@ export namespace SessionSummary {
       messageID: z.string(),
     }),
     async (input) => {
-      const all = await Session.messages({ sessionID: input.sessionID })
-      await summarizeMessage({ messageID: input.messageID, messages: all })
+      try {
+        const all = await Session.messages({ sessionID: input.sessionID })
+        await summarizeMessage({ messageID: input.messageID, messages: all })
+      } catch (error) {
+        // 摘要是后台装饰信息；provider、凭证或摘要内容失败时不能影响前台分析会话。
+        log.error("failed to generate summary", { error })
+      }
     },
   )
 
@@ -37,20 +44,20 @@ export namespace SessionSummary {
     if (textPart && !userMsg.summary?.title) {
       const agent = await Agent.get("title")
       if (!agent) return
-      const stream = await LLM.stream({
+      const stream = await ModelGateway.stream({
         agent,
         user: userMsg,
-        tools: {},
+        tools: emptyToolSet(),
         model: agent.model
           ? await Provider.getModel(agent.model.providerID, agent.model.modelID)
-          : ((await Provider.getSmallModel(userMsg.model.providerID)) ??
+          : ((await Provider.getSmallModel(userMsg.model.providerID, userMsg.model.modelID)) ??
             (await Provider.getModel(userMsg.model.providerID, userMsg.model.modelID))),
         small: true,
         messages: [
           {
             role: "user" as const,
             content: `
-              The following is the text to summarize:
+              请只为以下用户消息生成中文会话标题：
               <text>
               ${textPart?.text ?? ""}
               </text>
@@ -60,7 +67,10 @@ export namespace SessionSummary {
         abort: new AbortController().signal,
         sessionID: userMsg.sessionID,
         system: [],
-        retries: 3,
+        // 标题生成是后台任务：没有标题只是少个显示名，用户不在等它。provider 过载时
+        // 反复重试会跟用户正在等的请求抢配额，所以只试一次，失败就保留默认标题。
+        requestSource: "background",
+        retries: SessionRetry.BACKGROUND_MAX_RETRIES,
       })
       const result = await stream.text
       log.info("title", { title: result })
@@ -68,5 +78,4 @@ export namespace SessionSummary {
       await Session.updateMessage(userMsg)
     }
   }
-
 }

@@ -16,8 +16,75 @@ jobs:
 
       - uses: ./.github/actions/setup-bun
 
-      - name: Typecheck
-        run: bun turbo typecheck
+      - name: Set up Python
+        id: setup-python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Test
-        run: bun turbo test
+      - name: Install the locked econometrics-engine dependencies
+        run: |
+          "${{ steps.setup-python.outputs.python-path }}" -m pip install -r packages/killstata-econometrics-engine/requirements.lock
+
+      - name: Typecheck all workspaces
+        run: |
+          bun run --cwd packages/killstata typecheck
+          bun run --cwd packages/script typecheck
+          bun run --cwd packages/sdk/js typecheck
+          bun run --cwd packages/util typecheck
+          bun run --cwd desktop typecheck
+
+      - name: Test KillStata Core
+        env:
+          KILLSTATA_PYTHON: ${{ steps.setup-python.outputs.python-path }}
+          PYTHONPATH: ${{ github.workspace }}/packages/killstata-econometrics-engine/src
+        working-directory: packages/killstata
+        run: bun test --timeout=20000
+
+      - name: Test Desktop and Web adapters
+        run: bun run --cwd desktop test
+
+      - name: Test Python econometrics engine
+        env:
+          KILLSTATA_PYTHON: ${{ steps.setup-python.outputs.python-path }}
+          PYTHONPATH: ${{ github.workspace }}/packages/killstata-econometrics-engine/src
+        run: |
+          "${{ steps.setup-python.outputs.python-path }}" -m unittest discover -s packages/killstata-econometrics-engine/tests -p 'test_*.py'
+
+  native-web-smoke:
+    name: Native Web startup (${{ matrix.os }})
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Set up Node for authenticated HTTP verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the runner-native CLI and bundled Web assets
+        working-directory: packages/killstata
+        run: bun run script/build.ts --single --skip-install
+
+      - name: Start the native CLI Web host and fetch its authenticated UI assets
+        working-directory: packages/killstata
+        run: node test/release/native-web-smoke.mjs
+
+      # Bun 1.3.5 fails to extract its Windows baseline runtime on windows-latest.
+      - name: Build the x64 baseline CLI where the runner toolchain supports it
+        if: ${{ runner.arch == 'X64' && runner.os != 'Windows' }}
+        working-directory: packages/killstata
+        run: bun run script/build.ts --single --baseline --skip-install
+
+      - name: Start the x64 baseline Web host and fetch its authenticated UI assets
+        if: ${{ runner.arch == 'X64' && runner.os != 'Windows' }}
+        working-directory: packages/killstata
+        run: node test/release/native-web-smoke.mjs --baseline

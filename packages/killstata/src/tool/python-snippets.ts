@@ -4,11 +4,11 @@
 // from drifting apart the way the CSV-encoding fallback did before this fix.
 
 export const PY_READ_CSV_FALLBACK = `
-def read_csv_with_fallback(path):
+def read_csv_with_fallback(path, **read_kwargs):
     read_error = None
     for index, encoding in enumerate(["utf-8-sig", "gbk", "latin1"]):
         try:
-            df = pd.read_csv(path, encoding=encoding)
+            df = pd.read_csv(path, encoding=encoding, **read_kwargs)
             df.attrs["_source_encoding"] = encoding
             return df
         except Exception as exc:

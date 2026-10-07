@@ -1,5 +1,5 @@
 import path from "path"
-import { relativeWithinProject } from "./analysis-path"
+import { isInternalWorkspacePath, relativeWithinProject } from "./analysis-path"
 
 export type DisplayVisibility = "user_default" | "user_collapsed" | "internal_only"
 
@@ -26,15 +26,41 @@ function normalizeVisibility(value: unknown): DisplayVisibility | undefined {
   return value === "user_default" || value === "user_collapsed" || value === "internal_only" ? value : undefined
 }
 
+// 内部工作区（.killstata）路径对用户隐身：任何用户可见渲染（TUI 展开分析过程、
+// 工具 summary/details、转录导出）都只显示文件名，不暴露内部目录结构。
+// 用户自己放进来的文件（data/*.xlsx 等）走相对路径正常显示——区分"内部细节不可见"
+// 但不伤害"用户文件可追踪"。
+//
+// 判定函数定义在 analysis-path（路径解析要用它选根，而本模块依赖 analysis-path 的
+// relativeWithinProject，定义留在这里会成环）；此处重新导出，既有调用点无需改动。
+export { isInternalWorkspacePath }
+
 export function displayPath(filePath: string, mode: PathMode = "relative") {
   const normalized = path.normalize(filePath)
   if (mode === "name") return path.basename(normalized)
+  if (isInternalWorkspacePath(normalized)) {
+    // 只留末段文件名/目录名；.killstata 目录本身无文件名可暴露，返回空
+    const tail = path.basename(normalized)
+    return tail === ".killstata" ? "" : tail
+  }
   if (!path.isAbsolute(normalized)) return normalized
   try {
     return relativeWithinProject(normalized)
   } catch {
     return normalized
   }
+}
+
+/**
+ * glob 模式串的用户可见形式。
+ *
+ * pattern 不是路径，`displayPath` 那套（取 basename）会把 `**\/*.json` 这类通配结构毁掉，
+ * 但它同样可能带内部路径前缀——模型找自己的产物时会写 `.killstata/datasets/gf_68825014/**`，
+ * 原样渲染就把内部目录和数据集 ID 一起暴露给用户了（2026-08-12 gf.xlsx 会话实况）。
+ * 这里只在命中内部工作区时折叠成统一措辞，普通 pattern 原样返回。
+ */
+export function displayGlobPattern(pattern: string) {
+  return isInternalWorkspacePath(pattern) ? "内部产物" : pattern
 }
 
 export function createToolDisplay(input: {
@@ -47,8 +73,8 @@ export function createToolDisplay(input: {
     visibility: input.visibility ?? "user_default",
     summary: input.summary.trim(),
     details: (input.details ?? []).filter((item): item is string => typeof item === "string" && item.trim().length > 0),
-    artifacts: (input.artifacts ?? []).filter(
-      (item): item is DisplayArtifact => Boolean(item && item.label && item.path),
+    artifacts: (input.artifacts ?? []).filter((item): item is DisplayArtifact =>
+      Boolean(item && item.label && item.path),
     ),
   }
 }

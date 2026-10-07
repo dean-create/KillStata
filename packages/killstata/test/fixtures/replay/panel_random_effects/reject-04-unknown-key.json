@@ -1,0 +1,14 @@
+{
+  "description": "多塞了一个 methodName 字段；strict 契约应拒绝未知键",
+  "modelArgs": {
+    "datasetId": "wage_panel",
+    "stageId": "stage_000",
+    "dependentVar": "lwage",
+    "treatmentVar": "educ",
+    "entityVar": "nr",
+    "timeVar": "year",
+    "methodName": "swamy_arora"
+  },
+  "expect": "reject",
+  "rejectHint": ["methodName"]
+}

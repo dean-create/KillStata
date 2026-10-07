@@ -7,8 +7,9 @@ import { resolveRuntimePythonCommand } from "@/killstata/runtime-config"
 import { Instance } from "@/project/instance"
 import { recordWorkflowStageSuccess } from "@/runtime/workflow"
 import { DataImportTool } from "@/tool/data-import"
-import { EconometricsRecommendTool, PanelFeRegressionTool } from "@/tool/econometrics-method-tools"
-import { HdfeRegressionTool } from "@/tool/pyfixest"
+import { DataPreprocessTool } from "@/tool/data-preprocess"
+import { EconometricsRecommendTool, PanelFeRegressionTool } from "../fixtures/legacy/tool/econometrics-method-tools"
+import { HdfeRegressionTool } from "../fixtures/legacy/tool/pyfixest"
 import {
   loadRealPaperDatasetContract,
   resolveRealPaperDatasets,
@@ -16,9 +17,11 @@ import {
 } from "../helpers/real-paper-datasets"
 
 const ctx = {
-  sessionID: "real-paper-data-chain",
-  messageID: "message",
-  callID: "call",
+  // 工具契约要求这些标识使用各自的前缀；无效 sessionID 会让导入产物无法
+  // 关联到工作流，进而把后续真实数据问题伪装成“缺少画像/阶段未就绪”。
+  sessionID: "ses_real_paper_data_chain",
+  messageID: "msg_real_paper_data_chain",
+  callID: "call_real_paper_data_chain",
   agent: "econometrics",
   abort: new AbortController().signal,
   metadata: async () => undefined,
@@ -36,12 +39,24 @@ const BASELINE_CONTROLS = [
 ] as const
 
 async function requireRealEconometricsRuntime() {
-  const python = await resolveRuntimePythonCommand()
-  execFileSync(python, ["-c", "import pandas, pyarrow, linearmodels, pyfixest"], {
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"],
-  })
-  return python
+  // runtime-config 会从 Instance 读取项目级 Python 配置；测试原先在
+  // withTempProject 之前调用它，导致“缺少 Instance 上下文”而非真正检查依赖。
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "killstata-real-paper-python-"))
+  try {
+    return await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const python = await resolveRuntimePythonCommand()
+        execFileSync(python, ["-c", "import pandas, pyarrow, linearmodels, pyfixest"], {
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "pipe"],
+        })
+        return python
+      },
+    })
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 }
 
 async function withTempProject<T>(fn: (root: string) => Promise<T>) {
@@ -166,7 +181,6 @@ describe("real paper Excel chain", () => {
             preserveLabels: true,
             inputPath: source.path,
             sheetPolicy: { mode: "named_sheet", sheetName: source.contract.sheet },
-            createInspectionArtifacts: false,
           },
           ctx as never,
         )
@@ -198,7 +212,6 @@ describe("real paper Excel chain", () => {
           preserveLabels: true,
           inputPath: files.didPath,
           sheetPolicy: { mode: "named_sheet", sheetName: contract.did.sheet },
-          createInspectionArtifacts: false,
         },
         ctx as never,
       )
@@ -214,9 +227,22 @@ describe("real paper Excel chain", () => {
         ctx as never,
       )
       expect(didProfile.metadata.profile?.dataStructure).toBe("panel")
+      expect(didProfile.output).toContain("面板数据")
+      expect(didProfile.output).not.toContain("数据结构：panel")
+      expect(didProfile.output).toContain("列名不能替代识别策略")
+      expect(didProfile.metadata.analysisView).toMatchObject({
+        kind: "econometrics",
+        results: expect.arrayContaining([{ label: "数据结构", value: "面板数据" }]),
+      })
       expect(didProfile.metadata.profile?.duplicatePanelKeys).toBe(contract.did.duplicateEntityTimeRows)
       const didQa = await dataImport.execute(
-        { action: "qa", preserveLabels: true, ...didSource, entityVar: "city", timeVar: "year", createInspectionArtifacts: false },
+        {
+          action: "validate",
+          preserveLabels: true,
+          ...didSource,
+          entityVar: "city",
+          timeVar: "year",
+        },
         ctx as never,
       )
       expect(didQa.metadata.qaGateStatus).not.toBe("block")
@@ -227,7 +253,6 @@ describe("real paper Excel chain", () => {
           preserveLabels: true,
           inputPath: files.digitalPath,
           sheetPolicy: { mode: "named_sheet", sheetName: contract.digital.sheet },
-          createInspectionArtifacts: false,
         },
         ctx as never,
       )
@@ -242,14 +267,26 @@ describe("real paper Excel chain", () => {
         ctx as never,
       )
       expect(digitalProfile.metadata.profile?.duplicatePanelKeys).toBe(contract.digital.duplicateEntityTimeRows)
+      expect(digitalProfile.output).toContain("面板数据")
+      expect(digitalProfile.output).toContain(`重复实体-时间键：${contract.digital.duplicateEntityTimeRows}`)
+      expect(digitalProfile.output).toContain("面板固定效应估计前应先修复")
+      expect(digitalProfile.metadata.analysisView).toMatchObject({
+        results: expect.arrayContaining([{ label: "重复实体-时间键", value: String(contract.digital.duplicateEntityTimeRows) }]),
+      })
       await expect(
         dataImport.execute(
-          { action: "qa", preserveLabels: true, ...digitalSource, entityVar: "地区", timeVar: "年份", createInspectionArtifacts: false },
+          {
+            action: "validate",
+            preserveLabels: true,
+            ...digitalSource,
+            entityVar: "地区",
+            timeVar: "年份",
+          },
           ctx as never,
         ),
       ).rejects.toThrow(
         new RegExp(
-          `Data operation blocked by QA gate:.*${contract.digital.duplicateEntityTimeRows} duplicate entity-time rows.*Reflection log`,
+          `数据动作被(?: QA 门禁| 数据质量检查)阻断：.*${contract.digital.duplicateEntityTimeRows} duplicate entity-time rows.*诊断记录`,
           "s",
         ),
       )
@@ -269,7 +306,6 @@ describe("real paper Excel chain", () => {
           preserveLabels: true,
           inputPath: files.didPath,
           sheetPolicy: { mode: "named_sheet", sheetName: contract.did.sheet },
-          createInspectionArtifacts: false,
         },
         ctx as never,
       )
@@ -310,34 +346,58 @@ describe("real paper Excel chain", () => {
           preserveLabels: true,
           inputPath: files.digitalPath,
           sheetPolicy: { mode: "named_sheet", sheetName: contract.digital.sheet },
-          createInspectionArtifacts: false,
         },
         ctx as never,
       )
-      const importedSource = { datasetId: imported.metadata.datasetId!, stageId: imported.metadata.stageId! }
-      const repaired = await dataImport.execute(
+      const importedSource = {
+        datasetId: imported.metadata.datasetId!,
+        stageId: imported.metadata.stageId!,
+        runId: imported.metadata.runId,
+      }
+      // data_preprocess 的真实前置条件是当前会话已完成导入与画像；先记录这两步，
+      // 再测试“复合实体键修复”，避免把测试夹具缺少工作流状态误报为工具故障。
+      recordWorkflowStageSuccess({
+        sessionID: ctx.sessionID,
+        toolName: "data_import",
+        args: { action: "import", ...importedSource },
+        metadata: { action: "import", ...importedSource },
+      })
+      await recommend.execute(
         {
-          action: "preprocess",
-          preserveLabels: true,
-          ...importedSource,
-          operations: [
-            {
-              type: "combine_columns",
-              variables: ["省份", "地区"],
-              params: { output_column: "省份_地区", separator: "_" },
-            },
-          ],
-          createInspectionArtifacts: false,
+          datasetId: importedSource.datasetId,
+          stageId: importedSource.stageId,
+          dependentVar: "数字普惠金融指数",
+          entityVar: "地区",
+          timeVar: "年份",
+        },
+        ctx as never,
+      )
+      recordWorkflowStageSuccess({
+        sessionID: ctx.sessionID,
+        toolName: "econometrics_recommend",
+        args: importedSource,
+        metadata: importedSource,
+      })
+      const preprocessTool = await DataPreprocessTool.init()
+      const repaired = await preprocessTool.execute(
+        {
+          datasetId: importedSource.datasetId,
+          stageId: importedSource.stageId,
+          method: "combine_columns",
+          columns: ["省份", "地区"],
+          options: { output_column: "省份_地区", separator: "_" },
         },
         { ...ctx, agent: "explorer" } as never,
       )
       const source = { datasetId: repaired.metadata.datasetId!, stageId: repaired.metadata.stageId! }
+      const sourceWorkflow = { ...source, runId: repaired.metadata.runId }
       expect(source.datasetId).toBe(importedSource.datasetId)
       expect(source.stageId).not.toBe(importedSource.stageId)
-      expect(repaired.metadata.result?.rows_after).toBe(contract.digital.rows)
-      expect(repaired.metadata.result?.columns_after).toBe(contract.digital.columns + 1)
+      const r = repaired.metadata.result!
+      expect(r.rowsAfter).toBe(contract.digital.rows)
+      expect(r.columnsAfter).toBe(contract.digital.columns + 1)
 
-      const parquetPath = path.resolve(root, repaired.metadata.result!.output_path!)
+      const parquetPath = path.resolve(root, r.outputPath!)
       const compositeFacts = JSON.parse(
         execFileSync(
           await resolveRuntimePythonCommand(),
@@ -361,13 +421,14 @@ describe("real paper Excel chain", () => {
 
       recordWorkflowStageSuccess({
         sessionID: ctx.sessionID,
-        toolName: "data_import",
-        args: { action: "preprocess", ...source },
-        metadata: { action: "preprocess", ...source },
+        toolName: "data_preprocess",
+        args: { method: "combine_columns", ...sourceWorkflow },
+        metadata: { method: "combine_columns", ...sourceWorkflow },
       })
       const profile = await recommend.execute(
         {
-          ...source,
+          datasetId: source.datasetId,
+          stageId: source.stageId,
           dependentVar: "数字普惠金融指数",
           treatmentVar: "每百人互联网用户数",
           entityVar: "省份_地区",
@@ -379,17 +440,16 @@ describe("real paper Excel chain", () => {
       recordWorkflowStageSuccess({
         sessionID: ctx.sessionID,
         toolName: "econometrics_recommend",
-        args: source,
-        metadata: source,
+        args: sourceWorkflow,
+        metadata: sourceWorkflow,
       })
       const qa = await dataImport.execute(
         {
-          action: "qa",
+          action: "validate",
           preserveLabels: true,
           ...source,
           entityVar: "省份_地区",
           timeVar: "年份",
-          createInspectionArtifacts: false,
         },
         ctx as never,
       )
@@ -397,8 +457,8 @@ describe("real paper Excel chain", () => {
       recordWorkflowStageSuccess({
         sessionID: ctx.sessionID,
         toolName: "data_import",
-        args: { action: "qa", ...source },
-        metadata: { action: "qa", ...source, qaGateStatus: qa.metadata.qaGateStatus },
+        args: { action: "validate", ...sourceWorkflow },
+        metadata: { action: "validate", ...sourceWorkflow, qaGateStatus: qa.metadata.qaGateStatus },
       })
 
       const panelFe = await PanelFeRegressionTool.init()
@@ -411,30 +471,32 @@ describe("real paper Excel chain", () => {
           entityVar: "省份_地区",
           timeVar: "年份",
           clusterVar: "省份_地区",
+          covariance: "clustered",
         },
         ctx as never,
       )
       const backend = result.metadata.result!
-      expect(backend.rows_used).toBe(contract.digital.rows)
-      expect(backend.cluster_var).toBe("省份_地区")
-      expect(backend.degraded_from ?? null).toBeNull()
-      expect(Number.isFinite(backend.coefficient)).toBe(true)
-      expect(Number.isFinite(backend.std_error) && backend.std_error! > 0).toBe(true)
-      expect(Number.isFinite(backend.p_value) && backend.p_value! >= 0 && backend.p_value! <= 1).toBe(true)
-      expect(backend.coefficient).toBeCloseTo(calibration.digitalPanelFe.coefficient, 7)
-      expect(backend.std_error).toBeCloseTo(calibration.digitalPanelFe.stdError, 7)
-      expect(backend.p_value).toBeCloseTo(calibration.digitalPanelFe.pValue, 7)
-      expect(backend.rows_used).toBe(calibration.digitalPanelFe.rowsUsed)
-      expect(backend.cluster_var).toBe(calibration.digitalPanelFe.clusterVar)
+      const primary = backend.primary!
+      expect(backend.rowsUsed).toBe(contract.digital.rows)
+      expect(backend.clusterVar).toBe("省份_地区")
+      expect(backend.covariance).toBe("clustered")
+      expect(Number.isFinite(primary.estimate)).toBe(true)
+      expect(Number.isFinite(primary.stdError) && primary.stdError! > 0).toBe(true)
+      expect(Number.isFinite(primary.pValue) && primary.pValue! >= 0 && primary.pValue! <= 1).toBe(true)
+      expect(primary.estimate).toBeCloseTo(calibration.digitalPanelFe.coefficient, 7)
+      expect(primary.stdError).toBeCloseTo(calibration.digitalPanelFe.stdError, 7)
+      expect(primary.pValue).toBeCloseTo(calibration.digitalPanelFe.pValue, 7)
+      expect(backend.rowsUsed).toBe(calibration.digitalPanelFe.rowsUsed)
+      expect(backend.clusterVar).toBe(calibration.digitalPanelFe.clusterVar)
       expect(result.output).not.toContain(files.digitalPath)
       if (process.env.KILLSTATA_PRINT_REAL_PAPER_RESULTS === "1") {
         console.log(
           `REAL_PAPER_DIGITAL_RESULT=${JSON.stringify({
-            coefficient: backend.coefficient,
-            stdError: backend.std_error,
-            pValue: backend.p_value,
-            rowsUsed: backend.rows_used,
-            clusterVar: backend.cluster_var,
+            coefficient: primary.estimate,
+            stdError: primary.stdError,
+            pValue: primary.pValue,
+            rowsUsed: backend.rowsUsed,
+            clusterVar: backend.clusterVar,
           })}`,
         )
       }
@@ -457,11 +519,14 @@ describe("real paper Excel chain", () => {
           preserveLabels: true,
           inputPath: files.didPath,
           sheetPolicy: { mode: "named_sheet", sheetName: contract.did.sheet },
-          createInspectionArtifacts: false,
         },
         ctx as never,
       )
-      const source = { datasetId: imported.metadata.datasetId!, stageId: imported.metadata.stageId! }
+      const source = {
+        datasetId: imported.metadata.datasetId!,
+        stageId: imported.metadata.stageId!,
+        runId: imported.metadata.runId,
+      }
       recordWorkflowStageSuccess({
         sessionID: ctx.sessionID,
         toolName: "data_import",
@@ -470,7 +535,8 @@ describe("real paper Excel chain", () => {
       })
       await recommend.execute(
         {
-          ...source,
+          datasetId: source.datasetId,
+          stageId: source.stageId,
           dependentVar: "经济发展水平",
           treatmentVar: "did",
           entityVar: contract.did.entityVar,
@@ -486,20 +552,19 @@ describe("real paper Excel chain", () => {
       })
       const qa = await dataImport.execute(
         {
-          action: "qa",
+          action: "validate",
           preserveLabels: true,
           ...source,
           entityVar: contract.did.entityVar,
           timeVar: contract.did.timeVar,
-          createInspectionArtifacts: false,
         },
         ctx as never,
       )
       recordWorkflowStageSuccess({
         sessionID: ctx.sessionID,
         toolName: "data_import",
-        args: { action: "qa", ...source },
-        metadata: { action: "qa", ...source, qaGateStatus: qa.metadata.qaGateStatus },
+        args: { action: "validate", ...source },
+        metadata: { action: "validate", ...source, qaGateStatus: qa.metadata.qaGateStatus },
       })
 
       const panelFe = await PanelFeRegressionTool.init()
@@ -512,22 +577,20 @@ describe("real paper Excel chain", () => {
           entityVar: contract.did.entityVar,
           timeVar: contract.did.timeVar,
           clusterVar: contract.did.entityVar,
+          covariance: "clustered",
         },
         ctx as never,
       )
       const panel = panelResult.metadata.result!
-      expect(panel.rows_used).toBe(contract.did.rows)
+      const panelPrimary = panel.primary!
+      expect(panel.rowsUsed).toBe(contract.did.rows)
       expect(panel.backend).toContain("linearmodels")
-      expect(Number.isFinite(panel.coefficient)).toBe(true)
-      expect(Number.isFinite(panel.std_error) && panel.std_error! > 0).toBe(true)
-      expect(Number.isFinite(panel.p_value) && panel.p_value! >= 0 && panel.p_value! <= 1).toBe(true)
-      expect(panel.degraded_from ?? null).toBeNull()
+      expect(panel.covariance).toBe("clustered")
+      expect(Number.isFinite(panelPrimary.estimate)).toBe(true)
+      expect(Number.isFinite(panelPrimary.stdError) && panelPrimary.stdError! > 0).toBe(true)
+      expect(Number.isFinite(panelPrimary.pValue) && panelPrimary.pValue! >= 0 && panelPrimary.pValue! <= 1).toBe(true)
       expect(panelResult.output).not.toContain(files.didPath)
-      const diagnosticsPath = panel.diagnostics_path!
-      const diagnostics = JSON.parse(
-        fs.readFileSync(path.isAbsolute(diagnosticsPath) ? diagnosticsPath : path.resolve(root, diagnosticsPath), "utf-8"),
-      ) as { panel?: { cluster_count?: number } }
-      expect(diagnostics.panel?.cluster_count).toBe(contract.did.entities)
+      expect(panel.clusterCount).toBe(contract.did.entities)
 
       const hdfe = await HdfeRegressionTool.init()
       const hdfeResult = await hdfe.execute(
@@ -552,7 +615,7 @@ describe("real paper Excel chain", () => {
       expect(Number.isFinite(hdfeBackend.primary?.stdError) && hdfeBackend.primary!.stdError! > 0).toBe(true)
       expect(hdfeResult.output).not.toContain(files.didPath)
 
-      const pointEstimateGap = Math.abs(panel.coefficient! - hdfeBackend.primary!.estimate!)
+      const pointEstimateGap = Math.abs(panelPrimary.estimate! - hdfeBackend.primary!.estimate!)
       expect(pointEstimateGap).toBeLessThan(1e-6)
 
       const additionalSpecifications = [
@@ -572,13 +635,13 @@ describe("real paper Excel chain", () => {
           kind: "baseline",
           tool: "panel_fe_regression",
           outcome: "经济发展水平",
-          coefficient: panel.coefficient!,
-          stdError: panel.std_error!,
-          pValue: panel.p_value!,
-          rowsUsed: panel.rows_used!,
+          coefficient: panelPrimary.estimate!,
+          stdError: panelPrimary.stdError!,
+          pValue: panelPrimary.pValue!,
+          rowsUsed: panel.rowsUsed!,
         },
       ]
-      const resultPaths = new Set<string>([panel.output_path!])
+      const resultPaths = new Set<string>([panel.resultPath!])
 
       for (const specification of additionalSpecifications) {
         const result = await panelFe.execute(
@@ -590,31 +653,32 @@ describe("real paper Excel chain", () => {
             entityVar: contract.did.entityVar,
             timeVar: contract.did.timeVar,
             clusterVar: contract.did.entityVar,
+            covariance: "clustered",
           },
           ctx as never,
         )
         const backend = result.metadata.result!
-        expect(backend.effective_method, specification.outcome).toBe("panel_fe")
-        expect(backend.rows_used, specification.outcome).toBe(contract.did.rows)
-        expect(Number.isFinite(backend.coefficient), specification.outcome).toBe(true)
-        expect(Number.isFinite(backend.std_error) && backend.std_error! > 0, specification.outcome).toBe(true)
+        const primary = backend.primary!
+        expect(backend.rowsUsed, specification.outcome).toBe(contract.did.rows)
+        expect(Number.isFinite(primary.estimate), specification.outcome).toBe(true)
+        expect(Number.isFinite(primary.stdError) && primary.stdError! > 0, specification.outcome).toBe(true)
         expect(
-          Number.isFinite(backend.p_value) && backend.p_value! >= 0 && backend.p_value! <= 1,
+          Number.isFinite(primary.pValue) && primary.pValue! >= 0 && primary.pValue! <= 1,
           specification.outcome,
         ).toBe(true)
-        expect(backend.cluster_var, specification.outcome).toBe(contract.did.entityVar)
-        expect(backend.degraded_from ?? null, specification.outcome).toBeNull()
+        expect(backend.clusterVar, specification.outcome).toBe(contract.did.entityVar)
+        expect(backend.covariance, specification.outcome).toBe("clustered")
         expect(result.output, specification.outcome).not.toContain(files.didPath)
-        expect(resultPaths.has(backend.output_path!), `${specification.outcome}: result path was reused`).toBe(false)
-        resultPaths.add(backend.output_path!)
+        expect(resultPaths.has(backend.resultPath!), `${specification.outcome}: result path was reused`).toBe(false)
+        resultPaths.add(backend.resultPath!)
         compactResults.push({
           kind: specification.kind,
           tool: "panel_fe_regression",
           outcome: specification.outcome,
-          coefficient: backend.coefficient!,
-          stdError: backend.std_error!,
-          pValue: backend.p_value!,
-          rowsUsed: backend.rows_used!,
+          coefficient: primary.estimate!,
+          stdError: primary.stdError!,
+          pValue: primary.pValue!,
+          rowsUsed: backend.rowsUsed!,
         })
       }
 

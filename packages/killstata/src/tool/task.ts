@@ -1,4 +1,5 @@
 import { Tool } from "./tool"
+import { ToolModel } from "./model-contracts"
 import DESCRIPTION from "./task.txt"
 import z from "zod"
 import { Session } from "../session"
@@ -6,13 +7,17 @@ import { Bus } from "../bus"
 import { MessageV2 } from "../session/message-v2"
 import { Identifier } from "../id/id"
 import { Agent } from "../agent/agent"
-import { SessionPrompt } from "../session/prompt"
-import { iife } from "@/util/iife"
+import { cancel as cancelSessionPrompt, prompt as promptSession } from "../session/prompt/dispatch"
+import { resolvePromptParts } from "../session/prompt/message"
+import { iife } from "@killstata/util/iife"
 import { defer } from "@/util/defer"
 import { Config } from "../config/config"
 import { PermissionNext } from "@/permission/next"
+import { RuntimeTaskLedger } from "@/runtime/task-ledger"
 import { createSubagentContract } from "@/runtime/tool-policy"
 import { RuntimeEvents } from "@/runtime/events"
+import { Instance } from "@/project/instance"
+import path from "path"
 
 function collectArtifactHints(messages: MessageV2.WithParts[]) {
   const artifacts = new Set<string>()
@@ -34,14 +39,28 @@ function collectArtifactHints(messages: MessageV2.WithParts[]) {
 }
 
 const parameters = z.object({
-  description: z.string().describe("A short (3-5 words) description of the task"),
-  prompt: z.string().describe("The task for the agent to perform"),
-  subagent_type: z.string().describe("The type of specialized agent to use for this task"),
-  session_id: z.string().describe("Existing Task session to continue").optional(),
-  command: z.string().describe("The command that triggered this task").optional(),
+  description: z.string().describe("任务的简短中文说明（3 至 5 个词）"),
+  prompt: z.string().describe("交给内部 Agent 的明确任务"),
+  subagent_type: z.string().describe("本任务使用的专用 Agent 类型"),
+  session_id: z.string().describe("要继续的既有子任务会话").optional(),
+  command: z.string().describe("触发此任务的命令").optional(),
 })
 
-export const TaskTool = Tool.define("task", async (ctx) => {
+type TaskParameters = z.infer<typeof parameters>
+
+function matchesUserAuthorization(authorization: unknown, params: TaskParameters) {
+  if (!authorization || typeof authorization !== "object" || Array.isArray(authorization)) return false
+  const approved = authorization as Partial<TaskParameters>
+  return (
+    approved.description === params.description &&
+    approved.prompt === params.prompt &&
+    approved.subagent_type === params.subagent_type &&
+    approved.session_id === params.session_id &&
+    approved.command === params.command
+  )
+}
+
+export const TaskTool = Tool.define("task", Tool.Execution.protectedExternal, ToolModel.forTool("task"), async (ctx) => {
   const agents = await Agent.list().then((x) => x.filter((a) => a.mode !== "primary"))
 
   // Filter agents by permissions if agent provided
@@ -53,7 +72,7 @@ export const TaskTool = Tool.define("task", async (ctx) => {
   const description = DESCRIPTION.replace(
     "{agents}",
     accessibleAgents
-      .map((a) => `- ${a.name}: ${a.description ?? "This subagent should only be called manually by the user."}`)
+      .map((a) => `- ${a.name}: ${a.description ?? "该子 Agent 只应在用户明确指定时调用。"}`)
       .join("\n"),
   )
   return {
@@ -62,8 +81,9 @@ export const TaskTool = Tool.define("task", async (ctx) => {
     async execute(params: z.infer<typeof parameters>, ctx) {
       const config = await Config.get()
 
-      // Skip permission check when user explicitly invoked via @ or command subtask
-      if (!ctx.extra?.bypassAgentCheck) {
+      // @/命令生成的 subtask part 是本次调用的精确用户授权证据；它只跳过 task 自己的
+      // 重复弹窗，仍必须经过 SessionProcessor、ToolOrchestrator 和其余资源权限检查。
+      if (!matchesUserAuthorization(ctx.extra?.userInitiatedTask, params)) {
         await ctx.ask({
           permission: "task",
           patterns: [params.subagent_type],
@@ -76,14 +96,21 @@ export const TaskTool = Tool.define("task", async (ctx) => {
       }
 
       const agent = await Agent.get(params.subagent_type)
-      if (!agent) throw new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`)
+      if (!agent) throw new Error(`未知子 Agent 类型：${params.subagent_type} 不在当前可用列表中。`)
 
       const hasTaskPermission = agent.permission.some((rule) => rule.permission === "task")
 
       const session = await iife(async () => {
         if (params.session_id) {
-          const found = await Session.get(params.session_id).catch(() => {})
-          if (found) return found
+          const found = await Session.get(params.session_id).catch(() => undefined)
+          if (!found) throw new Error(`TASK_SESSION_NOT_FOUND：找不到要续接的子会话 ${params.session_id}。`)
+          const sameParent = found.parentID === ctx.sessionID
+          const sameProject = found.projectID === Instance.project.id
+          const sameDirectory = path.resolve(found.directory) === path.resolve(Instance.directory)
+          if (!sameParent || !sameProject || !sameDirectory) {
+            throw new Error("TASK_SESSION_SCOPE_MISMATCH：只能续接当前父会话在同一项目和目录中创建的子会话。")
+          }
+          return found
         }
 
         return await Session.create({
@@ -118,13 +145,24 @@ export const TaskTool = Tool.define("task", async (ctx) => {
         })
       })
       const msg = await MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID })
-      if (msg.info.role !== "assistant") throw new Error("Not an assistant message")
+      if (msg.info.role !== "assistant") throw new Error("子会话最后一条消息不是 Agent 结果，暂时无法汇总。")
 
       ctx.metadata({
         title: params.description,
         metadata: {
           sessionId: session.id,
         },
+      })
+      ctx.progress?.({
+        message: `子 Agent ${agent.name} 已排队`,
+        title: params.description,
+        metadata: { sessionId: session.id, agent: agent.name },
+      })
+      RuntimeTaskLedger.appendEventBestEffort({
+        sessionID: ctx.sessionID,
+        kind: "agent.control",
+        message: `subagent ${agent.name} queued`,
+        metadata: { childSessionID: session.id, description: params.description },
       })
       Bus.publish(RuntimeEvents.SubagentLifecycle, {
         sessionID: ctx.sessionID,
@@ -155,19 +193,25 @@ export const TaskTool = Tool.define("task", async (ctx) => {
             sessionId: session.id,
           },
         })
+        ctx.progress?.({
+          message: `子 Agent ${agent.name} 正在执行`,
+          title: params.description,
+          metadata: { completedToolCount: Object.values(parts).filter((item) => item.state.status === "completed").length },
+        })
       })
 
       const model = agent.model ?? {
         modelID: msg.info.modelID,
         providerID: msg.info.providerID,
       }
+      RuntimeTaskLedger.linkChildTask({ sessionID: ctx.sessionID, childSessionID: session.id })
 
       function cancel() {
-        SessionPrompt.cancel(session.id)
+        cancelSessionPrompt(session.id)
       }
       ctx.abort.addEventListener("abort", cancel)
       using _ = defer(() => ctx.abort.removeEventListener("abort", cancel))
-      const promptParts = await SessionPrompt.resolvePromptParts(params.prompt)
+      const promptParts = await resolvePromptParts(params.prompt)
       Bus.publish(RuntimeEvents.SubagentLifecycle, {
         sessionID: ctx.sessionID,
         subagentSessionID: session.id,
@@ -177,7 +221,7 @@ export const TaskTool = Tool.define("task", async (ctx) => {
 
       let result: MessageV2.WithParts
       try {
-        result = await SessionPrompt.prompt({
+        result = await promptSession({
           messageID,
           sessionID: session.id,
           model: {
@@ -194,6 +238,12 @@ export const TaskTool = Tool.define("task", async (ctx) => {
           parts: promptParts,
         })
       } catch (error) {
+        RuntimeTaskLedger.recordChildTaskOutcome({
+          sessionID: ctx.sessionID,
+          childSessionID: session.id,
+          status: "failed",
+          result: { error: String(error) },
+        })
         Bus.publish(RuntimeEvents.SubagentLifecycle, {
           sessionID: ctx.sessionID,
           subagentSessionID: session.id,
@@ -222,9 +272,17 @@ export const TaskTool = Tool.define("task", async (ctx) => {
         sessionID: session.id,
         summary: text,
         producedArtifacts: collectArtifactHints(messages),
-        nextStepRecommendation: text ? "Integrate the subagent summary into the parent turn and decide whether follow-up work is needed." : "",
+        nextStepRecommendation: text
+          ? "Integrate the subagent summary into the parent turn and decide whether follow-up work is needed."
+          : "",
       })
 
+      RuntimeTaskLedger.recordChildTaskOutcome({
+        sessionID: ctx.sessionID,
+        childSessionID: session.id,
+        status: "completed",
+        result: { summary: text, contract },
+      })
       Bus.publish(RuntimeEvents.SubagentLifecycle, {
         sessionID: ctx.sessionID,
         subagentSessionID: session.id,
@@ -232,13 +290,7 @@ export const TaskTool = Tool.define("task", async (ctx) => {
         phase: "completed",
       })
 
-      const output = [
-        text,
-        "",
-        "<subagent_result>",
-        JSON.stringify(contract, null, 2),
-        "</subagent_result>",
-      ].join("\n")
+      const output = [text, "", "<subagent_result>", JSON.stringify(contract, null, 2), "</subagent_result>"].join("\n")
 
       return {
         title: params.description,

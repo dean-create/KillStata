@@ -1,5 +1,5 @@
 import path from "path"
-import { BoxRenderable, TextareaRenderable, MouseEvent, PasteEvent, t, dim, fg } from "@opentui/core"
+import { BoxRenderable, TextareaRenderable, MouseEvent, PasteEvent, t, dim, fg, TextAttributes } from "@opentui/core"
 import { createEffect, createMemo, type JSX, onMount, createSignal, onCleanup, Show, on } from "solid-js"
 import { useLocal } from "@tui/context/local"
 import { useTheme } from "@tui/context/theme"
@@ -14,6 +14,7 @@ import { usePromptHistory, type PromptInfo } from "./history"
 import { usePromptStash } from "./stash"
 import { DialogStash } from "../dialog-stash"
 import { DialogDataFile } from "../dialog-data-file"
+import { NativeFilePicker } from "../../util/native-file-picker"
 import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useCommandDialog } from "../dialog-command"
 import { useRenderer } from "@opentui/solid"
@@ -22,14 +23,17 @@ import { useExit } from "../../context/exit"
 import { Clipboard } from "../../util/clipboard"
 import type { FilePart } from "@killstata/sdk/v2"
 import { TuiEvent } from "../../event"
-import { iife } from "@/util/iife"
+import { iife } from "@killstata/util/iife"
 import { Locale } from "@/util/locale"
-import { formatDuration } from "@/util/format"
 import { useDialog } from "@tui/ui/dialog"
+import { cleanupAll } from "@/runtime/retention"
+import { parseCleanupCommand } from "../../cleanup-command"
+import { parseCompactCommand } from "../../compact-command"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
-import { DialogAlert } from "../../ui/dialog-alert"
+import { DialogReasoning } from "../dialog-reasoning"
 import { useToast } from "../../ui/toast"
 import { useTextareaKeybindings } from "../textarea-keybindings"
+import { ProviderTransform } from "@/provider/transform"
 import {
   attachmentLabel,
   dataFileLabel,
@@ -46,7 +50,10 @@ export type PromptProps = {
   onSubmit?: () => void
   ref?: (ref: PromptRef | undefined) => void
   hint?: JSX.Element
-  right?: JSX.Element
+  // OpenTUI 的 box 不能直接接收动态字符串或外部 JSX 节点；把模型标签作为
+  // 原始字符串传进来，并在 Prompt 内部放进 text，避免节点重排时产生 orphan text。
+  right?: string
+  onRightMouseDown?: () => void
   showPlaceholder?: boolean
   placeholders?: {
     normal?: string[]
@@ -93,6 +100,8 @@ export function Prompt(props: PromptProps) {
   const dialog = useDialog()
   const toast = useToast()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
+  const running = createMemo(() => status().type !== "idle")
+  const queue = createMemo(() => sync.data.runtimeQueue?.[props.sessionID ?? ""] ?? { pending: 0, actions: [] })
   const history = usePromptHistory()
   const stash = usePromptStash()
   const command = useCommandDialog()
@@ -273,9 +282,6 @@ export function Prompt(props: PromptProps) {
         category: "会话",
         keybind: "editor_open",
         value: "prompt.editor",
-        slash: {
-          name: "editor",
-        },
         onSelect: async (dialog) => {
           dialog.clear()
 
@@ -457,7 +463,8 @@ export function Prompt(props: PromptProps) {
         start = part.source.text.start
         end = part.source.text.end
         virtualText = part.source.text.value
-        styleId = pasteStyleId
+        // 数据文件引用复用文件样式（橙字加粗、无底色）；普通粘贴才用带底色的 paste 样式。
+        styleId = part.source.text.kind === "datafile" ? fileStyleId : pasteStyleId
       }
 
       if (virtualText) {
@@ -590,7 +597,14 @@ export function Prompt(props: PromptProps) {
     },
   ])
 
-  async function submit() {
+  function clearInput() {
+    input.extmarks.clear()
+    setStore("prompt", { input: "", parts: [] })
+    setStore("extmarkToPartIndex", new Map())
+    input.clear()
+  }
+
+  async function submit(delivery: "queued" | "steer" = "queued") {
     if (input && !input.isDestroyed && input.plainText !== store.prompt.input) {
       setStore("prompt", "input", input.plainText)
       syncExtmarksWithPromptParts()
@@ -610,6 +624,74 @@ export function Prompt(props: PromptProps) {
       promptModelWarning()
       return false
     }
+
+    const contextMatch = trimmed.match(/^\/context(?:\s+.*)?$/i)
+    if (contextMatch && props.sessionID) {
+      input.extmarks.clear()
+      setStore("prompt", { input: "", parts: [] })
+      setStore("extmarkToPartIndex", new Map())
+      input.clear()
+      command.trigger("app.context")
+      return true
+    }
+
+    const reasoningMatch = trimmed.match(/^\/reasoning(?:\s+(.+))?$/i)
+    if (reasoningMatch) {
+      const requested = reasoningMatch[1]?.trim().toLowerCase()
+      if (!requested) {
+        clearInput()
+        dialog.replace(() => <DialogReasoning />)
+        return true
+      }
+
+      const available = local.model.reasoningLevel.list()
+      if (requested === "default" || requested === "off") {
+        local.model.reasoningLevel.set(undefined)
+        toast.show({ variant: "success", message: "已恢复模型默认推理策略", duration: 3000 })
+      } else if (!available.includes(requested)) {
+        toast.show({
+          variant: "error",
+          message: `当前模型不支持 ${requested}；可用：${available.join("、")}`,
+          duration: 5000,
+        })
+      } else {
+        local.model.reasoningLevel.set(requested)
+        toast.show({ variant: "success", message: `推理等级已设为 ${requested}`, duration: 3000 })
+      }
+      clearInput()
+      return true
+    }
+
+    const compactCommand = parseCompactCommand(store.prompt.input)
+    if (compactCommand.matched) {
+      if (compactCommand.error) {
+        toast.show({ variant: "error", message: compactCommand.error, duration: 5000 })
+        return true
+      }
+      if (!props.sessionID) {
+        toast.show({ variant: "warning", message: "当前还没有可压缩的会话。", duration: 3000 })
+        return true
+      }
+      clearInput()
+      void sdk.client.session.summarize({
+        sessionID: props.sessionID,
+        modelID: selectedModel.modelID,
+        providerID: selectedModel.providerID,
+        auto: false,
+        instructions: compactCommand.instructions,
+      }).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error)
+        toast.show({
+          variant: "error",
+          message: ProviderTransform.isBalanceOrQuotaError(message)
+            ? ProviderTransform.BALANCE_OR_QUOTA_ERROR_MESSAGE
+            : `压缩失败：${message}`,
+          duration: 5000,
+        })
+      })
+      return true
+    }
+
     const sessionID = props.sessionID
       ? props.sessionID
       : await (async () => {
@@ -618,6 +700,44 @@ export function Prompt(props: PromptProps) {
         })()
     const messageID = Identifier.ascending("message")
     let inputText = store.prompt.input
+
+    // /cleanup 不走模型，直接做减法（保留会话/精简产物），toast 展示统计
+    const cleanupCommand = parseCleanupCommand(inputText)
+    if (cleanupCommand.matched) {
+      toast.show({
+        variant: "info",
+        message: "清理中…",
+        duration: 1500,
+      })
+      try {
+        const report = await cleanupAll({
+          ...(cleanupCommand.keepTopSessions ? { keepTopSessions: cleanupCommand.keepTopSessions } : {}),
+          dryRun: cleanupCommand.dryRun,
+        })
+        toast.show({
+          variant: report.sessionsRemoved + report.childSessionsRemoved > 0 ? "success" : "info",
+          message: [
+            cleanupCommand.dryRun ? "[dry-run] " : "",
+            `会话 ${report.sessionsRemoved + report.childSessionsRemoved} 个`,
+            `反思 ${report.reflectionRemoved} 条`,
+            `工作流 ${report.workflowsRemoved} 份`,
+            `任务 ${report.tasksRemoved} 份`,
+            `数据集 ${report.datasetsTrimmed} 个`,
+            `释放 ${(report.bytesFreed / 1024 / 1024).toFixed(1)}M`,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          duration: 6000,
+        })
+      } catch (error) {
+        toast.show({
+          variant: "error",
+          message: `清理失败：${error instanceof Error ? error.message : String(error)}`,
+          duration: 5000,
+        })
+      }
+      return true
+    }
 
     // Expand pasted text inline before submitting
     const allExtmarks = input.extmarks.getAllForTypeId(promptPartTypeId)
@@ -640,7 +760,7 @@ export function Prompt(props: PromptProps) {
 
     // Capture mode before it gets reset
     const currentMode = store.mode
-    const variant = local.model.variant.current()
+    const variant = local.model.reasoningLevel.current()
 
     if (store.mode === "shell") {
       void sdk.client.session.shell({
@@ -677,6 +797,11 @@ export function Prompt(props: PromptProps) {
         model: `${selectedModel.providerID}/${selectedModel.modelID}`,
         messageID,
         variant,
+        queuePriority: delivery === "steer" ? 30 : undefined,
+        queueMetadata: {
+          delivery,
+          source: "tui",
+        },
         parts: nonTextParts
           .filter((x) => x.type === "file")
           .map((x) => ({
@@ -700,6 +825,12 @@ export function Prompt(props: PromptProps) {
           agent: agent.name,
           model: selectedModel,
           variant,
+          queuePriority: delivery === "steer" ? 30 : undefined,
+          queueActionType: "prompt",
+          queueMetadata: {
+            delivery,
+            source: "tui",
+          },
           parts: [
             {
               id: Identifier.ascending("part"),
@@ -713,6 +844,19 @@ export function Prompt(props: PromptProps) {
           ],
         })
         .catch(() => {})
+    }
+    if (running() && delivery === "queued") {
+      toast.show({
+        variant: "info",
+        message: queue().pending > 0 ? `已排队（前方 ${queue().pending} 条）` : "已排队，当前任务完成后执行",
+        duration: 2500,
+      })
+    } else if (running() && delivery === "steer") {
+      toast.show({
+        variant: "success",
+        message: "已发送引导，当前任务完成后优先处理",
+        duration: 2500,
+      })
     }
     history.append({
       ...store.prompt,
@@ -748,11 +892,23 @@ export function Prompt(props: PromptProps) {
   function insertDataFilePath(filePath: string) {
     const needsSpace = input.plainText.length > 0 && !input.plainText.endsWith(" ")
     if (needsSpace) input.insertText(" ")
-    pasteText(filePath, dataFileLabel(path.basename(filePath)))
+    pasteText(filePath, dataFileLabel(path.basename(filePath)), { styleId: fileStyleId, kind: "datafile" })
     input.focus()
   }
 
-  function pasteText(text: string, virtualText: string) {
+  // macOS/Windows 有真正的系统级文件选择对话框（见 native-file-picker.ts）。
+  // 只在当前平台/环境没有可用脚本宿主时才回退到内置的 TUI 目录浏览器；
+  // 用户主动取消原生对话框后不再弹回退窗口，否则会让人困惑"点了取消怎么又跳一个"。
+  async function openDataFilePicker() {
+    const result = await NativeFilePicker.pick()
+    if (!result.available) {
+      dialog.replace(() => <DialogDataFile onPick={insertDataFilePath} />)
+      return
+    }
+    if (result.path) insertDataFilePath(result.path)
+  }
+
+  function pasteText(text: string, virtualText: string, opts?: { styleId?: number; kind?: "datafile" }) {
     const currentOffset = input.visualCursor.offset
     const extmarkStart = currentOffset
     const extmarkEnd = extmarkStart + virtualText.length
@@ -763,7 +919,7 @@ export function Prompt(props: PromptProps) {
       start: extmarkStart,
       end: extmarkEnd,
       virtual: true,
-      styleId: pasteStyleId,
+      styleId: opts?.styleId ?? pasteStyleId,
       typeId: promptPartTypeId,
     })
 
@@ -778,6 +934,7 @@ export function Prompt(props: PromptProps) {
               start: extmarkStart,
               end: extmarkEnd,
               value: virtualText,
+              kind: opts?.kind,
             },
           },
         })
@@ -840,6 +997,9 @@ export function Prompt(props: PromptProps) {
         ref={(r) => (autocomplete = r)}
         anchor={() => anchor}
         input={() => input}
+        onSubmit={() => {
+          void submit()
+        }}
         setPrompt={(cb) => {
           setStore("prompt", produce(cb))
         }}
@@ -868,22 +1028,56 @@ export function Prompt(props: PromptProps) {
           <box
             paddingLeft={1}
             paddingRight={1}
-            paddingTop={0}
             flexShrink={0}
             backgroundColor={theme.background}
             flexGrow={1}
             minWidth={0}
           >
-            <box flexDirection="row" gap={1} alignItems="flex-start" width="100%" minWidth={0}>
-              {/* 数据文件入口。终端没有真正的文件选择器，所以这个标志是「按 Ctrl+O 打开
-                  数据文件浏览器」的可见提示 —— 否则用户根本不知道有这个功能。 */}
-              <text
+            <box flexDirection="row" gap={1} alignItems="center" width="100%" minWidth={0}>
+              {/* 数据文件入口：macOS/Windows 优先唤起系统级文件选择对话框（见
+                  native-file-picker.ts），没有可用脚本宿主时回退到内置目录浏览器。
+                  半角字符 + 左右各 1 格 padding，总宽 3 列 × 1 行高，与右侧发送按钮
+                  完全同尺寸；前景用 theme.secondary——killstata.json 里唯一真正的蓝色
+                  （#93C5FD），markdownLink/primary/accent 在这套主题里实际都是青色。 */}
+              <box
                 flexShrink={0}
-                fg={theme.textMuted}
-                onMouseDown={() => dialog.replace(() => <DialogDataFile onPick={insertDataFilePath} />)}
+                paddingLeft={1}
+                paddingRight={1}
+                backgroundColor={theme.backgroundElement}
+                onMouseDown={() => void openDataFilePicker()}
               >
-                📎
-              </text>
+                {/* 用普通 +（U+002B）而不是制表符十字 ┼/╋：制表符字形是为"与相邻格子
+                    拼成连续线"设计的，横竖都必须顶到格子边缘，所以竖线和横线一样长；
+                    而数学加号的字形本来就是竖笔短于横笔、不顶上下边缘，正是这里要的比例。
+                    刻意不加 BOLD，保持细笔画。字符的横竖比例由字体字形决定，代码无法
+                    单独拉伸某一笔，只能靠选对字符。 */}
+                <text fg={theme.secondary}>+</text>
+              </box>
+              {/* 斜杠命令入口标志：点击（或按 command_list 快捷键）打开命令面板。
+                  与「┼」保持同一尺寸和同一笔画粗细——同样不加 BOLD，否则会比左边的
+                  细十字明显粗一圈，两个图标看起来不是一套。 */}
+              <box
+                flexShrink={0}
+                paddingLeft={1}
+                paddingRight={1}
+                backgroundColor={theme.backgroundElement}
+                onMouseDown={() => command.show()}
+              >
+                <text fg={theme.secondary}>/</text>
+              </box>
+              {/* 执行模式切换：Auto（自由决策调工具） vs Plan（只读文件+列计划，不能写/执行） */}
+              <box
+                flexShrink={0}
+                paddingLeft={1}
+                paddingRight={1}
+                backgroundColor={local.executionMode.current() === "auto" ? theme.primary : theme.warning}
+                onMouseDown={() => {
+                  const next = local.executionMode.toggle()
+                  toast.show({ message: `已切换到 ${next === "auto" ? "Auto 自由执行" : "Plan 只读规划"} 模式`, variant: "info", duration: 2000 })
+                }}
+              >
+                <text fg={theme.background} attributes={TextAttributes.BOLD}>{local.executionMode.current() === "auto" ? "Auto ⇥" : "Plan ⇥"}</text>
+              </box>
               <textarea
                 placeholder={
                   props.showPlaceholder === false
@@ -928,7 +1122,7 @@ export function Prompt(props: PromptProps) {
                     // If no image, let the default paste behavior continue
                   }
                   if (keybind.match("data_file_picker", e)) {
-                    dialog.replace(() => <DialogDataFile onPick={insertDataFilePath} />)
+                    void openDataFilePicker()
                     return
                   }
                   if (keybind.match("input_clear", e) && store.prompt.input !== "") {
@@ -961,6 +1155,18 @@ export function Prompt(props: PromptProps) {
                       e.preventDefault()
                       return
                     }
+                  }
+                  // Tab 快捷切换 Auto/Plan：仅在补全面板未打开时生效，
+                  // 补全可见时 Tab 仍归自动补全（接受候选）。
+                  if (e.name === "tab" && store.mode === "normal" && !autocomplete.visible) {
+                    e.preventDefault()
+                    const next = local.executionMode.toggle()
+                    toast.show({
+                      message: `已切换到 ${next === "auto" ? "Auto 自由执行" : "Plan 只读规划"} 模式`,
+                      variant: "info",
+                      duration: 2000,
+                    })
+                    return
                   }
                   if (store.mode === "normal") autocomplete.onKeyDown(e)
                   if (!autocomplete.visible) {
@@ -1077,96 +1283,63 @@ export function Prompt(props: PromptProps) {
                 minWidth={0}
               />
               <Show when={hasRightContent()}>
-                <box flexDirection="row" flexShrink={0} gap={1}>
-                  {props.right}
+                <box
+                  flexDirection="row"
+                  flexShrink={0}
+                  gap={1}
+                  paddingLeft={1}
+                  paddingRight={1}
+                  backgroundColor={theme.backgroundElement}
+                  onMouseDown={() => props.onRightMouseDown?.()}
+                >
+                  <text fg={theme.textMuted}>{props.right} ›</text>
                 </box>
               </Show>
-              <Show when={store.mode === "normal"}>
-                <text flexShrink={0} fg={theme.textMuted}>
-                  {keybind.print("command_list")} <span style={{ fg: theme.textMuted }}>命令</span>
+              <Show when={running()}>
+                <text flexShrink={0} fg={theme.textMuted} onMouseDown={() => void submit("steer")}>
+                  ⚡ 引导
                 </text>
+              </Show>
+              {/* 发送/停止：单行高 + 左右各 1 格。终端字符格是宽 1:高 2，所以 3 列宽 ×
+                  1 行高在视觉上最接近正方形；一旦加垂直 padding 就会把整个输入行撑成
+                  3 行，按钮反而变成一根比输入框还高的竖条，与左侧 + / 图标完全脱节。 */}
+              <Show
+                when={running() && Boolean(props.sessionID)}
+                fallback={
+                  <box
+                    flexShrink={0}
+                    paddingLeft={1}
+                    paddingRight={1}
+                    backgroundColor={theme.primary}
+                    onMouseDown={() => void submit("queued")}
+                  >
+                    <text fg={theme.background} attributes={TextAttributes.BOLD}>
+                      ↑
+                    </text>
+                  </box>
+                }
+              >
+                <box
+                  flexShrink={0}
+                  paddingLeft={1}
+                  paddingRight={1}
+                  backgroundColor={theme.error}
+                  onMouseDown={() => {
+                    const sid = props.sessionID
+                    if (sid) sdk.client.session.abort({ sessionID: sid }).catch(() => {})
+                  }}
+                >
+                  <text fg={theme.background} attributes={TextAttributes.BOLD}>
+                    ■
+                  </text>
+                </box>
               </Show>
             </box>
           </box>
         </box>
-        <Show when={status().type === "retry" || props.hint}>
-          <box flexDirection="row">
-            <Show when={status().type === "retry"} fallback={props.hint ?? <text />}>
-              <box
-                flexDirection="row"
-                gap={1}
-                flexGrow={1}
-                justifyContent={status().type === "retry" ? "space-between" : "flex-start"}
-              >
-              <box flexShrink={0} flexDirection="row" gap={1}>
-                <box flexDirection="row" gap={1} flexShrink={0}>
-                  {(() => {
-                      const retry = createMemo(() => {
-                        const s = status()
-                        if (s.type !== "retry") return
-                        return s
-                      })
-                      const message = createMemo(() => {
-                        const r = retry()
-                        if (!r) return
-                        if (r.message.includes("exceeded your current quota") && r.message.includes("gemini"))
-                          return "gemini is way too hot right now"
-                        if (r.message.length > 80) return r.message.slice(0, 80) + "..."
-                        return r.message
-                      })
-                      const isTruncated = createMemo(() => {
-                        const r = retry()
-                        if (!r) return false
-                        return r.message.length > 120
-                      })
-                      const [seconds, setSeconds] = createSignal(0)
-                      onMount(() => {
-                        const timer = setInterval(() => {
-                          const next = retry()?.next
-                          if (next) setSeconds(Math.round((next - Date.now()) / 1000))
-                        }, 1000)
-
-                        onCleanup(() => {
-                          clearInterval(timer)
-                        })
-                      })
-                      const handleMessageClick = () => {
-                        const r = retry()
-                        if (!r) return
-                        if (isTruncated()) {
-                          DialogAlert.show(dialog, "Retry Error", r.message)
-                        }
-                      }
-
-                      const retryText = () => {
-                        const r = retry()
-                        if (!r) return ""
-                        const baseMessage = message()
-                        const truncatedHint = isTruncated() ? " (click to expand)" : ""
-                        const duration = formatDuration(seconds())
-                        const retryInfo = ` [retrying ${duration ? `in ${duration} ` : ""}attempt #${r.attempt}]`
-                        return baseMessage + truncatedHint + retryInfo
-                      }
-
-                      return (
-                        <Show when={retry()}>
-                          <box onMouseUp={handleMessageClick}>
-                            <text fg={theme.error}>{retryText()}</text>
-                          </box>
-                        </Show>
-                      )
-                    })()}
-                  </box>
-                </box>
-                <text fg={store.interrupt > 0 ? theme.primary : theme.text}>
-                  esc{" "}
-                  <span style={{ fg: store.interrupt > 0 ? theme.primary : theme.textMuted }}>
-                    {store.interrupt > 0 ? "again to interrupt" : "interrupt"}
-                  </span>
-                </text>
-              </box>
-            </Show>
-          </box>
+        {/* 网络重连提示已移到对话流末尾的 RetryNotice；这里只保留可选的 hint 透传。 */}
+        <Show when={props.hint}>
+          <box flexDirection="row">{props.hint}</box>
         </Show>
       </box>
     </>

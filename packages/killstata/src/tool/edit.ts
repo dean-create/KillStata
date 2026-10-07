@@ -6,54 +6,42 @@
 import z from "zod"
 import * as path from "path"
 import { Tool } from "./tool"
-import { createTwoFilesPatch } from "diff"
+import { ToolModel } from "./model-contracts"
 import DESCRIPTION from "./edit.txt"
 import { File } from "../file"
 import { Bus } from "../bus"
 import { FileTime } from "../file/time"
 import { Instance } from "../project/instance"
 import { assertExternalDirectory } from "./external-directory"
+import { displayPath } from "./analysis-display"
 
-
-function normalizeLineEndings(text: string): string {
-  return text.replaceAll("\r\n", "\n")
-}
-
-export const EditTool = Tool.define("edit", {
+export const EditTool = Tool.define("edit", Tool.Execution.protectedFilesystem, ToolModel.forTool("edit"), {
   description: DESCRIPTION,
   parameters: z.object({
-    filePath: z.string().describe("The absolute path to the file to modify"),
-    oldString: z.string().describe("The text to replace"),
-    newString: z.string().describe("The text to replace it with (must be different from oldString)"),
-    replaceAll: z.boolean().optional().describe("Replace all occurrences of oldString (default false)"),
+    filePath: z.string().describe("要修改文件的绝对路径"),
+    oldString: z.string().describe("要精确替换的原文"),
+    newString: z.string().describe("替换后的文本，必须不同于 oldString"),
+    replaceAll: z.boolean().optional().describe("是否替换 oldString 的全部出现位置，默认 false"),
   }),
   async execute(params, ctx) {
     if (!params.filePath) {
-      throw new Error("filePath is required")
+      throw new Error("filePath 为必填的目标文件绝对路径。")
     }
 
     if (params.oldString === params.newString) {
-      throw new Error("oldString and newString must be different")
+      throw new Error("oldString 与 newString 必须不同。")
     }
 
     const filePath = path.isAbsolute(params.filePath) ? params.filePath : path.join(Instance.directory, params.filePath)
     await assertExternalDirectory(ctx, filePath)
 
-    let diff = ""
-    let contentOld = ""
-    let contentNew = ""
     await FileTime.withLock(filePath, async () => {
       if (params.oldString === "") {
-        contentNew = params.newString
-        diff = trimDiff(createTwoFilesPatch(filePath, filePath, contentOld, contentNew))
         await ctx.ask({
           permission: "edit",
           patterns: [path.relative(Instance.worktree, filePath)],
           always: ["*"],
-          metadata: {
-            filepath: filePath,
-            diff,
-          },
+          metadata: { filepath: filePath },
         })
         await Bun.write(filePath, params.newString)
         await Bus.publish(File.Event.Edited, {
@@ -65,49 +53,27 @@ export const EditTool = Tool.define("edit", {
 
       const file = Bun.file(filePath)
       const stats = await file.stat().catch(() => {})
-      if (!stats) throw new Error(`File ${filePath} not found`)
-      if (stats.isDirectory()) throw new Error(`Path is a directory, not a file: ${filePath}`)
+      if (!stats) throw new Error(`找不到文件：${filePath}`)
+      if (stats.isDirectory()) throw new Error(`目标路径是目录而不是文件：${filePath}`)
       await FileTime.assert(ctx.sessionID, filePath)
-      contentOld = await file.text()
-      contentNew = replace(contentOld, params.oldString, params.newString, params.replaceAll)
-
-      diff = trimDiff(
-        createTwoFilesPatch(filePath, filePath, normalizeLineEndings(contentOld), normalizeLineEndings(contentNew)),
-      )
+      const contentOld = await file.text()
+      const contentNew = replace(contentOld, params.oldString, params.newString, params.replaceAll)
       await ctx.ask({
         permission: "edit",
         patterns: [path.relative(Instance.worktree, filePath)],
         always: ["*"],
-        metadata: {
-          filepath: filePath,
-          diff,
-        },
+        metadata: { filepath: filePath },
       })
 
       await file.write(contentNew)
       await Bus.publish(File.Event.Edited, {
         file: filePath,
       })
-      contentNew = await file.text()
-      diff = trimDiff(
-        createTwoFilesPatch(filePath, filePath, normalizeLineEndings(contentOld), normalizeLineEndings(contentNew)),
-      )
       FileTime.read(ctx.sessionID, filePath)
     })
-
-    ctx.metadata({
-      metadata: {
-        diff,
-      },
-    })
-
-    // 不再拉起语言服务器对刚改的文件挑错（见 write.ts 同段说明）。metadata.diff 保留——
-    // TUI 的编辑卡片和权限弹窗的"写前预览"都靠它，与已删除的 LSP 诊断无关。
     return {
-      metadata: {
-        diff,
-      },
-      title: `${path.relative(Instance.worktree, filePath)}`,
+      metadata: {},
+      title: displayPath(path.relative(Instance.worktree, filePath)),
       output: "Edit applied successfully.",
     }
   },
@@ -538,45 +504,9 @@ export const ContextAwareReplacer: Replacer = function* (content, find) {
   }
 }
 
-export function trimDiff(diff: string): string {
-  const lines = diff.split("\n")
-  const contentLines = lines.filter(
-    (line) =>
-      (line.startsWith("+") || line.startsWith("-") || line.startsWith(" ")) &&
-      !line.startsWith("---") &&
-      !line.startsWith("+++"),
-  )
-
-  if (contentLines.length === 0) return diff
-
-  let min = Infinity
-  for (const line of contentLines) {
-    const content = line.slice(1)
-    if (content.trim().length > 0) {
-      const match = content.match(/^(\s*)/)
-      if (match) min = Math.min(min, match[1].length)
-    }
-  }
-  if (min === Infinity || min === 0) return diff
-  const trimmedLines = lines.map((line) => {
-    if (
-      (line.startsWith("+") || line.startsWith("-") || line.startsWith(" ")) &&
-      !line.startsWith("---") &&
-      !line.startsWith("+++")
-    ) {
-      const prefix = line[0]
-      const content = line.slice(1)
-      return prefix + content.slice(min)
-    }
-    return line
-  })
-
-  return trimmedLines.join("\n")
-}
-
 export function replace(content: string, oldString: string, newString: string, replaceAll = false): string {
   if (oldString === newString) {
-    throw new Error("oldString and newString must be different")
+    throw new Error("oldString 与 newString 必须不同。")
   }
 
   let notFound = true
@@ -606,7 +536,7 @@ export function replace(content: string, oldString: string, newString: string, r
   }
 
   if (notFound) {
-    throw new Error("oldString not found in content")
+    throw new Error("在最新文件内容中找不到 oldString。")
   }
   throw new Error(
     "Found multiple matches for oldString. Provide more surrounding lines in oldString to identify the correct match.",

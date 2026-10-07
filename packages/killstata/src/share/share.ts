@@ -7,9 +7,7 @@ export namespace Share {
   const log = Log.create({ service: "share" })
   const explicitUrl = process.env["KILLSTATA_SHARE_URL"]?.trim()
   const disabled =
-    process.env["KILLSTATA_DISABLE_SHARE"] === "true" ||
-    process.env["KILLSTATA_DISABLE_SHARE"] === "1" ||
-    !explicitUrl
+    process.env["KILLSTATA_DISABLE_SHARE"] === "true" || process.env["KILLSTATA_DISABLE_SHARE"] === "1" || !explicitUrl
 
   let queue: Promise<void> = Promise.resolve()
   const pending = new Map<string, any>()

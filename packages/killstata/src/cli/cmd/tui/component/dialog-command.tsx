@@ -182,7 +182,10 @@ function DialogCommand(props: { options: CommandOption[]; suggestedOptions: Comm
 }
 
 function chineseCategory(category?: string) {
-  return ({ Session: "会话", Agent: "模型", System: "系统", Input: "输入" } as Record<string, string>)[category ?? ""] ?? category
+  return (
+    ({ Session: "会话", Agent: "模型", System: "系统", Input: "输入" } as Record<string, string>)[category ?? ""] ??
+    category
+  )
 }
 
 function chineseDescription(option: CommandOption) {
@@ -192,19 +195,18 @@ function chineseDescription(option: CommandOption) {
     sessions: "切换或恢复会话",
     new: "开始一段新对话",
     model: "选择当前使用的模型",
-    config: "设置模型与 API Key",
+    config: "设置模型与api key",
     help: "查看使用帮助",
-    exit: "退出 KillStata",
-    editor: "在编辑器中编写长消息",
+    exit: "退出killstata",
     themes: "切换界面主题",
     rename: "修改当前会话标题",
-    timeline: "跳转到指定消息",
+    context: "查看当前会话上下文窗口和剩余预算",
+    reasoning: "设置或查看当前模型推理等级",
     compact: "整理较长的会话内容",
     undo: "撤销上一条提问",
     redo: "恢复已撤销的提问",
     timestamps: "显示或隐藏消息时间",
     thinking: "显示或隐藏分析过程",
-    details: "查看处理过程的技术详情",
     copy: "复制当前会话内容",
     export: "导出当前会话记录",
   }

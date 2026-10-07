@@ -1,0 +1,13 @@
+{
+  "description": "省份面板的工资对教育 + 工龄控制 + 实体 = 省份、时间 = 年份",
+  "modelArgs": {
+    "datasetId": "wage_panel",
+    "stageId": "stage_000",
+    "dependentVar": "lwage",
+    "treatmentVar": "educ",
+    "covariates": ["exper"],
+    "entityVar": "nr",
+    "timeVar": "year"
+  },
+  "expect": "pass"
+}

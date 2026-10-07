@@ -32,7 +32,6 @@ describe("project identity (non-git data directories)", () => {
 
       expect(project.worktree).not.toBe("/")
       expect(project.worktree).toBe(dir)
-      expect(project.vcs).toBeUndefined()
     })
   })
 
@@ -71,6 +70,19 @@ describe("project identity (non-git data directories)", () => {
       // 从子目录启动，也应该认出同一个项目——否则会话会分裂
       expect(fromSub.worktree).toBe(root)
       expect(fromSub.id).toBe(fromRoot.id)
+    })
+  })
+
+  test("a .git directory never changes the data project identity", async () => {
+    await withDataDir(async (root) => {
+      fs.mkdirSync(path.join(root, ".git"), { recursive: true })
+      const sub = path.join(root, "raw")
+      fs.mkdirSync(sub)
+
+      const { project } = await Project.fromDirectory(sub)
+
+      expect(project.worktree).toBe(sub)
+      expect(project.id).not.toBe("global")
     })
   })
 })

@@ -93,7 +93,7 @@ export namespace ShareNext {
       }
     | {
         type: "part"
-        data: SDK.Part
+        data: SDK.Part | MessageV2.CompactionRestorePart
       }
     | {
         type: "model"

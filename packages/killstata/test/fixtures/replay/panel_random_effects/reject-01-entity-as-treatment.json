@@ -1,0 +1,14 @@
+{
+  "description": "个体索引与核心解释变量重合",
+  "modelArgs": {
+    "datasetId": "wage_panel",
+    "stageId": "stage_000",
+    "dependentVar": "lwage",
+    "treatmentVar": "nr",
+    "covariates": ["exper"],
+    "entityVar": "nr",
+    "timeVar": "year"
+  },
+  "expect": "reject",
+  "rejectHint": ["entityVar", "索引"]
+}

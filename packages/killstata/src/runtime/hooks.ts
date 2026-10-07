@@ -1,4 +1,4 @@
-import type { LifecycleHookResult, WorkflowInputIntent } from "./types"
+import type { LifecycleHookResult, QueryCorrelation, WorkflowInputIntent } from "./types"
 
 export type InputAcceptedHook = (input: {
   sessionID: string
@@ -17,6 +17,9 @@ export type PreToolHook = (input: {
   sessionID: string
   toolName: string
   args: unknown
+  /** Tool orchestrator 分配的 callID；trace logger 用它配对 pre/post。 */
+  callID: string
+  correlation?: QueryCorrelation
 }) => Promise<LifecycleHookResult | void> | LifecycleHookResult | void
 
 export type PostToolHook = (input: {
@@ -29,6 +32,11 @@ export type PostToolHook = (input: {
   }
   toolName: string
   args: unknown
+  /** Tool orchestrator 分配的 callID；trace logger 用它配对 pre/post。 */
+  callID: string
+  correlation?: QueryCorrelation
+  /** 计量方法先返回估计结果，语义 verifier 在后台执行，避免阻塞主模型收尾。 */
+  deferVerification?: boolean
   result: {
     title: string
     metadata: Record<string, unknown>
@@ -48,6 +56,11 @@ export type PostToolFailureHook = (input: {
   toolName: string
   args: unknown
   error: unknown
+  /** 结构化错误码（如 ManagedProcessError.code），用于让分类不依赖错误文案。 */
+  errorCode?: string
+  /** Tool orchestrator 分配的 callID；trace logger 用它配对 pre/fail。 */
+  callID: string
+  correlation?: QueryCorrelation
 }) => Promise<LifecycleHookResult | void> | LifecycleHookResult | void
 
 export type TurnFinishedHook = (input: {
@@ -69,6 +82,9 @@ async function collect(results: Array<LifecycleHookResult | void>) {
     if (result.preventContinuation) output.preventContinuation = true
     if (result.updatedInput !== undefined) output.updatedInput = result.updatedInput
     if (result.repair) output.repair = result.repair
+    if (result.confirmedToolIDs?.length) {
+      output.confirmedToolIDs = [...(output.confirmedToolIDs ?? []), ...result.confirmedToolIDs]
+    }
     if (result.appendSystem?.length) {
       output.appendSystem = [...(output.appendSystem ?? []), ...result.appendSystem]
     }

@@ -1,9 +1,9 @@
 {
-  "description": "模型把 datasetId 传成空字符串（占位符没有被真实值替换）",
+  "description": "模型不应把 Harness runtime 字段 datasetId 放进统计 arguments",
   "modelArgs": {
-    "datasetId": "   ",
-    "stageId": "stage_000"
+    "datasetId": "dataset_forged",
+    "dependentVar": "investment"
   },
   "expect": "reject",
-  "rejectHint": ["datasetId", "不能为空"]
+  "rejectHint": ["datasetId", "runtime"]
 }

@@ -8,6 +8,7 @@ import {
 } from "@/runtime/analysis-text-sanitizer"
 import { isAnalysisTurn, maybeBuildAnalysisUserViewText } from "@/runtime/analysis-user-view"
 import { WORKFLOW_ANALYSIS_TOOL_IDS, isWorkflowAnalysisTool } from "@/runtime/tool-catalog"
+import { MessageV2 } from "@/session/message-v2"
 
 export type TranscriptOptions = {
   thinking: boolean
@@ -30,6 +31,19 @@ export type MessageWithParts = {
   parts: Part[]
 }
 
+export function isInternalCompactionSummary(info: UserMessage | AssistantMessage) {
+  return MessageV2.isInternalSummary(info)
+}
+
+export function isInternalCompactionContinuation(message: MessageWithParts) {
+  return message.info.role === "user" && message.parts.some((part) =>
+    part.type === "text" && part.synthetic && part.text.includes("<killstata-analysis-continuation>"),
+  )
+}
+
+// 含 data_batch / econometrics / regression_table 等已下线或从未实现的工具名：
+// 本集合按 tool name 匹配**历史消息**决定是否折叠内部步骤，删掉会让老会话的
+// 内部工具调用重新暴露给用户。属展示层历史兼容名单，不代表当前可调度。
 const INTERNAL_ANALYSIS_TRANSCRIPT_TOOLS = new Set([
   "data_import",
   "data_batch",
@@ -44,7 +58,7 @@ const INTERNAL_ANALYSIS_TRANSCRIPT_TOOLS = new Set([
   "grep",
   "list",
   "read",
-  "workflow",
+  "pipeline",
   "skill",
   "invalid",
   "todowrite",
@@ -54,6 +68,7 @@ const INTERNAL_ANALYSIS_TRANSCRIPT_TOOLS = new Set([
 const INTERNAL_ANALYSIS_ERROR_PATTERNS = [
   /Cannot read .* as text/i,
   /Cannot read binary file/i,
+  /不能将.*按文本读取[：:]/,
   /Model tried to call unavailable tool/i,
   /\bartifactRefs\b/i,
   /\blatestTrustedArtifacts\b/i,
@@ -75,6 +90,7 @@ export function formatTranscript(
 
   let latestUserText: string | undefined
   for (const msg of messages) {
+    if (isInternalCompactionSummary(msg.info) || isInternalCompactionContinuation(msg)) continue
     latestUserText = msg.info.role === "user" ? (collectUserText(msg.parts) ?? latestUserText) : latestUserText
     transcript += formatMessage(msg.info, msg.parts, options, latestUserText)
     transcript += `---\n\n`
@@ -89,6 +105,7 @@ export function formatMessage(
   options: TranscriptOptions,
   latestUserText?: string,
 ): string {
+  if (isInternalCompactionSummary(msg)) return ""
   let result = ""
   const assistantTools = msg.role === "assistant" ? collectAssistantTools(parts) : []
   const analysisTurn = isAnalysisTurn(assistantTools, latestUserText)
@@ -211,7 +228,7 @@ export function formatPart(
 
   if (part.type === "reasoning") {
     if (options.thinking) {
-      return `_Thinking:_\n\n${part.text}\n\n`
+      return `_思考过程：_\n\n${part.text}\n\n`
     }
     return ""
   }

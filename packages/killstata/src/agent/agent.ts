@@ -13,8 +13,15 @@ import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
+import { VERIFIER_ROLE_PROMPT } from "./prompt/roles"
 import { PermissionNext } from "@/permission/next"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
+import {
+  WORKFLOW_ANALYSIS_TOOL_IDS,
+  WORKFLOW_DATA_METHOD_TOOL_IDS,
+  WORKFLOW_IMPORT_TOOL_IDS,
+  WORKFLOW_REPORT_TOOL_IDS,
+} from "@/runtime/tool-catalog"
 import { Global } from "@/global"
 import path from "path"
 
@@ -48,26 +55,55 @@ export namespace Agent {
 
   const state = Instance.state(async () => {
     const cfg = await Config.get()
-    const projectRoot = Instance.project.vcs ? Instance.worktree : Instance.directory
+    const projectRoot = Instance.worktree
 
+    // 计量工作流工具默认放行：这些工具经 admission 表验证、走 managed-process 白名单
+    // 安全执行、exposure 分阶段控制可见性——每次调用都弹权限只会打断分析流程。
+    // 清单从 tool-catalog 派生（不硬编码工具名，改名即编译期/不变量测试兜底）。
+    const workflowToolsAllow = Object.fromEntries(
+      [
+        ...WORKFLOW_ANALYSIS_TOOL_IDS,
+        ...WORKFLOW_IMPORT_TOOL_IDS,
+        ...WORKFLOW_DATA_METHOD_TOOL_IDS,
+        ...WORKFLOW_REPORT_TOOL_IDS,
+      ].map((id) => [id, "allow"]),
+    )
+    const managedRuntimePattern = `${path.join(Global.Path.data, "venv", "*")} *`
+
+    // 默认收紧：* 从 allow 改为 ask（对齐 claude-code 的 fail-closed 权限管线）。
+    // 只读/搜索工具与计量工作流工具显式放行；bash/edit/write 等有副作用的默认要问。
     const defaults = PermissionNext.fromConfig({
-      "*": "allow",
+      "*": "ask",
       doom_loop: "ask",
-      external_directory: {
-        "*": "allow",
-        [Truncate.DIR]: "allow",
-        [Truncate.GLOB]: "allow",
-      },
-      question: "deny",
-      plan_enter: "deny",
-      plan_exit: "deny",
-      // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
+      ...workflowToolsAllow,
       read: {
         "*": "allow",
         "*.env": "ask",
         "*.env.*": "ask",
         "*.env.example": "allow",
       },
+      glob: "allow",
+      grep: "allow",
+      list: "allow",
+      // 模型不能直接获得这些命令；只有已准入工具以 managedRuntime=true 请求固定
+      // `.killstata/venv` runner 时，PermissionNext 的结构校验才允许命中。
+      bash: {
+        "*": "ask",
+        [managedRuntimePattern]: "allow",
+      },
+      // 网络读取会把 URL/检索词发送到外部；虽不改本地状态，仍按精确目标确认。
+      webfetch: "ask",
+      skill: "allow",
+      workflow: "allow",
+      todoread: "allow",
+      todowrite: "allow",
+      task: "ask",
+      external_directory: {
+        "*": "allow",
+        [Truncate.DIR]: "allow",
+        [Truncate.GLOB]: "allow",
+      },
+      question: "deny",
     })
     const user = PermissionNext.fromConfig(cfg.permission ?? {})
 
@@ -79,30 +115,6 @@ export namespace Agent {
           defaults,
           PermissionNext.fromConfig({
             question: "allow",
-            plan_enter: "allow",
-          }),
-          user,
-        ),
-        mode: "primary",
-        native: true,
-      },
-      explorer: {
-        name: "explorer",
-        options: {},
-        permission: PermissionNext.merge(
-          defaults,
-          PermissionNext.fromConfig({
-            question: "allow",
-            plan_exit: "allow",
-            external_directory: {
-              [path.join(projectRoot, ".killstata", "plans", "*")]: "allow",
-              [path.join(Global.Path.data, "plans", "*")]: "allow",
-            },
-            edit: {
-              "*": "deny",
-              [path.join(".killstata", "plans", "*.md")]: "allow",
-              [path.relative(Instance.worktree, path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
-            },
           }),
           user,
         ),
@@ -111,7 +123,7 @@ export namespace Agent {
       },
       general: {
         name: "general",
-        description: `General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.`,
+        description: "通用内部 Agent：处理可独立拆分的复杂检索或多步骤任务。仅在任务之间无依赖且不会重复工作时使用。",
         permission: PermissionNext.merge(
           defaults,
           PermissionNext.fromConfig({
@@ -126,7 +138,7 @@ export namespace Agent {
       },
       verifier: {
         name: "verifier",
-        description: `Verification-focused agent for checking data quality, econometric assumptions, diagnostics, and reproducibility artifacts before finalizing an answer.`,
+        description: "核验内部 Agent：在给出结论前检查数据质量、计量假设、诊断和可复现产物。",
         permission: PermissionNext.merge(
           defaults,
           PermissionNext.fromConfig({
@@ -141,15 +153,7 @@ export namespace Agent {
           }),
           user,
         ),
-        prompt: [
-          "You are a verification subagent for killstata.",
-          "Your job is to audit datasets, model specifications, diagnostics, and saved artifacts.",
-          "Prioritize blocking errors, methodological inconsistencies, missing files, and reproducibility gaps.",
-          "Treat numeric_snapshot.json as the only trusted source for statistical numbers in user-facing summaries.",
-          "Flag any coefficient, p-value, standard error, R-squared, N, descriptive statistic, or correlation that is missing from or inconsistent with the numeric snapshot.",
-          "If QA warnings or blocking errors exist, state them concretely and propose the minimum repair needed.",
-          "Do not rewrite the user's goal. Focus on validation evidence.",
-        ].join("\n"),
+        prompt: VERIFIER_ROLE_PROMPT,
         options: {},
         mode: "subagent",
         native: true,
@@ -165,7 +169,6 @@ export namespace Agent {
             list: "allow",
             bash: "allow",
             webfetch: "allow",
-            websearch: "allow",
             read: "allow",
             external_directory: {
               [Truncate.DIR]: "allow",
@@ -174,7 +177,8 @@ export namespace Agent {
           }),
           user,
         ),
-        description: `Fast agent specialized for exploring a dataset and the working directory. Use it to quickly find data files by pattern (eg. "**/*.xlsx"), profile a dataset's variables and structure, or answer questions about what data is available and how it is shaped (eg. "is this panel data?", "which columns look like treatment/outcome?"). Specify the desired thoroughness: "quick" for a basic look, "medium" for moderate profiling, or "very thorough" for comprehensive inspection across multiple files and naming conventions.`,
+        description:
+          "探索内部 Agent：快速查找数据文件、画像变量和结构，回答数据可用性问题。可指定 quick、medium 或 very thorough；它只读、不做清洗或估计。",
         prompt: PROMPT_EXPLORE,
         options: {},
         mode: "subagent",
@@ -228,7 +232,8 @@ export namespace Agent {
       },
     }
 
-    for (const [key, value] of Object.entries(cfg.agent ?? {})) {
+    for (const [rawKey, value] of Object.entries(cfg.agent ?? {})) {
+      const key = normalizePrimaryAgent(rawKey)
       if (value.disable) {
         delete result[key]
         continue
@@ -251,7 +256,7 @@ export namespace Agent {
       item.mode = value.mode ?? item.mode
       item.color = value.color ?? item.color
       item.hidden = value.hidden ?? item.hidden
-      item.name = value.name ?? item.name
+      item.name = key === "analyst" ? "analyst" : value.name ?? item.name
       item.steps = value.steps ?? item.steps
       item.options = mergeDeep(item.options, value.options ?? {})
       item.permission = PermissionNext.merge(item.permission, PermissionNext.fromConfig(value.permission ?? {}))
@@ -276,8 +281,12 @@ export namespace Agent {
     return result
   })
 
+  export function normalizePrimaryAgent(name: string) {
+    return name === "explorer" ? "analyst" : name
+  }
+
   export async function get(agent: string) {
-    return state().then((x) => x[agent])
+    return state().then((x) => x[normalizePrimaryAgent(agent)])
   }
 
   export async function list() {
@@ -294,7 +303,8 @@ export namespace Agent {
     const agents = await state()
 
     if (cfg.default_agent) {
-      const agent = agents[cfg.default_agent]
+      const requested = normalizePrimaryAgent(cfg.default_agent)
+      const agent = agents[requested]
       if (!agent) throw new Error(`default agent "${cfg.default_agent}" not found`)
       if (agent.mode === "subagent") throw new Error(`default agent "${cfg.default_agent}" is a subagent`)
       if (agent.hidden === true) throw new Error(`default agent "${cfg.default_agent}" is hidden`)
@@ -319,6 +329,8 @@ export namespace Agent {
     const params = {
       experimental_telemetry: {
         isEnabled: cfg.experimental?.openTelemetry,
+        recordInputs: false,
+        recordOutputs: false,
         metadata: {
           userId: cfg.username ?? "unknown",
         },
@@ -333,7 +345,7 @@ export namespace Agent {
         ),
         {
           role: "user",
-          content: `Create an agent configuration based on this request: \"${input.description}\".\n\nIMPORTANT: The following identifiers already exist and must NOT be used: ${existing.map((i) => i.name).join(", ")}\n  Return ONLY the JSON object, no other text, do not wrap in backticks`,
+          content: `请根据以下需求生成 Agent 配置："${input.description}"。\n\n以下 identifier 已存在，不得使用：${existing.map((i) => i.name).join(", ")}。\n只返回 JSON 对象，不要附加解释或代码围栏`,
         },
       ],
       model: language,

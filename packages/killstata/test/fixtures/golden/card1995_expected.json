@@ -6,13 +6,7 @@
   "dependent": "lwage",
   "endogenous": "educ",
   "instrument": "nearc4",
-  "controls": [
-    "exper",
-    "expersq",
-    "black",
-    "south",
-    "smsa"
-  ],
+  "controls": ["exper", "expersq", "black", "south", "smsa"],
   "ols_educ_coefficient": 0.07400898928105001,
   "ols_educ_std_error": 0.0035054349331816973,
   "iv_educ_coefficient": 0.1322887692695076,

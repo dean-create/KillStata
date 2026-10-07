@@ -2,6 +2,7 @@ import { ConfigMarkdown } from "@/config/markdown"
 import { Config } from "../config/config"
 import { MCP } from "../mcp"
 import { Provider } from "../provider/provider"
+import { formatModelNotFoundMessage } from "../provider/model-policy"
 import { UI } from "./ui"
 
 export function FormatError(input: unknown) {
@@ -10,10 +11,8 @@ export function FormatError(input: unknown) {
   if (Provider.ModelNotFoundError.isInstance(input)) {
     const { providerID, modelID, suggestions } = input.data
     return [
-      `Model not found: ${providerID}/${modelID}`,
-      ...(Array.isArray(suggestions) && suggestions.length ? ["Did you mean: " + suggestions.join(", ")] : []),
-      `Try: \`killstata models\` to list available models`,
-      `Or check your config (killstata.json) provider/model names`,
+      formatModelNotFoundMessage({ providerID, modelID, suggestions }),
+      "也可以运行 `killstata models` 查看模型目录。",
     ].join("\n")
   }
   if (Provider.InitError.isInstance(input)) {

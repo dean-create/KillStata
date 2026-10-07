@@ -14,9 +14,24 @@ process.chdir(dir)
 
 import pkg from "../package.json"
 import { Script } from "@killstata/script"
+import { buildWebDistribution } from "../../../desktop/scripts/build-web"
+import { copyWebAssets } from "./web-assets"
 
+const singleFlag = process.argv.includes("--single")
+const baselineFlag = process.argv.includes("--baseline")
 const skipInstall = process.argv.includes("--skip-install")
+const windowsPriorityFlag = process.argv.includes("--windows-priority")
 const cliBinaryName = "killstata"
+const engineSourceRoot = path.resolve(dir, "../killstata-econometrics-engine")
+const { outputDirectory: webAssetsDirectory } = await buildWebDistribution()
+
+function copyEngineAssets(destinationRoot: string) {
+  if (!fs.existsSync(engineSourceRoot)) throw new Error(`Missing econometrics engine source: ${engineSourceRoot}`)
+  fs.cpSync(engineSourceRoot, path.join(destinationRoot, "engine"), {
+    recursive: true,
+    filter: (source) => !source.includes(`${path.sep}__pycache__${path.sep}`) && !source.endsWith(`${path.sep}__pycache__`),
+  })
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof AggregateError) {
@@ -97,22 +112,99 @@ async function buildTarget(
   }
 }
 
-const targets: {
+const allTargets: {
   os: string
-  arch: "x64"
+  arch: "arm64" | "x64"
+  abi?: "musl"
+  avx2?: false
 }[] = [
+  {
+    os: "linux",
+    arch: "arm64",
+  },
+  {
+    os: "linux",
+    arch: "x64",
+  },
+  {
+    os: "linux",
+    arch: "x64",
+    avx2: false,
+  },
+  {
+    os: "linux",
+    arch: "arm64",
+    abi: "musl",
+  },
+  {
+    os: "linux",
+    arch: "x64",
+    abi: "musl",
+  },
+  {
+    os: "linux",
+    arch: "x64",
+    abi: "musl",
+    avx2: false,
+  },
+  {
+    os: "darwin",
+    arch: "arm64",
+  },
+  {
+    os: "darwin",
+    arch: "x64",
+  },
+  {
+    os: "darwin",
+    arch: "x64",
+    avx2: false,
+  },
   {
     os: "win32",
     arch: "x64",
   },
+  {
+    os: "win32",
+    arch: "x64",
+    avx2: false,
+  },
 ]
+
+const targets = (() => {
+  if (windowsPriorityFlag) {
+    return allTargets.filter((item) => item.os === "win32" && item.arch === "x64" && item.avx2 !== false)
+  }
+
+  if (singleFlag) {
+    return allTargets.filter((item) => {
+      if (item.os !== process.platform || item.arch !== process.arch) {
+        return false
+      }
+
+      // When building for the current platform, prefer a single native binary by default.
+      // Baseline binaries require additional Bun artifacts and can be flaky to download.
+      if (item.avx2 === false) {
+        return baselineFlag
+      }
+
+      // also skip abi-specific builds for the same reason
+      if (item.abi !== undefined) {
+        return false
+      }
+
+      return true
+    })
+  }
+
+  return allTargets
+})()
 
 await $`rm -rf dist`
 
 const binaries: Record<string, string> = {}
 if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`
-  await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
 }
 for (const item of targets) {
   const name = [
@@ -120,6 +212,8 @@ for (const item of targets) {
     // changing to win32 flags npm for some reason
     item.os === "win32" ? "windows" : item.os,
     item.arch,
+    item.avx2 === false ? "baseline" : undefined,
+    item.abi === undefined ? undefined : item.abi,
   ]
     .filter(Boolean)
     .join("-")
@@ -144,12 +238,15 @@ for (const item of targets) {
         bin: {
           [cliBinaryName]: binaryEntry,
         },
+        files: ["bin/", "engine/", "dist-web/"],
       },
       null,
       2,
     ),
   )
+  copyEngineAssets(path.join(dir, "dist", name))
+  copyWebAssets(webAssetsDirectory, path.join(dir, "dist", name))
   binaries[name] = Script.version
 }
 
-export { binaries }
+export { binaries, webAssetsDirectory }

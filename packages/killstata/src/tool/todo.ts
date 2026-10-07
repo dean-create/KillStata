@@ -1,14 +1,15 @@
 import z from "zod"
 import { Tool } from "./tool"
+import { ToolModel } from "./model-contracts"
 import DESCRIPTION_WRITE from "./todowrite.txt"
 import { Todo } from "../session/todo"
 import { createToolDisplay } from "./analysis-display"
 
 const TodoWriteItemInput = z.object({
-  content: z.string().min(1).describe("Brief description of the task"),
-  status: z.string().optional().describe("Current status of the task"),
-  priority: z.string().optional().describe("Priority level of the task"),
-  id: z.string().optional().describe("Unique identifier for the todo item"),
+  content: z.string().min(1).describe("任务的简短说明"),
+  status: z.string().optional().describe("任务当前状态"),
+  priority: z.string().optional().describe("任务优先级"),
+  id: z.string().optional().describe("待办事项唯一标识"),
 })
 
 function normalizeTodoStatus(value?: string) {
@@ -43,10 +44,10 @@ export function createTodoToolDisplay(summary: string) {
   })
 }
 
-export const TodoWriteTool = Tool.define("todowrite", {
+export const TodoWriteTool = Tool.define("todowrite", Tool.Execution.session, ToolModel.forTool("todowrite"), {
   description: DESCRIPTION_WRITE,
   parameters: z.object({
-    todos: z.array(TodoWriteItemInput).describe("The updated todo list"),
+    todos: z.array(TodoWriteItemInput).describe("更新后的内部任务清单"),
   }),
   async execute(params, ctx) {
     await ctx.ask({
@@ -72,8 +73,9 @@ export const TodoWriteTool = Tool.define("todowrite", {
   },
 })
 
-export const TodoReadTool = Tool.define("todoread", {
-  description: "Use this tool to read your todo list",
+export const TodoReadTool = Tool.define("todoread", Tool.Execution.readOnly, ToolModel.forTool("todoread"), {
+  description:
+    "只读获取当前会话的内部任务清单，用于恢复复杂多步骤工作的真实进度。仅在已有清单且需要核对 pending/in_progress/completed/cancelled 状态时使用；不要为简单任务调用，不把清单状态当作工具执行证据或用户可见结论。",
   parameters: z.object({}),
   async execute(_params, ctx) {
     await ctx.ask({

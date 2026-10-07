@@ -1,4 +1,5 @@
 import fs from "fs/promises"
+import fsSync from "fs"
 import path from "path"
 import { Global } from "../global"
 import { Identifier } from "../id/id"
@@ -15,6 +16,18 @@ export namespace Truncate {
 
   export type Result = { content: string; truncated: false } | { content: string; truncated: true; outputPath: string }
   const REFERENCE_PREFIX = "tool-output:"
+  const LEGACY_REFERENCE_PREFIX = "tool-output/"
+
+  function outputReferenceID(value: string) {
+    // 兼容旧版/模型自行还原出的 `.killstata/workspace/tool-output/tool_x.json` 形态；
+    // 实际受管文件仍按无扩展名 ID 存储，扩展名只属于历史展示路径。
+    return value.match(/(?:^|[\\/])tool-output(?::|[\\/])(tool_[0-9A-Za-z]+)(?:\.json)?$/)?.[1]
+  }
+
+  /** 大块工具输出被卸载到磁盘后留下的引用标记；压缩/历史裁剪据此判断结果还能不能恢复。 */
+  export function isOutputReference(value: unknown): value is string {
+    return typeof value === "string" && outputReferenceID(value) !== undefined
+  }
 
   export interface Options {
     maxLines?: number
@@ -42,12 +55,47 @@ export namespace Truncate {
   }
 
   export function resolveOutputReference(reference: string) {
-    if (!reference.startsWith(REFERENCE_PREFIX)) return undefined
-    const id = reference.slice(REFERENCE_PREFIX.length)
+    const id = outputReferenceID(reference)
+    if (!id) {
+      if (reference.includes("tool-output")) {
+        throw new Error("TOOL_OUTPUT_REFERENCE_DENIED：分页输出标识不合法。")
+      }
+      return undefined
+    }
     if (!/^tool_[0-9A-Za-z]+$/.test(id)) {
       throw new Error("TOOL_OUTPUT_REFERENCE_DENIED：分页输出标识不合法。")
     }
     return path.join(DIR, id)
+  }
+
+  export function referenceExists(reference: string) {
+    try {
+      const filepath = resolveOutputReference(reference)
+      if (!filepath) return false
+      return fsSync.existsSync(filepath)
+    } catch {
+      return false
+    }
+  }
+
+  /** 从新旧字段中解析唯一的受控输出引用；不会把普通路径误当成恢复凭据。 */
+  export function outputReference(...values: unknown[]) {
+    return values.find((value): value is string => isOutputReference(value))
+  }
+
+  /** 仅返回仍可读取的输出引用，供 Compaction/Snip 生成恢复承诺。 */
+  export function liveOutputReference(...values: unknown[]) {
+    const reference = outputReference(...values)
+    return reference && referenceExists(reference) ? reference : undefined
+  }
+
+  /** 将已脱敏的完整工具输出写入受控存储，返回可由 Read 分页读取的稳定引用。 */
+  export async function persist(text: string) {
+    const id = Identifier.ascending("tool")
+    const filepath = path.join(DIR, id)
+    await fs.mkdir(DIR, { recursive: true })
+    await fs.writeFile(filepath, text, { mode: 0o600 })
+    return `${REFERENCE_PREFIX}${id}`
   }
 
   export async function output(text: string, options: Options = {}, _agent?: Agent.Info): Promise<Result> {
@@ -92,11 +140,7 @@ export namespace Truncate {
     const unit = hitBytes ? "bytes" : "lines"
     const preview = out.join("\n")
 
-    const id = Identifier.ascending("tool")
-    const filepath = path.join(DIR, id)
-    await fs.mkdir(DIR, { recursive: true })
-    await fs.writeFile(filepath, text, { mode: 0o600 })
-    const outputReference = `${REFERENCE_PREFIX}${id}`
+    const outputReference = await persist(text)
 
     const hint = `工具执行成功，但输出过长。完整脱敏输出标识：${outputReference}\n如需查看，请使用 Read 的 offset/limit 分页读取相关片段，不要一次读取整个文件。`
     const message =

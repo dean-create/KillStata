@@ -1,48 +1,37 @@
 import { describe, expect, test } from "bun:test"
-import { execFileSync } from "child_process"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { PanelFeRegressionTool } from "../../src/tool/econometrics-method-tools"
-import { resolveRuntimePythonCommand } from "../../src/killstata/runtime-config"
-import { Instance } from "../../src/project/instance"
-import { registerCanonicalDataset } from "../helpers/canonical-dataset"
-
-const ctx = {
-  sessionID: "test",
-  messageID: "",
-  callID: "",
-  agent: "econometrics",
-  abort: AbortSignal.any([]),
-  metadata: async () => undefined,
-  ask: async () => undefined,
-}
+import { EconometricsEngineClient } from "@/runtime/services/econometrics-engine-client"
+import { resolveRuntimePythonCommand } from "@/killstata/runtime-config"
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "killstata-panel-fe-golden-"))
 }
 
-async function withInstance<T>(fn: (root: string) => Promise<T>) {
-  const root = makeTempDir()
-  try {
-    return await Instance.provide({
-      directory: root,
-      fn: async () => fn(root),
-    })
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
+function engine() {
+  const managedPython = process.platform === "win32"
+    ? path.join(os.homedir(), ".killstata", "venv", "Scripts", "python.exe")
+    : path.join(os.homedir(), ".killstata", "venv", "bin", "python")
+  return new EconometricsEngineClient({
+    command: process.env.KILLSTATA_PYTHON ?? managedPython,
+    cwd: path.resolve(process.cwd(), "../.."),
+    pythonPath: path.resolve(process.cwd(), "../killstata-econometrics-engine/src"),
+  })
 }
 
 async function supportsEconometricsRuntime() {
+  const configuredPython = process.env.KILLSTATA_PYTHON?.trim()
   try {
-    const pythonCommand = await resolveRuntimePythonCommand()
-    execFileSync(pythonCommand, ["-c", "import statsmodels.api as sm; import linearmodels; import scipy; print('ok')"], {
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "pipe"],
+    const pythonCommand = configuredPython ?? await resolveRuntimePythonCommand()
+    const processResult = Bun.spawnSync([pythonCommand, "-c", "import linearmodels, scipy; print('ok')"], {
+      stdout: "pipe",
+      stderr: "pipe",
     })
+    if (processResult.exitCode !== 0) throw new Error(new TextDecoder().decode(processResult.stderr))
     return true
-  } catch {
+  } catch (error) {
+    if (configuredPython) throw error
     return false
   }
 }
@@ -51,42 +40,43 @@ const EXPECTED = JSON.parse(
   fs.readFileSync(path.join(process.cwd(), "test", "fixtures", "golden", "grunfeld_fe_expected.json"), "utf-8"),
 )
 
-describe("tool.econometrics panel_fe_regression golden test (Grunfeld, linearmodels ground truth)", () => {
-  test("panel_fe_regression on Grunfeld matches linearmodels PanelOLS to a tight tolerance", async () => {
-    if (!(await supportsEconometricsRuntime())) return
-    await withInstance(async (root) => {
-      const csvPath = path.join(root, "grunfeld.csv")
-      fs.copyFileSync(path.join(process.cwd(), "test", "fixtures", "golden", "grunfeld.csv"), csvPath)
-      const source = registerCanonicalDataset({
-        sessionID: ctx.sessionID,
-        sourcePath: csvPath,
-        datasetId: "dataset_grunfeld_fe",
-      })
+describe("Python Registry panel_fe_regression golden test (Grunfeld, linearmodels ground truth)", () => {
+  test("two-way FE result and clustered standard errors match the independent oracle", async () => {
+    if (!(await supportsEconometricsRuntime())) {
+      console.warn("[panel-fe-golden] 计量运行时不可用，跳过真实数值断言")
+      return
+    }
 
-      const tool = await PanelFeRegressionTool.init()
-      const result = await tool.execute(
-        {
-          ...source,
+    const root = makeTempDir()
+    const client = engine()
+    try {
+      const response = await client.execute({
+        method_id: "panel_fe_regression",
+        data_path: path.join(process.cwd(), "test", "fixtures", "golden", "grunfeld.csv"),
+        output_dir: path.join(root, "result"),
+        arguments: {
           dependentVar: "invest",
           treatmentVar: "value",
           covariates: ["capital"],
           entityVar: "firm",
           timeVar: "year",
+          clusterVar: "firm",
+          covariance: "clustered",
         },
-        ctx as any,
-      )
+      })
+      const result = response.payload as Record<string, any>
 
-      const r = result.metadata.result!
-      expect(r.rows_used).toBe(EXPECTED.n)
-
-      // Point estimates are unbiased regardless of the SE/R^2 bugs this migration fixes,
-      // so this assertion already holds against the pre-migration numpy backend too.
-      expect(r.coefficient).toBeCloseTo(EXPECTED.coefficient, 4)
-
-      // These two are the ones B4/B5 fix: pre-migration they land on legacy_numpy's values
-      // (std_error ~0.011447, r_squared ~0.774756) instead of linearmodels' ground truth.
-      expect(r.std_error).toBeCloseTo(EXPECTED.std_error_clustered, 4)
-      expect(r.r_squared).toBeCloseTo(EXPECTED.r_squared_within, 3)
-    })
+      expect(result.rowsUsed).toBe(EXPECTED.n)
+      expect(result.covariance).toBe("clustered")
+      expect(result.primary?.term).toBe("value")
+      expect(result.primary?.estimate).toBeCloseTo(EXPECTED.coefficient, 4)
+      expect(result.primary?.stdError).toBeCloseTo(EXPECTED.std_error_clustered, 4)
+      expect(result.rSquaredWithin).toBeCloseTo(EXPECTED.r_squared_within, 3)
+      expect(fs.existsSync(result.resultPath)).toBe(true)
+      expect(fs.existsSync(result.coefficientsPath)).toBe(true)
+    } finally {
+      await client.close()
+      fs.rmSync(root, { recursive: true, force: true })
+    }
   }, 20_000)
 })

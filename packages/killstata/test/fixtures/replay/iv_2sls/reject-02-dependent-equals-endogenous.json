@@ -1,13 +1,17 @@
 {
-  "description": "结果变量和内生解释变量填成了同一列",
+  "description": "结果变量和内生变量填了同一列",
   "modelArgs": {
-    "datasetId": "card1995",
+    "datasetId": "card_1995",
     "stageId": "stage_000",
-    "dependentVar": "education",
-    "endogenousVar": "education",
-    "instrumentVar": "near_college",
-    "instrumentJustification": "地理距离满足相关性、外生性与排除限制，是标准的 Card (1995) 识别策略。"
+    "dependentVar": "lwage",
+    "treatmentVar": "lwage",
+    "instrumentVars": [
+      "nearc4"
+    ],
+    "instrumentJustification": "Card (1995) 中到四年制大学的距离改变上学成本，在控制变量给定下不直接进入工资方程。"
   },
   "expect": "reject",
-  "rejectHint": ["endogenousVar", "不能与"]
+  "rejectHint": [
+    "dependentVar"
+  ]
 }

@@ -14,7 +14,7 @@ function localId(prefix: string) {
 }
 
 export namespace AgentControl {
-  const state = Instance.state(() => ({} as Record<string, AgentControlState>))
+  const state = Instance.state(() => ({}) as Record<string, AgentControlState>)
 
   function ensure(sessionID: string) {
     const current = state()

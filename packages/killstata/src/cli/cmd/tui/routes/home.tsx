@@ -1,6 +1,5 @@
 import { Prompt, type PromptRef } from "@tui/component/prompt"
 import { createMemo, onMount, Show } from "solid-js"
-import { useTheme } from "@tui/context/theme"
 import { Logo } from "../component/logo"
 import { Tips } from "../component/tips"
 import { useSync } from "../context/sync"
@@ -17,7 +16,6 @@ let once = false
 export function Home() {
   const sync = useSync()
   const kv = useKV()
-  const { theme } = useTheme()
   const route = useRouteData("home")
   const promptRef = usePromptRef()
   const command = useCommandDialog()
@@ -32,10 +30,10 @@ export function Home() {
 
   command.register(() => [
     {
-      title: tipsHidden() ? "Show tips" : "Hide tips",
+      title: tipsHidden() ? "显示提示" : "隐藏提示",
       value: "tips.toggle",
       keybind: "tips_toggle",
-      category: "System",
+      category: "系统",
       onSelect: (dialog) => {
         kv.set("tips_hidden", !tipsHidden())
         dialog.clear()
@@ -76,9 +74,6 @@ export function Home() {
           </Show>
         </box>
         <Toast />
-      </box>
-      <box paddingTop={1} paddingBottom={1} paddingLeft={2} paddingRight={2} flexDirection="row" flexShrink={0}>
-        <text fg={theme.textMuted}>数据处理 · 计量分析 · 结果解读</text>
       </box>
     </>
   )

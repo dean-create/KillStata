@@ -4,7 +4,7 @@ import { Rpc } from "@/util/rpc"
 import { type rpc } from "./worker"
 import path from "path"
 import { UI } from "@/cli/ui"
-import { iife } from "@/util/iife"
+import { iife } from "@killstata/util/iife"
 import { Log } from "@/util/log"
 import { withNetworkOptions, resolveNetworkOptions } from "@/cli/network"
 import { ensureFirstRunOnboarding } from "@/cli/onboarding"
@@ -103,6 +103,25 @@ export const TuiThreadCommand = cmd({
       Log.Default.error(e)
     }
     const client = Rpc.client<typeof rpc>(worker)
+    let exiting = false
+    const cleanupTuiProcess = async () => {
+      if (exiting) return
+      exiting = true
+      process.stdin.removeListener("data", onInput)
+      process.removeListener("SIGINT", onInterrupt)
+      await client.call("shutdown", undefined).catch(() => {})
+      worker.terminate()
+    }
+    const onInterrupt = () => {
+      void cleanupTuiProcess().finally(() => process.exit(130))
+    }
+    // OpenTUI 会把终端切到 raw mode，此时 Ctrl-C 可能不会产生 SIGINT，而是作为
+    // \x03 输入字节到达；进程级和输入级都处理，确保 worker/Core 不残留。
+    const onInput = (chunk: Buffer | string) => {
+      if (String(chunk).includes("\x03")) onInterrupt()
+    }
+    process.once("SIGINT", onInterrupt)
+    process.stdin.on("data", onInput)
     process.on("uncaughtException", (e) => {
       Log.Default.error(e)
     })
@@ -156,7 +175,7 @@ export const TuiThreadCommand = cmd({
         prompt,
       },
       onExit: async () => {
-        await client.call("shutdown", undefined)
+        await cleanupTuiProcess()
       },
     })
 

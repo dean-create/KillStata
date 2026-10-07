@@ -30,19 +30,13 @@ export function Header() {
 
   return (
     <box flexShrink={0}>
-      <box
-        paddingTop={0}
-        paddingBottom={0}
-        paddingLeft={1}
-        paddingRight={1}
-        flexShrink={0}
-      >
+      <box paddingTop={0} paddingBottom={0} paddingLeft={1} paddingRight={1} flexShrink={0}>
         <Switch>
           <Match when={session()?.parentID}>
             <box flexDirection="column" gap={1}>
               <box flexDirection={narrow() ? "column" : "row"} justifyContent="space-between" gap={narrow() ? 1 : 0}>
                 <text fg={theme.text}>
-                  <b>Subagent session</b>
+                  <b>子代理会话</b>
                 </text>
               </box>
               <box flexDirection="row" gap={2}>

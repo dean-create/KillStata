@@ -7,7 +7,7 @@ import {
   resolveDidCluster,
   resolveHdfeCovariance,
   SaturatedDidEventStudyTool,
-} from "../../src/tool/pyfixest"
+} from "../fixtures/legacy/tool/pyfixest"
 
 describe("PyFixest tool contracts", () => {
   test("defines four independent model-facing tools", () => {
@@ -41,21 +41,25 @@ describe("PyFixest tool contracts", () => {
     })
 
     expect(parsed.covariance).toBe("HC1")
-    expect(tool.parameters.safeParse({
-      datasetId: "did_123",
-      stageId: "stage_000",
-      dependentVar: "fte",
-      groupVar: "treated",
-      postVar: "treated",
-    }).success).toBe(false)
-    expect(tool.parameters.safeParse({
-      datasetId: "did_123",
-      stageId: "stage_000",
-      dependentVar: "fte",
-      groupVar: "treated",
-      postVar: "t",
-      formula: "fte ~ treated * t",
-    }).success).toBe(false)
+    expect(
+      tool.parameters.safeParse({
+        datasetId: "did_123",
+        stageId: "stage_000",
+        dependentVar: "fte",
+        groupVar: "treated",
+        postVar: "treated",
+      }).success,
+    ).toBe(false)
+    expect(
+      tool.parameters.safeParse({
+        datasetId: "did_123",
+        stageId: "stage_000",
+        dependentVar: "fte",
+        groupVar: "treated",
+        postVar: "t",
+        formula: "fte ~ treated * t",
+      }).success,
+    ).toBe(false)
   })
 
   test("derives HDFE covariance from the declared clustering design", async () => {
@@ -84,33 +88,41 @@ describe("PyFixest tool contracts", () => {
   test("rejects ambiguous HDFE data sources and unsupported cluster designs before execution", async () => {
     const tool = await HdfeRegressionTool.init()
 
-    expect(tool.parameters.safeParse({
-      dataPath: "panel.csv",
-      datasetId: "panel_123",
-      dependentVar: "y",
-      treatmentVar: "x",
-      fixedEffects: ["firm"],
-    }).success).toBe(false)
-    expect(tool.parameters.safeParse({
-      dataPath: "panel.csv",
-      dependentVar: "y",
-      treatmentVar: "x",
-      fixedEffects: ["firm"],
-      clusterVars: ["firm", "year", "region"],
-    }).success).toBe(false)
-    expect(tool.parameters.safeParse({
-      datasetId: "panel_123",
-      dependentVar: "y",
-      treatmentVar: "x",
-      fixedEffects: ["firm"],
-    }).success).toBe(false)
-    expect(tool.parameters.safeParse({
-      datasetId: "panel_123",
-      stageId: "stage_000",
-      dependentVar: "y",
-      treatmentVar: "x",
-      fixedEffects: ["firm"],
-    }).success).toBe(true)
+    expect(
+      tool.parameters.safeParse({
+        dataPath: "panel.csv",
+        datasetId: "panel_123",
+        dependentVar: "y",
+        treatmentVar: "x",
+        fixedEffects: ["firm"],
+      }).success,
+    ).toBe(false)
+    expect(
+      tool.parameters.safeParse({
+        dataPath: "panel.csv",
+        dependentVar: "y",
+        treatmentVar: "x",
+        fixedEffects: ["firm"],
+        clusterVars: ["firm", "year", "region"],
+      }).success,
+    ).toBe(false)
+    expect(
+      tool.parameters.safeParse({
+        datasetId: "panel_123",
+        dependentVar: "y",
+        treatmentVar: "x",
+        fixedEffects: ["firm"],
+      }).success,
+    ).toBe(false)
+    expect(
+      tool.parameters.safeParse({
+        datasetId: "panel_123",
+        stageId: "stage_000",
+        dependentVar: "y",
+        treatmentVar: "x",
+        fixedEffects: ["firm"],
+      }).success,
+    ).toBe(true)
   })
 
   test("requires the full DID2S design instead of accepting a free-form formula", async () => {
@@ -127,14 +139,16 @@ describe("PyFixest tool contracts", () => {
 
     expect(resolveDidCluster(valid.entityVar, valid.clusterVar)).toBe("firm")
     expect(valid.referencePeriod).toBe(-1)
-    expect(tool.parameters.safeParse({
-      dataPath: "panel.csv",
-      dependentVar: "outcome",
-      treatmentVar: "treated",
-      entityVar: "firm",
-      timeVar: "year",
-      formula: "outcome ~ treated | firm + year",
-    }).success).toBe(false)
+    expect(
+      tool.parameters.safeParse({
+        dataPath: "panel.csv",
+        dependentVar: "outcome",
+        treatmentVar: "treated",
+        entityVar: "firm",
+        timeVar: "year",
+        formula: "outcome ~ treated | firm + year",
+      }).success,
+    ).toBe(false)
   })
 
   test("uses a cohort variable for the saturated event study", async () => {
@@ -149,30 +163,36 @@ describe("PyFixest tool contracts", () => {
     })
 
     expect(resolveDidCluster(parsed.entityVar, parsed.clusterVar)).toBe("firm")
-    expect(tool.parameters.safeParse({
-      datasetId: "panel_123",
-      stageId: "stage_000",
-      dependentVar: "outcome",
-      cohortVar: "first_treat_year",
-      entityVar: "firm",
-      timeVar: "year",
-      covariates: ["size"],
-    }).success).toBe(false)
-    expect(tool.parameters.safeParse({
-      datasetId: "panel_123",
-      stageId: "stage_000",
-      dependentVar: "outcome",
-      cohortVar: "first_treat_year",
-      entityVar: "firm",
-      timeVar: "year",
-      aggregateAtt: true,
-    }).success).toBe(false)
-    expect(tool.parameters.safeParse({
-      dataPath: "panel.csv",
-      dependentVar: "outcome",
-      treatmentVar: "treated",
-      entityVar: "firm",
-      timeVar: "year",
-    }).success).toBe(false)
+    expect(
+      tool.parameters.safeParse({
+        datasetId: "panel_123",
+        stageId: "stage_000",
+        dependentVar: "outcome",
+        cohortVar: "first_treat_year",
+        entityVar: "firm",
+        timeVar: "year",
+        covariates: ["size"],
+      }).success,
+    ).toBe(false)
+    expect(
+      tool.parameters.safeParse({
+        datasetId: "panel_123",
+        stageId: "stage_000",
+        dependentVar: "outcome",
+        cohortVar: "first_treat_year",
+        entityVar: "firm",
+        timeVar: "year",
+        aggregateAtt: true,
+      }).success,
+    ).toBe(false)
+    expect(
+      tool.parameters.safeParse({
+        dataPath: "panel.csv",
+        dependentVar: "outcome",
+        treatmentVar: "treated",
+        entityVar: "firm",
+        timeVar: "year",
+      }).success,
+    ).toBe(false)
   })
 })

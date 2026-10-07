@@ -77,26 +77,15 @@ const AgentCreateCommand = cmd({
         if (cliPath) {
           targetPath = path.join(cliPath, "agent")
         } else {
-          let scope: "global" | "project" = "global"
-          if (project.vcs === "git") {
-            const scopeResult = await prompts.select({
-              message: "Location",
-              options: [
-                {
-                  label: "Current project",
-                  value: "project" as const,
-                  hint: Instance.worktree,
-                },
-                {
-                  label: "Global",
-                  value: "global" as const,
-                  hint: Global.Path.config,
-                },
-              ],
-            })
-            if (prompts.isCancel(scopeResult)) throw new UI.CancelledError()
-            scope = scopeResult
-          }
+          const scopeResult = await prompts.select({
+            message: "Location",
+            options: [
+              { label: "Current project", value: "project" as const, hint: Instance.worktree },
+              { label: "Global", value: "global" as const, hint: Global.Path.config },
+            ],
+          })
+          if (prompts.isCancel(scopeResult)) throw new UI.CancelledError()
+          const scope = scopeResult
           targetPath = path.join(
             scope === "global" ? Global.Path.config : path.join(Instance.worktree, ".killstata"),
             "agent",

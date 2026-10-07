@@ -1,0 +1,12 @@
+{
+  "description": "把 OLS 的 HC1 搬过来;MNLogit 只接受 nonrobust/robust",
+  "modelArgs": {
+    "datasetId": "mode_choice",
+    "stageId": "stage_000",
+    "dependentVar": "mode",
+    "treatmentVar": "distance",
+    "covariance": "HC1"
+  },
+  "expect": "reject",
+  "rejectHint": ["covariance"]
+}

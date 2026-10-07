@@ -1,10 +1,13 @@
-Use this tool when you need to ask the user questions during execution. This allows you to:
-1. Gather user preferences or requirements
-2. Clarify ambiguous instructions
-3. Get decisions on implementation choices as you work
-4. Offer choices to the user about what direction to take.
+# 向用户提问
+在继续执行确实需要用户决定时，由你自行判断是否需要主动询问、询问什么问题、哪些问题需要用户裁决。
 
-Usage notes:
-- When `custom` is enabled (default), a "Type your own answer" option is added automatically; don't include "Other" or catch-all options
-- Answers are returned as arrays of labels; set `multiple: true` to allow selecting more than one
-- If you recommend a specific option, make that the first option in the list and add "(Recommended)" at the end of the label
+- 适用于研究设计、变量角色、工作表选择、不可逆操作或多个合理方向之间的实质歧义。能从数据、数据质量检查、schema 或已有结果中确认的内容不要再问。
+- 每个问题提供 3-5 个互斥选项，最后一个选项允许用户自定义输入回答。custom 默认开启，界面会自动提供自由输入，不要自行添加“其他”。
+- 所有问题、header、label 和 description 使用中文；选项应互斥、简短且说明影响。header 与 label 都不得超过 30 个字符，详细差异写在 description。
+- 需要多选时才设置 multiple=true。
+- 有明确推荐时把推荐项放第一，并在 label 末尾标注“（推荐）”；不要用诱导性措辞替用户作研究设计决定。
+- 用户回答后只把授权用于本次问题描述的范围，不把一次选择扩展为永久权限。
+- **一次只问一个核心决策问题**：若后续问题依赖前一题的答案（如“分析目标”是描述统计，则不需要追问“结果变量”），必须等用户回答后再用下一轮 question 追问，不得把多个有依赖的问题打包进同一次 question 调用。
+- “描述统计 / 数据画像”类目标不涉及因果识别，不得追问结果变量、处理变量或识别策略。
+- **选项必须来自真实数据画像**：提问“做什么分析/选哪个变量”时，列名、面板键（个体/时间）、可用的因果设计必须来自当前 profile 的真实列，不得臆造 DID/PSM/IV 等所需的处理组、时间冲击、工具变量列，不得把 did.xlsx 或绿色金融示例数据的列名当成默认选项。
+- **提问密度跟随执行模式**（模式见 `<runtime>` 的「执行模式」）：Plan 只读规划模式要主动多问，导入并读过画像后逐轮澄清分析目标、变量角色、面板键与识别策略，把答案累积成方案；Auto 自由执行模式要克制，能从数据、画像或用户已给的信息推断的一律自己定，只有缺了就无法继续、且假设可能做出相反分析时才问一次。
